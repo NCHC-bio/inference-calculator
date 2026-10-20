@@ -1,12 +1,12 @@
 import { App as AntApp, ConfigProvider, Segmented, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { getBundle } from './bundle';
 import { useLang, useT } from './i18n';
+import { StoreProvider, useCalc } from './state/store';
+import type { Mode } from './state/state';
 import { antdTheme, useDarkMode } from './theme';
-
-type Mode = 'need' | 'have';
 
 /** antd does not paint body: sync page background, text colour and color-scheme from the theme tokens. */
 function PageTheme({ dark }: { dark: boolean }) {
@@ -26,12 +26,12 @@ function PageTheme({ dark }: { dark: boolean }) {
 
 function Shell() {
   const tr = useT();
-  const [mode, setMode] = useState<Mode>('need');
+  const [{ mode }, dispatch] = useCalc();
   return (
     <main style={{ maxWidth: 960, margin: '0 auto', padding: 16 }}>
       <Segmented<Mode>
         value={mode}
-        onChange={setMode}
+        onChange={(m) => dispatch({ type: 'mode', mode: m })}
         options={[
           { value: 'need', label: tr('mode.need') },
           { value: 'have', label: tr('mode.have') },
@@ -44,7 +44,7 @@ function Shell() {
   );
 }
 
-export function App() {
+function ThemedApp() {
   const dark = useDarkMode();
   const lang = useLang();
   return (
@@ -58,5 +58,13 @@ export function App() {
         <Shell />
       </AntApp>
     </ConfigProvider>
+  );
+}
+
+export function App() {
+  return (
+    <StoreProvider>
+      <ThemedApp />
+    </StoreProvider>
   );
 }

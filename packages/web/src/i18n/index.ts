@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useCalc } from '../state/store';
 import en from './en';
 import zhTW from './zh-TW';
 
@@ -17,13 +18,9 @@ export function t(lang: Lang, key: MsgKey, vars?: Record<string, string | number
 
 export const tZh: TFn = (key, vars) => t('zh-TW', key, vars);
 
-export function langFromUrl(): Lang {
-  return new URLSearchParams(window.location.search).get('lang') === 'en' ? 'en' : 'zh-TW';
-}
-
-/** Single source of the active language. Task 3 will read it from the central store instead of the URL. */
+/** Single source of the active language: the central store (seeded from the `lang` URL param). */
 export function useLang(): Lang {
-  return langFromUrl();
+  return useCalc()[0].lang;
 }
 
 export function useT(): TFn {
