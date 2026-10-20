@@ -6,6 +6,8 @@ import { getBundle } from './bundle';
 import { useLang, useT } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import type { Mode } from './state/state';
+import { AnswerLine } from './components/AnswerLine';
+import { BasisDrawer } from './components/BasisDrawer';
 import { Sentence } from './components/Sentence';
 import { antdTheme, useDarkMode } from './theme';
 
@@ -39,6 +41,8 @@ function Shell() {
         ]}
       />
       <Sentence />
+      <AnswerLine />
+      <BasisDrawer />
       <footer style={{ marginTop: 24, opacity: 0.65 }}>
         {tr('footer.dataVersion', { version: getBundle().meta.dataVersion })}
       </footer>

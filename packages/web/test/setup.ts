@@ -70,3 +70,8 @@ for (const prefix of ['Webkit', 'Moz', 'ms', 'O']) {
     for (let o: object | null = document.createElement('div').style; o; o = Object.getPrototypeOf(o)) delete (o as Record<string, unknown>)[prefix + prop];
   }
 }
+
+// jsdom does not implement getComputedStyle(el, pseudoElt) and logs "Not implemented" on every call; antd's Drawer
+// (scroll locker measuring the scrollbar) passes '::-webkit-scrollbar'. Drop the pseudo-element argument.
+const computedStyle = window.getComputedStyle.bind(window);
+window.getComputedStyle = ((el: Element) => computedStyle(el)) as typeof window.getComputedStyle;

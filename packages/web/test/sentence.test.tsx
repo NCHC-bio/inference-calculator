@@ -1,5 +1,5 @@
 import { quantOptions } from '@nchc/core';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
@@ -57,7 +57,8 @@ describe('Sentence', () => {
     await u.click(screen.getByLabelText('模型'));
     const tier = getBundle().workloads.assist!.tierNote.value;
     await shown(`這類任務建議：${tier}`);
-    expect(screen.getByText('推估')).toBeInTheDocument();
+    // Scoped to the menu: the answer line has its own 推估 tag.
+    expect(within(document.querySelector<HTMLElement>('.ant-select-dropdown')!).getByText('推估')).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByText(/^可在 \d+ \/ \d+ 種機台上執行$|^目前設定下所有機台都跑不動$/)).toHaveLength(Object.keys(getBundle().models).length));
   });
   it('have mode: unit word follows the platform unit (張 for GPUs, 台 for machines)', async () => {
