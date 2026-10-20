@@ -1,26 +1,16 @@
 import { DownOutlined, RightOutlined } from '@ant-design/icons';
-import type { PlatformResult, Why } from '@nchc/core';
+import type { PlatformResult } from '@nchc/core';
 import { Col, Row, Tag, theme, Typography } from 'antd';
 import { useRef, type JSX, type MouseEvent } from 'react';
 import { getBundle } from '../bundle';
-import { useLang, useT, type MsgKey } from '../i18n';
+import { useLang, useT } from '../i18n';
 import { CapacityBar } from './CapacityBar';
 import { Explain } from './Explain';
 import { Isotype } from './Isotype';
+import { WHY } from './why';
 
 const fmt = (lang: string, n: number) => new Intl.NumberFormat(lang).format(n);
 const stop = (e: MouseEvent) => e.stopPropagation();
-
-/** Short infeasibility reason per core code; a new core code fails to compile here. */
-const WHY: Record<Why, MsgKey> = {
-  context: 'why.context',
-  tp: 'why.tp',
-  weights: 'why.weights',
-  mem: 'why.mem',
-  bw: 'why.bw',
-  compute: 'why.compute',
-  ttft: 'why.ttft',
-};
 
 /** Id of the detail region a row's toggle controls (Task 8 renders the detail with this id). */
 export const rowDetailId = (platform: string): string => `platform-detail-${platform}`;

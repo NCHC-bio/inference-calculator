@@ -7,6 +7,7 @@ import { useLang, useT } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import type { Mode } from './state/state';
 import { AnswerLine } from './components/AnswerLine';
+import { HaveResult } from './components/HaveResult';
 import { PlatformList } from './components/PlatformList';
 import { BasisDrawer } from './components/BasisDrawer';
 import { Sentence } from './components/Sentence';
@@ -43,7 +44,7 @@ function Shell() {
       />
       <Sentence />
       <AnswerLine />
-      {mode === 'need' && <PlatformList />}
+      {mode === 'need' ? <PlatformList /> : <HaveResult />}
       <BasisDrawer />
       <footer style={{ marginTop: 24, opacity: 0.65 }}>
         {tr('footer.dataVersion', { version: getBundle().meta.dataVersion })}

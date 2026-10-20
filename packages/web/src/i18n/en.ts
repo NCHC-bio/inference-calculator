@@ -88,6 +88,8 @@ const en = {
   'detail.power': 'Peak power about {kw} kW',
   'detail.powerUnknown': 'Power not verified',
   'detail.powerNote': '{note}: {why}',
+  'have.full': 'At full load ({n} concurrent users)',
+  'have.next': 'One more user would: {why}',
   'detail.queue': 'At peak some requests queue for about {sec} s; already included in the first-word wait',
   'typing.caption': 'The first word appears after {ttft} s, then about {tps} words per second',
   'typing.tip': 'A demo: 1 word approximates 1 token. {tps} tok/s per user, TTFT {ttft} s',

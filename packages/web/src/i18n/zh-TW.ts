@@ -90,6 +90,8 @@ const zhTW = {
   'detail.power': '峰值功耗約 {kw} kW',
   'detail.powerUnknown': '功耗未查證',
   'detail.powerNote': '{note}：{why}',
+  'have.full': '滿載時（同時 {n} 人）',
+  'have.next': '再多 1 人會：{why}',
   'detail.queue': '尖峰時部分請求需排隊約 {sec} 秒，已計入首字時間',
   'typing.caption': '先等 {ttft} 秒出現第一個字，之後每秒約 {tps} 字',
   'typing.tip': '示範用，1 個字近似 1 個 token：每人 {tps} tok/s，TTFT {ttft} s',
