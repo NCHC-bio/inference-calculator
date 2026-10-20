@@ -4,18 +4,26 @@ import { getBundle } from '../bundle';
 import { useView } from '../compute/useResults';
 import { useT } from '../i18n';
 import { useCalc } from '../state/store';
-import { PlatformRow } from './PlatformRow';
+import { PlatformRow, rowDetailId } from './PlatformRow';
+import { RowDetail } from './RowDetail';
 
 /** 每個平台一列（spec §8.3.3-4），照 bundle 的順序；只在 need 模式顯示。 */
 export function PlatformList(): JSX.Element | null {
   const tr = useT();
-  const [{ openRow }, dispatch] = useCalc();
+  const [{ openRow, workload }, dispatch] = useCalc();
   const view = useView();
   if (view.kind !== 'need') return null;
   const { result } = view;
-  const platforms = getBundle().platforms;
+  const bundle = getBundle();
+  const platforms = bundle.platforms;
+  const demoText = bundle.workloads[workload]!.demoText;
   const byId = new Map(result.perPlatform.map((p) => [p.platform, p]));
-  const firstSelf = Object.keys(platforms).find((id) => platforms[id]!.group === 'self');
+  // Core's note says power is unverified; the bundle's TDP record says why (its `conflict`), when it has one.
+  const powerNote = (note: string, hw: string) => {
+    const tdp = bundle.hardware[hw]?.tdpW;
+    return tdp?.value === null && tdp.conflict ? tr('detail.powerNote', { note, why: tdp.conflict }) : note;
+  };
+  const firstSelf =Object.keys(platforms).find((id) => platforms[id]!.group === 'self');
   return (
     <div data-testid="platform-list" style={{ marginTop: 12 }}>
       {Object.keys(platforms).map((id) => {
@@ -36,7 +44,16 @@ export function PlatformList(): JSX.Element | null {
               open={open}
               onToggle={() => dispatch({ type: 'openRow', id: open ? null : id })}
             />
-            {/* Task 8: <RowDetail id={rowDetailId(id)}> renders here when `open` (the toggle's aria-controls). */}
+            {open && r.usage && (
+              <RowDetail
+                id={rowDetailId(id)}
+                usage={r.usage}
+                unit={platforms[id]!.unit}
+                demoText={demoText}
+                power={{ kw: r.powerKw, ...(r.powerNote !== undefined ? { note: powerNote(r.powerNote, platforms[id]!.hardware) } : {}) }}
+                queueing={r.queueing}
+              />
+            )}
           </Fragment>
         );
       })}

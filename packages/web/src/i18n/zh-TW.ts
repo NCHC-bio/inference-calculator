@@ -74,6 +74,26 @@ const zhTW = {
   'why.bw': '每人速度不夠',
   'why.compute': '算力不夠',
   'why.ttft': '首字等太久',
+  // Expanded row detail (spec §8.3.3 點某一列).
+  'usage.mem': '記憶體',
+  'usage.bw': '頻寬',
+  'usage.compute': '算力',
+  'usage.ttft': '首字',
+  'usage.mem.tip': '模型與所有使用者上下文佔用的記憶體',
+  'usage.bw.tip': '每產生一個字要讀取的資料量佔頻寬的比例',
+  'usage.compute.tip': '讀入與生成所需的計算量佔算力的比例',
+  'usage.ttft.tip': '首字等待時間佔你要求上限的比例',
+  'memory.label': '記憶體組成：模型、每位使用者一格的上下文、保留區、剩餘空間',
+  'memory.tip': '模型 {weights} GB；每人上下文 {perUserKv} GB；保留 {reserve} GB',
+  'detail.shape.gpu': '每副本 {tp} 張 GPU × {replicas} 個副本',
+  'detail.shape.machine': '{replicas} 台',
+  'detail.power': '峰值功耗約 {kw} kW',
+  'detail.powerUnknown': '功耗未查證',
+  'detail.powerNote': '{note}：{why}',
+  'detail.queue': '尖峰時部分請求需排隊約 {sec} 秒，已計入首字時間',
+  'typing.caption': '先等 {ttft} 秒出現第一個字，之後每秒約 {tps} 字',
+  'typing.tip': '示範用，1 個字近似 1 個 token：每人 {tps} tok/s，TTFT {ttft} s',
+  'typing.waiting': '等待第一個字',
 };
 
 export default zhTW;
