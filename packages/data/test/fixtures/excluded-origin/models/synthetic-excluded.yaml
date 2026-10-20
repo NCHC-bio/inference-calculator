@@ -1,0 +1,14 @@
+# Synthetic model (not a real model) whose origin country is on the excluded list.
+id: synthetic-excluded
+name: Synthetic excluded
+hfRepo: example/synthetic-excluded
+origin: { developer: Example Lab, country: CN }
+totalParamsB: { value: 8, status: official, source: fx-src, verified: 2026-10-19 }
+layers: 32
+heads: 32
+kvHeads: 8
+headDim: 128
+hidden: 4096
+attention: gqa
+source: fx-src
+verified: 2026-10-19

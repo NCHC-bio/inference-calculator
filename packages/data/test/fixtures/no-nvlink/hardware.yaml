@@ -1,0 +1,9 @@
+# fx-node offers tp up to 8 but this fx-gpu has no nvlinkBidirGBs (finding 2a).
+- id: fx-gpu
+  name: Fixture GPU
+  memGB: { value: 100, unit: GB, status: official, source: fx-src, verified: 2026-10-19 }
+  memBwTBs: { value: 4, unit: TB/s, status: official, source: fx-src, verified: 2026-10-19 }
+  tflops:
+    fp8: { value: 2000, status: official, source: fx-src, verified: 2026-10-19 }
+    bf16: { value: 1000, status: official, source: fx-src, verified: 2026-10-19 }
+  tdpW: { value: null, status: unverified, source: fx-src, conflict: fixture, verified: 2026-10-19 }

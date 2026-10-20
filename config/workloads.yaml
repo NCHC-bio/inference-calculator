@@ -1,0 +1,79 @@
+# Workload presets, speed presets and the "N concurrent people" interpretation (spec §8.3.3).
+# name / description / tierNote / demoText are copied from the demo (docs/prototypes/calculator-demo-v7.html, WL / SPEED / SRC),
+# except the assist tierNote: it names only catalog models of the research tier table (T3) (2026-10-20 review). The
+# frontier candidates are not in the catalog yet (gated, or MoE layouts not supported; config/models/README.md).
+# tierModels lists the catalog ids a tierNote names;
+# the validator rejects unknown models.
+
+workloads:
+  - id: chat
+    name: 一般對話問答
+    kind: chat
+    inputTokens: { value: 1020, unit: tokens, status: measured, source: splitwise-azure, verified: 2026-10-19 }
+    outputTokens: { value: 129, unit: tokens, status: measured, source: splitwise-azure, verified: 2026-10-19 }
+    cacheHitRate: { value: 0, status: estimate, basis: '該 trace 未報告前綴快取命中率；保守假設無快取命中', evidence: [splitwise-azure], verified: 2026-10-19 }
+    description: 一問一答，例如寫信、查資料。每次約讀入 1,020、回覆 129 token（Azure 實測）
+    # Gemma-3-TAIDE-12B (T1) is not in the catalog yet, so tierModels lists only the other three.
+    tierModels: [gemma-4-12b-it, gemma-4-31b-it, gpt-oss-20b]
+    tierNote: { value: '小型模型即可（如 Gemma-3-TAIDE-12B、Gemma 4 12B／31B、gpt-oss-20b）', status: estimate, basis: '任務對應的模型等級：依 BixBench、BiomniBench、TW-LegalBench 等評測綜合判斷，非單一來源；參考模型依 docs/research/open-models.md 等級表', evidence: [bixbench, biomnibench, tw-legalbench], verified: 2026-10-19 }
+    demoText: 可以的！以下是改善研究計畫摘要的三個建議：第一，開頭先點出研究問題的重要性；第二，具體寫出方法與資料來源；第三，用一句話總結預期貢獻。
+
+  - id: doc
+    name: 長文件問答
+    kind: chat
+    inputTokens: { value: 12035, unit: tokens, status: measured, source: mooncake-trace, verified: 2026-10-19 }
+    outputTokens: { value: 343, unit: tokens, status: measured, source: mooncake-trace, verified: 2026-10-19 }
+    cacheHitRate: { value: 0, status: estimate, basis: '該 trace 未報告前綴快取命中率；保守假設無快取命中', evidence: [mooncake-trace], verified: 2026-10-19 }
+    description: 把報告或法規交給 AI 再提問。每次約讀入 1.2 萬、回覆 343 token（Mooncake 公開 trace 實測）
+    tierModels: [muse-glimmer-30b, granite-4.2-30b, gemma-4-31b-it]
+    tierNote: { value: '中型、長上下文模型（如 Muse-Glimmer-30B、Granite 4.2 30B、Gemma 4 31B）', status: estimate, basis: '任務對應的模型等級：依 BixBench、BiomniBench、TW-LegalBench 等評測綜合判斷，非單一來源；參考模型依 docs/research/open-models.md 等級表', evidence: [bixbench, biomnibench, tw-legalbench], verified: 2026-10-19 }
+    demoText: 根據您提供的《個人資料保護法》第 6 條與第 15 條，研究機構蒐集健康資料時，須符合學術研究目的並經去識別化處理；若涉及跨境傳輸，另須依第 21 條評估。
+
+  # TraceLab Table 8: 126,180 and 252 are the Claude-subset P50 prefix and output tokens per step (Codex: 115,584 / 184);
+  # 95.7% is the global prefix cache hit rate (Table 11). See docs/research/task-workload-and-models.md.
+  - id: assist
+    name: 研究助理
+    kind: agent
+    inputTokens: { value: 126180, unit: tokens, status: measured, source: tracelab, verified: 2026-10-19 }
+    outputTokens: { value: 252, unit: tokens, status: measured, source: tracelab, verified: 2026-10-19 }
+    cacheHitRate: { value: 0.957, status: measured, source: tracelab, verified: 2026-10-19 }
+    description: AI 一步步幫你跑分析、寫程式、看結果（如 scRNA 分析）。每步讀入約 12.6 萬（96% 可重複利用）、回覆 252 token（TraceLab 實測）
+    tierModels: [mistral-medium-3.5-128b, muse-glimmer-30b]
+    tierNote: { value: '大型模型（如 Mistral Medium 3.5；預算有限時用 Muse-Glimmer-30B）。前沿等級的候選模型尚未收錄於模型目錄，暫不列出；生資評測尚無公開分數', status: estimate, basis: '任務對應的模型等級：依 BixBench、BiomniBench、TW-LegalBench 等評測綜合判斷，非單一來源；參考模型依 docs/research/open-models.md 等級表 T3，只列目錄中的模型（前沿候選待收錄，見 config/models/README.md）', evidence: [bixbench, biomnibench, tw-legalbench], verified: 2026-10-20 }
+    demoText: 第 3 群細胞高度表現 CD3E、CD8A 與 GZMB，推測為細胞毒性 T 細胞。建議以 UMAP 檢視其與第 5 群的相對位置，再做軌跡分析確認分化關係。
+
+speedPresets:
+  - id: smooth
+    name: 流暢
+    minTokensPerSec: { value: 20, unit: tokens/s, status: estimate, basis: 'Level1Techs 論壇多人辦公室服務規劃中，期望每人 20 tok/s；非產業標準', evidence: [l1t-office-sizing], verified: 2026-10-19 }
+    maxTtftSec: { value: 5, unit: s, status: estimate, basis: '計算機預設值，待國網使用者資料校正；l1t 來源只支持每人 20 tok/s，沒有任何來源支持 5 秒首字等待', evidence: [l1t-office-sizing], verified: 2026-10-19 }
+    description: 每人每秒至少 20 token，送出後 5 秒內開始回覆，含排隊等候（推估標準）
+  - id: ok
+    name: 可接受
+    minTokensPerSec: { value: 8, unit: tokens/s, status: estimate, basis: '計算機預設值，待國網使用者資料校正；l1t 來源只支持每人 20 tok/s，沒有任何來源支持 8 tok/s', evidence: [l1t-office-sizing], verified: 2026-10-19 }
+    maxTtftSec: { value: 15, unit: s, status: estimate, basis: '計算機預設值，待國網使用者資料校正；l1t 來源只支持每人 20 tok/s，沒有任何來源支持 15 秒首字等待', evidence: [l1t-office-sizing], verified: 2026-10-19 }
+    description: 每人每秒至少 8 token，送出後 15 秒內開始回覆，含排隊等候（推估標準）
+
+concurrency:
+  # TraceLab Table 7: LLM generation is 3.3% of session (wall-clock) time. Using it as the share of open sessions that
+  # generate at the same moment is an interpretation, not the measurement, so it is an estimate (review M6;
+  # docs/research/task-workload-and-models.md: capping human pauses at 1 h raises the share to 14.5%).
+  agentGeneratingShare: { value: 0.033, status: estimate, basis: 'TraceLab 實測的是「LLM 生成佔工作階段經過時間 3.3%」（Table 7）；把它解讀成「開著的工作階段中同時在生成的比例」是推論，不是量測。結果對這個比例很敏感：若把人類停頓以 1 小時為上限，生成比例升到 14.5%，同時生成的人數約為 4.4 倍', evidence: [tracelab], verified: 2026-10-20 }
+  chatRule: { value: '對話類：「同時最多 N 人」視為 N 人同時在等回覆（最保守的上限）', status: estimate, basis: '同時請求數不等於同時在線人數（不是每個人都同時有請求），取 N 人同時生成作為最保守的上限（spec §8.3.3）', evidence: [nvidia-llm-inference-cost-blog], verified: 2026-10-19 }
+  agentRule: { value: '研究助理類：「同時最多 N 人」視為 N 個工作階段同時開著、上下文保留在記憶體；其中同時在生成的比例取 TraceLab 的生成時間比例 3.3%（推估）', status: derived, formula: 'max(1, ceil(N × agentGeneratingShare))', inputs: [tracelab], verified: 2026-10-20 }
+  # Ruling R36 (spec §5.2): prefill queueing behind vLLM max_num_batched_tokens. Little's law is exact for any stable
+  # system; applying it to a closed, deterministic fluid loop without bursts is the assumption, so this is an estimate.
+  queueRule: { value: "排隊（vLLM）：每副本 B 個生成中的請求，每個解碼 輸出 個 token 後立刻送出下一個請求，需要 新輸入 = 輸入 × (1 − 快取命中率) 個未快取 prefill token。D 人同時解碼時每步需要 D × (1 + 新輸入 ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 新輸入))) 人同時解碼，其餘 B − D_max 人排隊。Little's law：完成率 λ = D_max ÷ (輸出 × t_step)，排隊時間 W = (B − D_max) ÷ λ，加進首字時間；每步時間與每人速度以 D_max 人解碼計", status: estimate, basis: "Little's law（L = λW）對任何穩態系統成立；把系統當成封閉迴路、確定性的流體近似（每人輪流解碼與等預填、沒有突發與抖動）是本計算機的假設，所以 W 是實際平均等待的下限，P95／P99 會更長（尾端餘裕留待 Plan 5）。每步 token 上限與 waiting queue 依 vLLM v0.32.0 scheduler", evidence: [little-1961, vllm-v032-scheduler, vllm-v032-arg-utils], verified: 2026-10-20 }
+
+# Verify-command (vllm bench serve) rules shared by every result.
+# vLLM v0.32.0 (re-verified 2026-10-20): the bench client decodes random token ids to a string and re-encodes it,
+# retrying up to 10 times until the length matches prefix + input tokens (datasets.py L494-L547, L753), else it
+# reports the mismatch; the server re-tokenizes the string (completions default add_special_tokens=True). Behaviour
+# change since v0.10.0: a prompt + max_tokens over max_model_len is no longer rejected; max_tokens is clamped to
+# max_model_len − prompt (api_utils.py get_max_tokens L169-L205), so an over-long prompt would silently shorten the
+# measured output. Measured 2026-10-20 with the v0.10.0 procedure (truncate once, no retry; docs/research/
+# prior-art-calculators.md §C): 6 catalog tokenizers, never longer than requested (max drift 0), up to 187 tokens
+# shorter. The margin guards the unobserved positive direction with the observed magnitude, rounded up, so max_tokens
+# is never clamped; it only lengthens --max-model-len (vLLM sizes the KV pool from --gpu-memory-utilization).
+benchmark:
+  maxModelLenMarginTokens: { value: 256, unit: tokens, status: estimate, basis: '量測到的重新斷詞誤差最大 187 token（只有變短，未見變長；以 v0.10.0 的流程量測，v0.32.0 的 bench 會重試讓長度相符，漂移只會更小），取同量級向上取整為 256 作為變長方向的保險：v0.32.0 遇到 prompt + max_tokens 超過 max_model_len 時會把 max_tokens 截短，量到的輸出就不是指定長度；不影響記憶體估算', evidence: [bench-retokenize-drift, vllm-bench-random-dataset, vllm-serving-validate-input], verified: 2026-10-20 }

@@ -1,0 +1,9 @@
+# fx-gpu publishes only bf16, but quantization fx-fp8 computes in fp8 and there is no `effective` fallback (finding 2b).
+- id: fx-gpu
+  name: Fixture GPU
+  memGB: { value: 100, unit: GB, status: official, source: fx-src, verified: 2026-10-19 }
+  memBwTBs: { value: 4, unit: TB/s, status: official, source: fx-src, verified: 2026-10-19 }
+  tflops:
+    bf16: { value: 1000, status: official, source: fx-src, verified: 2026-10-19 }
+  tdpW: { value: null, status: unverified, source: fx-src, conflict: fixture, verified: 2026-10-19 }
+  nvlinkBidirGBs: { value: 900, unit: GB/s, status: official, source: fx-src, verified: 2026-10-19 }

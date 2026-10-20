@@ -1,0 +1,18 @@
+# Synthetic MLA model that also declares layerGroups: the MLA KV formula would ignore the groups (Ruling R22).
+id: fx-mla-groups
+name: Fixture MLA with layer groups
+hfRepo: example/fx-mla-groups
+origin: { developer: Example Lab, country: US }
+totalParamsB: { value: 16, status: official, source: fx-src, verified: 2026-10-19 }
+layers: 4
+heads: 16
+kvHeads: 16
+headDim: 128
+hidden: 2048
+attention: mla
+mla: { kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 128, vHeadDim: 128 }
+layerGroups:
+  - { kind: sliding, count: 2, window: 4096 }
+  - { kind: full, count: 2 }
+source: fx-src
+verified: 2026-10-19

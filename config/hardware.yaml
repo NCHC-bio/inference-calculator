@@ -1,0 +1,78 @@
+# Per-device hardware specs. tflops are always DENSE values (NVIDIA pages show sparse; dense = sparse / 2).
+# Apple fills only `effective` (Apple publishes no GPU TFLOPS). Sources: docs/research/nvidia-nchc-hardware.md,
+# docs/research/apple-silicon.md, docs/research/dgx-spark-mac-mini.md.
+
+- id: h100-sxm
+  name: NVIDIA H100 SXM5 80GB
+  memGB: { value: 80, unit: GB, status: official, source: nvidia-h100, verified: 2026-10-19 }
+  memBwTBs: { value: 3.35, unit: TB/s, status: official, source: nvidia-h100, verified: 2026-10-19 }
+  tflops:
+    fp8: { value: 1979, unit: TFLOPS, status: official, source: nvidia-h100, verified: 2026-10-19 }
+    bf16: { value: 989.5, unit: TFLOPS, status: official, source: nvidia-h100, verified: 2026-10-19 }
+  tdpW: { value: 700, unit: W, status: official, source: nvidia-h100, verified: 2026-10-19 }
+  # 4th-gen NVLink, 18 links × 50 GB/s = 900 GB/s bidirectional (research ref [7], Hopper tuning guide).
+  nvlinkBidirGBs: { value: 900, unit: GB/s, status: official, source: nvidia-hopper-tuning-guide, verified: 2026-10-19 }
+
+- id: h200-sxm
+  name: NVIDIA H200 SXM 141GB
+  memGB: { value: 141, unit: GB, status: official, source: nvidia-h200, verified: 2026-10-19 }
+  memBwTBs: { value: 4.8, unit: TB/s, status: official, source: nvidia-h200, verified: 2026-10-19 }
+  tflops:
+    fp8: { value: 1979, unit: TFLOPS, status: official, source: nvidia-h200, verified: 2026-10-19 }
+    bf16: { value: 989.5, unit: TFLOPS, status: official, source: nvidia-h200, verified: 2026-10-19 }
+  tdpW: { value: 700, unit: W, status: official, source: nvidia-h200, verified: 2026-10-19 }
+  nvlinkBidirGBs: { value: 900, unit: GB/s, status: official, source: nvidia-h200, verified: 2026-10-19 }
+
+- id: gb200
+  name: NVIDIA GB200 Blackwell GPU（NVL72，單 GPU）
+  # NVIDIA publishes GB200 per superchip (2 GPU + 1 Grace) and per NVL72 rack, not per GPU, so every per-GPU value is
+  # derived (review): superchip ÷ 2 (= rack ÷ 72).
+  memGB: { value: 186, unit: GB, status: derived, formula: '每顆 GB200 superchip 372 GB HBM3E ÷ 2 GPU = 186（整櫃 13.4 TB ÷ 72 ≈ 186）', inputs: [nvidia-gb200-nvl72], verified: 2026-10-20 }
+  memBwTBs: { value: 8, unit: TB/s, status: derived, formula: '每顆 superchip 16 TB/s ÷ 2 GPU = 8（整櫃 576 TB/s ÷ 72 = 8）', inputs: [nvidia-gb200-nvl72], verified: 2026-10-20 }
+  tflops:
+    fp8: { value: 5000, unit: TFLOPS, status: derived, formula: '每顆 superchip FP8 20 PFLOPS（稀疏）÷ 2（dense 為稀疏的一半，官網註腳）÷ 2 GPU = 5,000', inputs: [nvidia-gb200-nvl72], verified: 2026-10-20 }
+    bf16: { value: 2500, unit: TFLOPS, status: derived, formula: '每顆 superchip FP16/BF16 10 PFLOPS（稀疏）÷ 2（dense）÷ 2 GPU = 2,500', inputs: [nvidia-gb200-nvl72], verified: 2026-10-20 }
+  # Per-GPU TDP is not published for GB200 NVL72.
+  tdpW: { value: null, unit: W, status: unverified, source: nvidia-gb200-nvl72, conflict: 'NVIDIA 只公布每顆 superchip 與整櫃的規格，未公布單 GPU TDP；查無可查證的單 GPU 數值，不填值', verified: 2026-10-20 }
+  nvlinkBidirGBs: { value: 1800, unit: GB/s, status: derived, formula: '每顆 superchip NVLink 3.6 TB/s ÷ 2 GPU = 1,800 GB/s（整櫃 130 TB/s ÷ 72 ≈ 1,806）', inputs: [nvidia-gb200-nvl72], verified: 2026-10-20 }
+
+- id: m5-ultra-512
+  name: Apple M5 Ultra 36C/80G 512GB
+  memGB: { value: 512, unit: GB, status: official, source: apple-mac-studio-specs, verified: 2026-10-19 }
+  memBwTBs: { value: 1.2, unit: TB/s, status: official, source: apple-mac-studio-specs, verified: 2026-10-19 }
+  tflops:
+    # 4945 pp512 tok/s (llama.cpp #4167, Llama-2-7B Q4_0) × 2 × 6.74e9 = 66.66 TFLOPS, truncated to 66.6
+    effective: { value: 66.6, unit: TFLOPS, status: derived, formula: 'pp512 tok/s × 2 × 6.74e9', inputs: [llamacpp-4167], verified: 2026-10-19 }
+  tdpW: { value: 300, unit: W, status: measured, source: apple-mlx-distributed, verified: 2026-10-19 }
+
+- id: gb10-spark
+  name: NVIDIA GB10（DGX Spark）128GB
+  memGB: { value: 128, unit: GB, status: official, source: nvidia-dgx-spark, verified: 2026-10-19 }
+  memBwTBs: { value: 0.273, unit: TB/s, status: official, source: nvidia-dgx-spark, verified: 2026-10-19 }
+  tflops:
+    # Measured MAMF (mamf-finder). The official "1 petaFLOP FP4" figure includes sparsity and is NOT used.
+    fp8: { value: 207.7, unit: TFLOPS, status: measured, source: storagereview-dgx-spark, verified: 2026-10-19 }
+    bf16: { value: 99.8, unit: TFLOPS, status: measured, source: storagereview-dgx-spark, verified: 2026-10-19 }
+  tdpW: { value: 140, unit: W, status: official, source: nvidia-dgx-spark, verified: 2026-10-19 }
+
+- id: m5-pro-64
+  name: Apple M5 Pro 18C/20G 64GB
+  memGB: { value: 64, unit: GB, status: official, source: apple-mac-mini-specs, verified: 2026-10-19 }
+  # Apple lists 307 GB/s only for the M5 Pro 15C/16G (docs/research/apple-silicon.md:31); not listed for 18C/20G.
+  memBwTBs: { value: 0.307, unit: TB/s, status: estimate, basis: 'Apple 只列出 M5 Pro 15C/16G 的 307 GB/s；18C/20G 沒有另列，沿用同一數字', evidence: [apple-mac-mini-specs], verified: 2026-10-19 }
+  tflops:
+    # 1621 pp512 tok/s × 2 × 6.74e9 = 21.85 TFLOPS, truncated to 21.8
+    effective: { value: 21.8, unit: TFLOPS, status: derived, formula: 'pp512 tok/s × 2 × 6.74e9', inputs: [llamacpp-4167], verified: 2026-10-19 }
+  # Apple does not publish TDP or power for Mac mini.
+  tdpW: { value: null, unit: W, status: unverified, source: apple-mac-mini-specs, conflict: 'Apple 未公布 Mac mini 的 TDP 或功耗（docs/research/dgx-spark-mac-mini.md）；查無可查證的數值，不填值', verified: 2026-10-20 }
+
+- id: m6-32
+  name: Apple M6 32GB
+  memGB: { value: 32, unit: GB, status: official, source: apple-mac-mini-specs, verified: 2026-10-19 }
+  memBwTBs: { value: 0.170, unit: TB/s, status: official, source: apple-mac-mini-specs, verified: 2026-10-19 }
+  tflops:
+    # 989 pp512 tok/s × 2 × 6.74e9 = 13.33 TFLOPS, truncated to 13.3.
+    # Caveat (docs/research/apple-silicon.md:131): the M6 row's GPU core count and bandwidth in llama.cpp #4167
+    # do not match Apple's official M6 specs, so this is an estimate, not a clean derivation.
+    effective: { value: 13.3, unit: TFLOPS, status: estimate, basis: 'pp512 tok/s × 2 × 6.74e9（989 tok/s）；但 llama.cpp #4167 的 M6 那一列，GPU 核心數與頻寬和 Apple 官方規格不一致，無法確認是同一機型', evidence: [llamacpp-4167], verified: 2026-10-19 }
+  tdpW: { value: null, unit: W, status: unverified, source: apple-mac-mini-specs, conflict: 'Apple 未公布 Mac mini 的 TDP 或功耗（docs/research/dgx-spark-mac-mini.md）；查無可查證的數值，不填值', verified: 2026-10-20 }

@@ -1,0 +1,9 @@
+- id: fx-node
+  name: Fixture node
+  sub: fixture
+  group: nchc
+  unit: gpu
+  hardware: no-such-hw
+  gpusPerNode: { value: 8, status: official, source: fx-src, verified: 2026-10-19 }
+  tpOptions: [1, 2, 4, 8]
+  calibration: fx-cal

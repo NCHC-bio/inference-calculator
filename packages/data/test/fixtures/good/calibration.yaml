@@ -1,0 +1,22 @@
+profiles:
+  - id: fx-cal
+    engine: vllm
+    etaBw: { value: 0.7, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    etaBwLow: { value: 0.5, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    etaCompute: { value: 0.5, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    memUtil: { value: 0.9, status: official, source: fx-src, verified: 2026-10-19 }
+    allreduceLatencyUs: { value: 10, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    tFixedSec: { value: 0, unit: s, status: estimate, basis: '尚無實測；待國網量測（GitHub issue #10）', evidence: [fx-src], verified: 2026-10-20 }
+    ttftOverheadSec: { value: 0, unit: s, status: estimate, basis: '尚無實測；待國網量測（GitHub issue #10）', evidence: [fx-src], verified: 2026-10-20 }
+points:
+  - id: fx-point
+    role: validate
+    platform: fx-node
+    model: fx-model
+    quant: fx-fp8
+    workload: { inputTokens: 1000, outputTokens: 100, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 1
+    metric: decodeTokPerSec
+    measured: { value: 50, status: measured, source: fx-src, verified: 2026-10-19 }
+    engine: fixture

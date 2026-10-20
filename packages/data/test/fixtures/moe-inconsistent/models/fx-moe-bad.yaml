@@ -1,0 +1,15 @@
+# Synthetic MoE whose expert formula (64 × 3 × 4096 × 14336 × 32 / 1e9 = 360.8B) exceeds totalParamsB (Ruling R31c).
+id: fx-moe-bad
+name: Fixture inconsistent MoE
+hfRepo: example/fx-moe-bad
+origin: { developer: Example Lab, country: US }
+totalParamsB: { value: 47, status: official, source: fx-src, verified: 2026-10-19 }
+layers: 32
+heads: 32
+kvHeads: 8
+headDim: 128
+hidden: 4096
+attention: gqa
+moe: { experts: 64, topK: 2, expertFfnDim: 14336 }
+source: fx-src
+verified: 2026-10-19

@@ -1,0 +1,465 @@
+# Every source id referenced anywhere in config/. URLs are copied from docs/research/*.md
+# (the file is noted per entry); nothing here may be invented (spec §2.1).
+# kind: official | paper | benchmark | secondary | internal
+
+# --- NVIDIA / NCHC hardware (docs/research/nvidia-nchc-hardware.md; Hopper tuning guide is ref [7]) ---
+- id: nvidia-h100
+  title: NVIDIA H100 Tensor Core GPU（官方產品頁）
+  url: https://www.nvidia.com/en-us/data-center/h100/
+  accessed: 2026-10-19
+  kind: official
+- id: nvidia-h200
+  title: NVIDIA H200 Tensor Core GPU（官方產品頁）
+  url: https://www.nvidia.com/en-us/data-center/h200/
+  accessed: 2026-10-19
+  kind: official
+- id: nvidia-gb200-nvl72
+  title: NVIDIA GB200 NVL72（官方產品頁）
+  url: https://www.nvidia.com/en-us/data-center/gb200-nvl72/
+  accessed: 2026-10-19
+  kind: official
+- id: nvidia-hopper-tuning-guide
+  title: NVIDIA Hopper Tuning Guide（CUDA 文件；第 4 代 NVLink 18 條 × 50 GB/s）
+  url: https://docs.nvidia.com/cuda/hopper-tuning-guide/index.html
+  accessed: 2026-10-19
+  kind: official
+- id: nchc-nano4-iservice
+  title: 國網中心 iService：晶創26（nano4）服務說明
+  url: https://iservice.nchc.org.tw/nchc_service/nchc_service_nano4.php
+  accessed: 2026-10-19
+  kind: official
+- id: nchc-nano5-page
+  title: 國網中心：晶創25（nano5）系統介紹
+  url: https://www.nchc.org.tw/Page?itemid=58
+  accessed: 2026-10-19
+  kind: official
+- id: nchc-nano4-manual
+  title: 國網 nano4 使用手冊：GB200 NVL72 系統架構
+  url: https://man.twcc.ai/@nano4-manual/SyaY-6T8bg
+  accessed: 2026-10-19
+  kind: official
+- id: arxiv-2607.16100
+  title: arXiv 2607.16100：GB200 NVLink 延遲與 AllReduce 實測
+  url: https://arxiv.org/html/2607.16100
+  accessed: 2026-10-19
+  kind: paper
+- id: nccl-collectives-bench-h100
+  title: waynehacking8/nccl-collectives-bench（commit 38c093e）：8× H100 80GB HBM3 主機中 4 張 GPU 的 nccl-tests all_reduce_perf，8 B 時 eager 22.72 µs（results/all_reduce.txt）、CUDA graph 16.08 µs（results/symmetric/all_reduce_reg0_graph1.txt）；主機有其他租戶，NCCL 函式庫 2.29.2（log 標頭）
+  url: https://github.com/waynehacking8/nccl-collectives-bench/tree/38c093eda275208e175abd3969c14e1316fe50e6/results
+  accessed: 2026-10-20
+  kind: benchmark
+- id: arxiv-2606.05951
+  title: arXiv 2606.05951（Demystifying NVSHMEM）：8× H200 SXM5（CoreWeave）nccl-tests CUDA graph，64 KiB 以下 NCCL ring 約 4.7–8.9 µs、NVLS 5.6–5.9 µs；GPU 數與 NCCL 版本未寫明
+  url: https://arxiv.org/html/2606.05951
+  accessed: 2026-10-20
+  kind: paper
+
+# --- DGX Spark (docs/research/dgx-spark-mac-mini.md) ---
+- id: nvidia-dgx-spark
+  title: NVIDIA DGX Spark（官方產品頁）
+  url: https://www.nvidia.com/en-us/products/workstations/dgx-spark/
+  accessed: 2026-10-19
+  kind: official
+- id: storagereview-dgx-spark
+  title: StorageReview：NVIDIA DGX Spark Review（mamf-finder 矩陣算力與推論吞吐實測）
+  url: https://www.storagereview.com/review/nvidia-dgx-spark-review-the-ai-appliance-bringing-datacenter-capabilities-to-desktops
+  accessed: 2026-10-19
+  kind: benchmark
+
+# --- Apple silicon (docs/research/apple-silicon.md; the forum thread was added there 2026-10-19, verified) ---
+- id: apple-mac-studio-specs
+  title: Apple Mac Studio 技術規格
+  url: https://www.apple.com/mac-studio/specs/
+  accessed: 2026-10-19
+  kind: official
+- id: apple-mac-mini-specs
+  title: Apple Mac mini 技術規格
+  url: https://www.apple.com/mac-mini/specs/
+  accessed: 2026-10-19
+  kind: official
+- id: apple-mlx-distributed
+  title: Apple Machine Learning Research：MLX distributed inference（2026-10-15）
+  url: https://machinelearning.apple.com/research/mlx-distributed-inference
+  accessed: 2026-10-19
+  kind: official
+- id: apple-forum-max-working-set
+  title: 'Apple Developer Forums：recommendedMaxWorkingSetSize - is there a way to use all of our unified memory for GPU / Metal ?（使用者回覆，非 Apple 官方說法）'
+  url: https://developer.apple.com/forums/thread/732035
+  accessed: 2026-10-19
+  kind: secondary
+- id: llamacpp-4167
+  title: llama.cpp discussion #4167：Apple Silicon 效能（Llama-2-7B Q4_0 pp512 / tg128）
+  url: https://github.com/ggml-org/llama.cpp/discussions/4167
+  accessed: 2026-10-19
+  kind: benchmark
+- id: mlx-lm-kv-cache
+  title: mlx-lm v0.32.2 原始碼 mlx_lm/models/cache.py：KVCache 以傳入 keys／values 的 dtype 配置快取（L339–356）
+  url: https://github.com/ml-explore/mlx-lm/blob/v0.32.2/mlx_lm/models/cache.py#L339-L356
+  accessed: 2026-10-19
+  kind: official
+- id: mlx-lm-kv-cache-step
+  title: mlx-lm v0.32.2 原始碼 mlx_lm/models/cache.py：KVCache.step = 256，快取放不下新 token 時以 ceil(新 token 數 / 256) × 256 擴充（L339-L366）；RotatingKVCache（sliding window）以同樣的 step 成長到 max_size 為止，之後維持 window 大小（L423-L520）
+  url: https://github.com/ml-explore/mlx-lm/blob/v0.32.2/mlx_lm/models/cache.py#L339-L366
+  accessed: 2026-10-20
+  kind: official
+- id: mlx-lm-prefill-step
+  title: mlx-lm v0.32.2 原始碼 mlx_lm/server.py：--prefill-step-size 預設 2048（L2036-L2041）；BatchGenerator 以 prefill_step_size 切 prompt，每段各做一次 forward（mlx_lm/generate.py L1112、L1219-L1231、L1871-L1879；stream_generate 的 generate_step 同為 2048，L323、L437-L452）
+  url: https://github.com/ml-explore/mlx-lm/blob/v0.32.2/mlx_lm/server.py#L2036-L2041
+  accessed: 2026-10-20
+  kind: official
+- id: mlx-lm-server-kv-bits
+  title: mlx-lm v0.32.2 原始碼 mlx_lm/server.py：--kv-bits 預設 None（KV cache 不量化，full precision；L2054–2060）
+  url: https://github.com/ml-explore/mlx-lm/blob/v0.32.2/mlx_lm/server.py#L2054-L2060
+  accessed: 2026-10-19
+  kind: official
+
+# --- Quantization formats and vLLM defaults (docs/research/prior-art-calculators.md §C, web-verified) ---
+- id: google-bfloat16
+  title: Google Cloud TPU：Improve your model's performance with bfloat16
+  url: https://docs.cloud.google.com/tpu/docs/bfloat16
+  accessed: 2026-10-19
+  kind: official
+- id: arxiv-2209.05433
+  title: FP8 Formats for Deep Learning（Micikevicius et al., arXiv 2209.05433）
+  url: https://arxiv.org/abs/2209.05433
+  accessed: 2026-10-19
+  kind: paper
+- id: arxiv-2306.00978
+  title: 'AWQ: Activation-aware Weight Quantization for LLM Compression and Acceleration（Lin et al., arXiv 2306.00978）'
+  url: https://arxiv.org/abs/2306.00978
+  accessed: 2026-10-19
+  kind: paper
+- id: vllm-quantized-kv-cache
+  title: vLLM v0.32.0 文件 docs/features/quantization/quantized_kvcache.md：Quantized KV Cache（kv_cache_dtype="fp8" 把 KV cache 量化為 FP8，L20-L29；`auto`「Use the model's default data type」，L37-L39；CLI `--kv-cache-dtype fp8`，L50）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/features/quantization/quantized_kvcache.md#L20-L50
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-optimization-docs
+  title: vLLM v0.32.0 原始碼 vllm/engine/arg_utils.py：vllm serve 的引擎參數 --dtype（L952）、--max-model-len（L966）、--quantization／-q（L967）、--tensor-parallel-size（L1177）、--gpu-memory-utilization（L1356-L1361，預設 0.92 見 vllm-v032-cache-config）、--kv-cache-dtype（L1365）；vllm/config/model.py ModelDType 含 "bfloat16"（L99），max_model_len「Model context length (prompt and output)」（L245-L257）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/engine/arg_utils.py#L952-L967
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-cache-config
+  title: vLLM v0.32.0 原始碼 vllm/config/cache.py CacheConfig.gpu_memory_utilization（預設 0.92，每個 instance 的上限；L102-L111）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/config/cache.py#L102-L111
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-arg-utils
+  title: vLLM v0.32.0 原始碼 vllm/engine/arg_utils.py：依 NVML 記憶體決定 API server 的預設值；≥ 160 GiB 為 max_num_seqs 1024／max_num_batched_tokens 16384，≥ 70 GiB 且非 A100 為 1024／8192，其他為 256／2048（L2923-L2951）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/engine/arg_utils.py#L2923-L2951
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-scheduler
+  title: vLLM v0.32.0 原始碼 vllm/v1/core/sched/scheduler.py：每步 token 預算 token_budget = max_num_scheduled_tokens（未設定時 = max_num_batched_tokens，L137-L141、L611），先排 RUNNING 的 request（L659），預算有剩才從 waiting queue 取（L912-L917）；排不進的 request 留在 waiting queue（docs/research/vllm-tp-kv-precision.md §7.2、§7.5）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/core/sched/scheduler.py#L137-L141
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-vllm-config
+  title: vLLM v0.32.0 原始碼 vllm/config/vllm.py：max_concurrent_batches（async scheduling 且 PP ≤ 1 時為 2，否則為 PP 大小）與 max_in_flight_tokens = max_concurrent_batches × max_num_batched_tokens（L577-L598）；async_scheduling 未設定時預設開啟，只有 pooling 模型、不相容的 speculative decoding、不支援的 executor 或 V1 runner 搭配 PP > 1 時關閉（L1585-L1644）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/config/vllm.py#L577-L598
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-block-size
+  title: vLLM v0.32.0 原始碼 vllm/config/cache.py：CacheConfig.DEFAULT_BLOCK_SIZE = 16（L72）；未指定 --block-size 時 _apply_block_size_default 填入預設值（L337-L348），之後由平台依 attention backend 調整（docs/research/vllm-tp-kv-precision.md §3.13）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/config/cache.py#L66-L78
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-block-size-backend
+  title: vLLM v0.32.0 原始碼 vllm/platforms/interface.py Platform.update_block_size_for_backend（L749-L785）與 _preferred_block_size_for_backends（L699-L747）：只有一個 backend 時取它的 get_preferred_block_size；vllm/v1/attention/backend.py L151-L160：預設 16 被接受就用 16，否則取 kernel 支援的最小 block（docs/research/vllm-tp-kv-precision.md §3.13）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/platforms/interface.py#L749-L785
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-cuda-backend-priority
+  title: vLLM v0.32.0 原始碼 vllm/platforms/cuda.py _get_backend_priorities（L83-L179）：MLA 在 SM100 依序 FLASHINFER_MLA、TOKENSPEED_MLA、CUTLASS_MLA、FLASH_ATTN_MLA、FLASHMLA、TRITON_MLA（L96-L131），SM12x 為 TRITON_MLA（L132-L136），其餘（SM90）FLASH_ATTN_MLA、FLASHMLA、FLASHINFER_MLA、TRITON_MLA（L137-L153）；非 MLA 在 SM100 為 FLASHINFER 優先（L158-L166），其餘 FLASH_ATTN 優先（L167-L179）（docs/research/vllm-tp-kv-precision.md §3.13）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/platforms/cuda.py#L83-L179
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-cutlass-mla
+  title: vLLM v0.32.0 原始碼 CUTLASS MLA backend：KV dtype auto／float16／bfloat16／fp8／fp8_e4m3、kernel block 只有 128、只支援 SM100（vllm/v1/attention/backends/mla/cutlass_mla.py L38-L66）；SM100 優先序中排在 FLASHINFER_MLA 與 TOKENSPEED_MLA 之後（TOKENSPEED_MLA 只接受 fp8 KV 與 DeepSeek R1 維度 qk_nope 128／qk_rope 64／v 128，tokenspeed_mla.py L101-L111、L133-L171）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/attention/backends/mla/cutlass_mla.py#L38-L66
+  accessed: 2026-10-21
+  kind: official
+- id: vllm-v032-mla-backends
+  title: vLLM v0.32.0 原始碼 MLA backends 的 KV dtype 與 kernel block：FlashMLA 接受 fp8、kernel block 只有 64（vllm/v1/attention/backends/mla/flashmla.py L48-L59），dense 只支援 Hopper（vllm/v1/attention/ops/flashmla.py L51-L58）；FlashAttention MLA 只接受 auto／float16／bfloat16、MultipleOf(16)、SM90（flashattn_mla.py L42-L51、L69-L71）；FlashInfer MLA 為 32／64、SM100、qk_nope_head_dim ∈ {64, 128, 192}（flashinfer_mla.py L195-L249）；Triton MLA 為 MultipleOf(16)（triton_mla.py L95-L111）（docs/research/vllm-tp-kv-precision.md §3.13）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/attention/backends/mla/flashmla.py#L48-L59
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-fp8-docs
+  title: vLLM v0.32.0 文件 docs/features/quantization/online.md：線上量化把 BF16／FP16 模型的 Linear 與 MoE 權重在載入時轉成 FP8 等格式、activation 每次 forward 動態縮放（L1-L6）；CLI `vllm serve … --quantization fp8_per_tensor`（L38），fp8_per_tensor = FP8 E4M3 權重與 activation、per-tensor scale（L51）。舊的 `--quantization fp8` 在 v0.32.0 仍可用但已棄用，會轉成 fp8_per_tensor 並警告「use --quantization fp8_per_tensor instead」（vllm/model_executor/model_loader/weight_utils.py L351-L357）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/features/quantization/online.md#L1-L51
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-vocab-embedding
+  title: vLLM v0.32.0 原始碼 vllm/model_executor/layers/vocab_parallel_embedding.py（VocabParallelEmbedding／ParallelLMHead L316-L321：量化設定沒有給方法時使用 UnquantizedEmbeddingMethod；這兩個類別不是 LinearBase）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/model_executor/layers/vocab_parallel_embedding.py#L316-L321
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-fp8-quant-method
+  title: vLLM v0.32.0 原始碼：線上量化只處理 LinearBase 與 RoutedExperts，embedding／ParallelLMHead 保留 checkpoint 的方法（vllm/model_executor/layers/quantization/base_config.py L306-L315、online/base.py L388-L411）；FP8 checkpoint 的 Fp8Config.get_quant_method 也只對 LinearBase、RoutedExperts 與 Attention（KV scale）回傳量化方法，其餘回傳 None（fp8.py L177-L208）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/model_executor/layers/quantization/online/base.py#L388-L411
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-awq-linear
+  title: vLLM v0.32.0 原始碼 vllm/model_executor/layers/quantization/auto_awq.py（v0.32.0 把 awq.py／awq_marlin.py 合併為 AutoAWQConfig）：pack_factor = 32 // weight_bits（L196）；BaseAWQLinearMethod.create_weights：qweight 與 qzeros 為 int32、輸出維度 ÷ pack_factor（qzeros = num_groups × output/8，即每個 zero 4 bits），scales 為 num_groups × output、params_dtype（16-bit）（L797-L876）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/model_executor/layers/quantization/auto_awq.py#L797-L876
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-awq-docs
+  title: vLLM v0.32.0 文件 docs/features/quantization/auto_awq.md：AWQ checkpoint 需先離線量化（AutoAWQ／llm-compressor），以 --quantization auto_awq 執行（L46-L53）；`awq` 是同一個 AutoAWQConfig 的別名（vllm/model_executor/layers/quantization/__init__.py L157-L159），vLLM 沒有線上轉 AWQ 的路徑
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/features/quantization/auto_awq.md#L46-L53
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-awq-marlin
+  title: vLLM v0.32.0 原始碼 vllm/model_executor/layers/quantization/auto_awq.py：AutoAWQConfig.override_quantization_method 對 quant_method awq 的 checkpoint，使用者指定 awq／awq_marlin／auto_awq／marlin 都改用 auto_awq（L262-L286）；get_quant_method 在 CUDA 上 check_marlin_supported 時用 Marlin kernel，否則用 Triton AWQ kernel（L288-L335）。v0.10.0 明確指定 awq 會「forcing awq」不用 Marlin，v0.32.0 已不是這樣
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/model_executor/layers/quantization/auto_awq.py#L262-L335
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-config-quant-detect
+  title: vLLM v0.32.0 原始碼 vllm/config/model.py ModelConfig._verify_quantization（L1370-L1448：讀取 checkpoint 的 quantization_config（L1376）；未指定 --quantization 時採用其 quant_method（L1440-L1442），指定不同方法時拒絕啟動「does not match」（L1443-L1448））
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/config/model.py#L1370-L1448
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-hf-quant-config
+  title: vLLM v0.32.0 原始碼：config.json 沒有 quantization_config 時讀取同目錄的 hf_quant_config.json（ModelOpt 0.29 以前的格式；vllm/transformers_utils/config.py L888-L899）；producer modelopt、quant_algo FP8 → quant_method modelopt（vllm/transformers_utils/model_arch_config_convertor.py L270-L286；ModelOptFp8Config.override_quantization_method，vllm/model_executor/layers/quantization/modelopt.py L449-L455）；exclude_modules 內的 LinearBase／ParallelLMHead 不量化，輸入 VocabParallelEmbedding 一律不量化（modelopt.py get_quant_method L224-L260）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/transformers_utils/config.py#L888-L899
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-mxfp4-moe-backend
+  title: vLLM v0.32.0 原始碼 vllm/model_executor/layers/fused_moe/oracle/mxfp4.py：gpt-oss 的 MXFP4 MoE backend 在 --moe-backend auto 時依 _get_priority_backends_for_gpt_oss 的順序選第一個支援的（L389-L422：FLASHINFER_TRTLLM（SM100）→ AITER（ROCm）→ TRITON → FLASHINFER_CUTLASS → CUTLASS → MARLIN → BATCHED_MARLIN → HUMMING；prioritize_humming 在 SM90 只把 Humming 移到 Marlin 前面，humming/priority.py L11、L26-L48；選擇迴圈 L691-L712）；OAI Triton kernel 支援 SM90 到 SM12x（experts/gpt_oss_triton_kernels_moe.py L41-L53），triton_kernels 隨 CUDA build 一起編入（CMakeLists.txt L1557-L1559）；明確指定 --moe-backend marlin 時走 MARLIN（L367、L639-L670）；envs.py 已沒有 VLLM_MXFP4_USE_MARLIN
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/model_executor/layers/fused_moe/oracle/mxfp4.py#L389-L422
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v022-mxfp4-marlin-env
+  title: vLLM v0.22.0 原始碼：VLLM_MXFP4_USE_MARLIN=1 時 select_mxfp4_moe_backend 直接回傳 MARLIN（vllm/model_executor/layers/fused_moe/oracle/mxfp4.py L525-L533；v0.21.0 同一段在 L421-L429），否則依 gpt-oss 優先序（L270-L289，TRITON 在 MARLIN 之前）；envs.py L1326-L1333 標為 deprecated（「Use --moe-backend marlin」，預定 v0.23 移除）
+  url: https://github.com/vllm-project/vllm/blob/0b3ba88f165976e77ca5e6a7a3f5bba4562b80af/vllm/model_executor/layers/fused_moe/oracle/mxfp4.py#L525-L533
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-mxfp4-src
+  title: vLLM v0.32.0 原始碼 vllm/model_executor/layers/quantization/mxfp4.py：Mxfp4Config.get_supported_act_dtypes → [torch.bfloat16]（L78-L80）；get_quant_method 對一般 LinearBase 回傳 UnquantizedLinearMethod（「MXFP4 linear layer is not implemented - falling back」，L91-L113），只有 RoutedExperts 走 MXFP4；MoE 權重與 scale 以 uint8 打包（L659-L670）。gpt-oss 的 MoE backend 優先序是 BF16 activation 的變體在前（vllm/model_executor/layers/fused_moe/oracle/mxfp4.py L389-L422）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/model_executor/layers/quantization/mxfp4.py#L78-L113
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-mxfp4-v0101
+  title: vLLM v0.10.1 原始碼 vllm/model_executor/layers/quantization/mxfp4.py（歷史：第一個含 mxfp4 的 tag；v0.10.0 沒有 mxfp4.py，所以 gpt-oss 需要 vLLM ≥ 0.10.1）
+  url: https://github.com/vllm-project/vllm/blob/v0.10.1/vllm/model_executor/layers/quantization/mxfp4.py
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-v032-online-quant
+  title: vLLM v0.32.0 原始碼 vllm/config/quantization.py：--quantization 的線上 shorthand（fp8_per_tensor、fp8_per_block、fp8_per_channel、mxfp8、mxfp4 等，L192-L224）；mxfp4／mxfp8 只在 checkpoint 沒有量化資訊時才走線上路徑（L231-L235）；線上 MXFP4 的 MoE backend 在 SM100 以上優先 FP4／MXFP8 activation（vllm/model_executor/layers/fused_moe/oracle/mxfp4.py L425-L448）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/config/quantization.py#L192-L235
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-gpt-oss-recipe
+  title: vLLM Recipes：GPT-OSS（以 vllm serve openai/gpt-oss-120b 啟動、不加量化參數；Hopper 設定檔不改 KV dtype，Blackwell 另以環境變數啟用 MXFP4×MXFP8）
+  url: https://github.com/vllm-project/recipes/blob/c033a835ef28b28a857f199ac43044dd4cf06077/OpenAI/GPT-OSS.md
+  accessed: 2026-10-20
+  kind: official
+- id: ocp-mx-spec
+  title: OCP Microscaling Formats (MX) Specification v1.0（2023-09；§5.1 每個區塊 w + k·d bits；表 1：MXFP4 = FP4 E2M1 元素 d = 4 bits、區塊 k = 32、E8M0 scale w = 8 bits）
+  url: https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-bench-random-dataset
+  title: vLLM v0.32.0 原始碼 vllm/benchmarks/datasets/datasets.py RandomDataset：real_input_len = input_len − 特殊 token 數（L599-L600）；prompt = prefix + input_len 個 token（total_input_len，L753），解碼後再編碼，長度不符時最多重試 10 次補足或截斷（gen_prompt_decode_to_target_len，L494-L547），仍不符才回報 mismatch；--random-range-ratio 預設 0.0（L1899-L1904）、--seed 預設 0（L1585）；預設 backend openai 以 /v1/completions 送出 max_tokens = output_len（serve.py L1600-L1620、lib/endpoint_request_func.py L212）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/benchmarks/datasets/datasets.py#L494-L547
+  accessed: 2026-10-20
+  kind: official
+- id: vllm-serving-validate-input
+  title: vLLM v0.32.0 原始碼 vllm/entrypoints/serve/utils/api_utils.py get_max_tokens（L169-L206）：prompt 長度超過 max_model_len 時拒絕（L183-L187），否則 max_tokens 取 max_model_len − prompt 長度與請求值的較小者（L188-L206），不再拒絕 prompt + max_tokens > max_model_len 的請求（v0.10.0 serving_engine.py 會拒絕）；completions 以它決定 max_tokens（openai/completion/serving.py L157-L164），completions 預設 add_special_tokens=True（openai/completion/protocol.py L117-L123）
+  url: https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/entrypoints/serve/utils/api_utils.py#L169-L206
+  accessed: 2026-10-20
+  kind: official
+- id: bench-retokenize-drift
+  title: 本專案量測（2026-10-20）：以 vLLM v0.10.0 RandomDataset.sample 的相同流程，對 6 個目錄模型的 tokenizer 計算伺服器端重新斷詞後的 prompt token 數與指定長度之差（docs/research/prior-art-calculators.md §C）
+  url: docs/research/prior-art-calculators.md
+  accessed: 2026-10-20
+  kind: internal
+
+# --- Queueing theory (docs/research/vllm-tp-kv-precision.md §7.5) ---
+- id: little-1961
+  title: J. D. C. Little, "A Proof for the Queuing Formula L = λW", Operations Research 9(3), 383–387, 1961（Little's law：穩態下平均人數 = 到達率 × 平均停留時間）
+  url: https://doi.org/10.1287/opre.9.3.383
+  accessed: 2026-10-20
+  kind: paper
+
+# --- Prior-art calculators and user questions (docs/research/prior-art-calculators.md, user-questions.md) ---
+- id: inferencex-gptoss-h200-v022
+  title: SemiAnalysis InferenceX 原始結果 API，gpt-oss-120b（MXFP4）H200 vLLM v0.22.0，GitHub Actions run 26696231118 attempt 1（https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1，2026-05-30，repo commit f6de379；腳本 benchmarks/single_node/gptoss_fp4_h200.sh 設 VLLM_MXFP4_USE_MARLIN=1）
+  url: https://inferencex.semianalysis.com/api/v1/benchmarks?model=gpt-oss-120b&runId=26696231118&exactRun=true
+  accessed: 2026-10-20
+  kind: benchmark
+  originOrg: SemiAnalysis
+  originCountry: US
+- id: inferencex-gptoss-h100-v021
+  title: SemiAnalysis InferenceX 原始結果 API，gpt-oss-120b（MXFP4）H100 vLLM v0.21.0，GitHub Actions run 25956497716 attempt 2（https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2，2026-05-17，repo commit be81eac；腳本 benchmarks/single_node/gptoss_fp4_h100.sh 設 VLLM_MXFP4_USE_MARLIN=1）
+  url: https://inferencex.semianalysis.com/api/v1/benchmarks?model=gpt-oss-120b&runId=25956497716&exactRun=true
+  accessed: 2026-10-20
+  kind: benchmark
+  originOrg: SemiAnalysis
+  originCountry: US
+- id: inferencex-llama70b-fp8-1k1k-v0102
+  title: SemiAnalysis InferenceX 原始結果 API，nvidia/Llama-3.3-70B-Instruct-FP8 H100／H200 vLLM v0.10.2（.github/workflows/70b-tmpl.yml），1k/1k，GitHub Actions run 18924448230 attempt 2（https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2，2025-10-29，repo commit 9596d23；腳本 benchmarks/70b_fp8_h200_slurm.sh、70b_fp8_h100_slurm.sh：kv-cache-dtype fp8、async-scheduling）
+  url: https://inferencex.semianalysis.com/api/v1/benchmarks?model=Llama-3.3-70B-Instruct-FP8&runId=18924448230&exactRun=true
+  accessed: 2026-10-20
+  kind: benchmark
+  originOrg: SemiAnalysis
+  originCountry: US
+- id: inferencex-llama70b-fp8-8k1k-v0102
+  title: SemiAnalysis InferenceX 原始結果 API，nvidia/Llama-3.3-70B-Instruct-FP8 H100／H200 vLLM v0.10.2，8k/1k，GitHub Actions run 18924487526 attempt 3（https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924487526/attempts/3，2025-10-29，repo commit 9596d23）
+  url: https://inferencex.semianalysis.com/api/v1/benchmarks?model=Llama-3.3-70B-Instruct-FP8&runId=18924487526&exactRun=true
+  accessed: 2026-10-20
+  kind: benchmark
+  originOrg: SemiAnalysis
+  originCountry: US
+- id: martin-alderson-speed
+  title: Martin Alderson：Local LLM speed calculator（自稱樂觀上限，實際只達 60–90%）
+  url: https://martinalderson.com/posts/local-llm-speed-calculator/
+  accessed: 2026-10-19
+  kind: secondary
+- id: mac-llm-calculator
+  title: Mac LLM Calculator（bagdaer1/mac-llm-calculator）
+  url: https://github.com/bagdaer1/mac-llm-calculator
+  accessed: 2026-10-19
+  kind: secondary
+- id: l1t-office-sizing
+  title: Level1Techs 論壇：DGX Spark vs 2x Radeon Pro R9700 vs Mac Studio M3 Ultra for multi-user office LLM serving（每人 20 tok/s）
+  url: https://forum.level1techs.com/t/sanity-check-on-my-math-dgx-spark-vs-2x-radeon-pro-r9700-vs-mac-studio-m3-ultra-for-multi-user-office-llm-serving-does-reality-match-the-numbers/253436
+  accessed: 2026-10-19
+  kind: secondary
+- id: nvidia-llm-inference-cost-blog
+  title: NVIDIA 技術部落格：LLM Inference Benchmarking — How Much Does Your LLM Inference Cost?（同時請求數不等於同時在線使用者數）
+  url: https://developer.nvidia.com/blog/llm-inference-benchmarking-how-much-does-your-llm-inference-cost
+  accessed: 2026-10-19
+  kind: official
+
+# --- Workload traces and benchmarks (docs/research/task-workload-and-models.md) ---
+- id: splitwise-azure
+  title: Splitwise（Patel et al., arXiv 2311.18677）：Azure LLM 推論紀錄
+  url: https://arxiv.org/html/2311.18677
+  accessed: 2026-10-19
+  kind: paper
+- id: mooncake-trace
+  title: Mooncake（FAST 2025）trace release：對話請求長度
+  url: https://github.com/kvcache-ai/Mooncake/blob/main/FAST25-release/README.md
+  accessed: 2026-10-19
+  kind: paper
+  originOrg: Moonshot AI
+  originCountry: CN
+- id: tracelab
+  title: TraceLab（arXiv 2606.30560）：真實 Claude Code 與 Codex Agent 使用紀錄
+  url: https://arxiv.org/html/2606.30560v2
+  accessed: 2026-10-19
+  kind: paper
+- id: bixbench
+  title: BixBench 205 題評測（arXiv 2609.03871）
+  url: https://arxiv.org/html/2609.03871v2
+  accessed: 2026-10-19
+  kind: paper
+- id: biomnibench
+  title: BiomniBench（bioRxiv 2026.05.12.724604）：32,014 個真實 Biomni 使用者查詢
+  url: https://www.biorxiv.org/content/10.64898/2026.05.12.724604v1.full
+  accessed: 2026-10-19
+  kind: paper
+- id: tw-legalbench
+  title: TW-LegalBench（arXiv 2606.18699）：台灣法律評測
+  url: https://arxiv.org/html/2606.18699v1
+  accessed: 2026-10-19
+  kind: paper
+
+# Documents the absence of a measurement (final-review M20): the evidence of the 0 placeholders for t_fixed and the
+# per-request TTFT overhead on MLX and DGX Spark, which no source supports.
+- id: gh-issue-12-mac-spark-calibration
+  title: 本專案 GitHub issue #12「校正：Mac TTFT 誤差 +33.3%、Mac／DGX Spark 未量測的開銷與缺比對點」：記錄 Mac（MLX）與 DGX Spark 尚無每步固定開銷、首字開銷等實測，待國網量測
+  url: https://github.com/NCHC-bio/inference-deployment-calculator/issues/12
+  accessed: 2026-10-21
+  kind: internal
+- id: nchc-model-policy
+  title: 國網中心明確禁止在計算機集群使用紅色供應鏈模型
+  url: docs/superpowers/specs/2026-10-19-inference-calculator-design.md#22-模型限制
+  accessed: 2026-10-19
+  kind: internal
+
+# --- Hugging Face model configs (written by pnpm data:import; pinned to a commit) ---
+- id: hf:openai/gpt-oss-20b@6cee5e8
+  title: openai/gpt-oss-20b config.json、safetensors 參數量與權重檔大小（Hugging Face，commit
+    6cee5e8）
+  url: https://huggingface.co/openai/gpt-oss-20b/tree/6cee5e81ee83917806bbde320786a8fb61efebee
+  accessed: 2026-10-20
+  kind: official
+- id: hf:openai/gpt-oss-120b@b5c939d
+  title: openai/gpt-oss-120b config.json、safetensors 參數量與權重檔大小（Hugging Face，commit
+    b5c939d）
+  url: https://huggingface.co/openai/gpt-oss-120b/tree/b5c939de8f754692c1647ca79fbf85e8c1e70f8a
+  accessed: 2026-10-20
+  kind: official
+- id: hf:microsoft/phi-4@2db69c1
+  title: microsoft/phi-4 config.json 與 safetensors 參數量（Hugging Face，commit 2db69c1）
+  url: https://huggingface.co/microsoft/phi-4/tree/2db69c1c3e91a05d2c64a3185acfbaf36f744e25
+  accessed: 2026-10-20
+  kind: official
+- id: hf:mistralai/Mistral-Small-3.1-24B-Instruct-2503@68faf51
+  title: mistralai/Mistral-Small-3.1-24B-Instruct-2503 config.json 與 safetensors
+    參數量（Hugging Face，commit 68faf51）
+  url: https://huggingface.co/mistralai/Mistral-Small-3.1-24B-Instruct-2503/tree/68faf511d618ef198fef186659617cfd2eb8e33a
+  accessed: 2026-10-20
+  kind: official
+- id: hf:allenai/OLMo-2-0325-32B@cc9d3cf
+  title: allenai/OLMo-2-0325-32B config.json 與 safetensors 參數量（Hugging Face，commit
+    cc9d3cf）
+  url: https://huggingface.co/allenai/OLMo-2-0325-32B/tree/cc9d3cf9c7230b86ee6b84607b37db1c01e3f1ed
+  accessed: 2026-10-20
+  kind: official
+- id: hf:ibm-granite/granite-3.3-8b-instruct@51dd4bc
+  title: ibm-granite/granite-3.3-8b-instruct config.json 與 safetensors 參數量（Hugging
+    Face，commit 51dd4bc）
+  url: https://huggingface.co/ibm-granite/granite-3.3-8b-instruct/tree/51dd4bc2ade4059a6bd87649d68aa11e4fb2529b
+  accessed: 2026-10-20
+  kind: official
+- id: hf:google/gemma-4-12B-it@707f0a3
+  title: google/gemma-4-12B-it config.json 與 safetensors 參數量（Hugging Face，commit
+    707f0a3）
+  url: https://huggingface.co/google/gemma-4-12B-it/tree/707f0a3b8a3c7ad586ed01e27eafbad8a27dd0f7
+  accessed: 2026-10-20
+  kind: official
+- id: hf:google/gemma-4-31B-it@842da37
+  title: google/gemma-4-31B-it config.json 與 safetensors 參數量（Hugging Face，commit
+    842da37）
+  url: https://huggingface.co/google/gemma-4-31B-it/tree/842da3794eaa0b77d5f08bae87a17459d91ff475
+  accessed: 2026-10-20
+  kind: official
+- id: hf:google/gemma-4-26B-A4B-it@4d7ae49
+  title: google/gemma-4-26B-A4B-it config.json 與 safetensors 參數量（Hugging
+    Face，commit 4d7ae49）
+  url: https://huggingface.co/google/gemma-4-26B-A4B-it/tree/4d7ae4984b7db7de8f8457170b3f1a419ee76d52
+  accessed: 2026-10-20
+  kind: official
+- id: hf:meta-models/Muse-Glimmer-30B@a4e59da
+  title: meta-models/Muse-Glimmer-30B config.json 與 safetensors 參數量（Hugging
+    Face，commit a4e59da）
+  url: https://huggingface.co/meta-models/Muse-Glimmer-30B/tree/a4e59da52a7bc87ae7251dd5545c0dd437c44b68
+  accessed: 2026-10-20
+  kind: official
+- id: hf:ibm-granite/granite-4.2-30b@9e668ce
+  title: ibm-granite/granite-4.2-30b config.json 與 safetensors 參數量（Hugging
+    Face，commit 9e668ce）
+  url: https://huggingface.co/ibm-granite/granite-4.2-30b/tree/9e668ce1c538387ef24d3644e9b0606647762636
+  accessed: 2026-10-20
+  kind: official
+- id: hf:mistralai/Mistral-Medium-3.5-128B@22b2b86
+  title: mistralai/Mistral-Medium-3.5-128B config.json、safetensors
+    參數量與權重檔大小（Hugging Face，commit 22b2b86）
+  url: https://huggingface.co/mistralai/Mistral-Medium-3.5-128B/tree/22b2b868a15677cfa6061277ed2f653d1349a9ab
+  accessed: 2026-10-20
+  kind: official
+- id: hf:mistralai/Mistral-Small-4-119B-2603@a11f36b
+  title: mistralai/Mistral-Small-4-119B-2603 config.json、safetensors
+    參數量與權重檔大小（Hugging Face，commit a11f36b）
+  url: https://huggingface.co/mistralai/Mistral-Small-4-119B-2603/tree/a11f36bebf709121056b1dbcc943d1c6afbe494d
+  accessed: 2026-10-20
+  kind: official
+- id: hf:nvidia/Llama-3.3-70B-Instruct-FP8@fde04ee
+  title: nvidia/Llama-3.3-70B-Instruct-FP8 config.json、safetensors
+    參數量與權重檔大小（Hugging Face，commit fde04ee）
+  url: https://huggingface.co/nvidia/Llama-3.3-70B-Instruct-FP8/tree/fde04ee76a27704c88f569542ef023b57d4d0362
+  accessed: 2026-10-20
+  kind: official

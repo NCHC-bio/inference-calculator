@@ -1,0 +1,17 @@
+# Synthetic derived model (not a real model): a US publisher, with a base from an excluded country.
+# Only the publisher's country is checked, so this passes; the base is recorded.
+id: synthetic-us-derived
+name: Synthetic US derived
+hfRepo: example-us-lab/synthetic-derived
+origin: { developer: Example US Lab, country: US }
+baseModel: example-cn-lab/synthetic-base
+baseOrigin: { developer: Example CN Lab, country: CN }
+totalParamsB: { value: 8, status: official, source: fx-src, verified: 2026-10-19 }
+layers: 32
+heads: 32
+kvHeads: 8
+headDim: 128
+hidden: 4096
+attention: gqa
+source: fx-src
+verified: 2026-10-19

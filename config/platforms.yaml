@@ -1,0 +1,141 @@
+# Deployable platforms. ORDER MATTERS: a later tie-break uses file order, and the loader preserves it.
+# NCHC platforms are allocated per GPU (unit gpu); self-hosted machines per machine (unit machine, tp 1 only).
+# Multi-node / multi-machine sharding is out of scope for this plan.
+# vllmDefaults are vLLM v0.32.0 defaults, not NCHC's deployment settings; maxConcurrentBatches 2 assumes async scheduling
+# with PP = 1, which the verify command pins with --async-scheduling. Confirming NCHC's settings is GitHub issue #13.
+
+- id: nano4-h200
+  name: H200
+  sub: nano4
+  group: nchc
+  unit: gpu
+  hardware: h200-sxm
+  gpusPerNode: { value: 8, unit: GPU, status: official, source: nchc-nano4-iservice, verified: 2026-10-19 }
+  nodes: { value: 220, unit: node, status: official, source: nchc-nano4-iservice, verified: 2026-10-19 }
+  tpOptions: [1, 2, 4, 8]
+  calibration: nvidia-default
+  vllmDefaults:
+    maxNumSeqs: { value: 1024, status: derived, formula: 'vLLM v0.32.0 API server 預設：H200 141 GB ≈ 131 GiB，≥ 70 GiB、< 160 GiB 且非 A100 → max_num_seqs 1024', inputs: [vllm-v032-arg-utils, nvidia-h200], verified: 2026-10-20 }
+    maxNumBatchedTokens: { value: 8192, status: derived, formula: 'vLLM v0.32.0 API server 預設：H200 141 GB ≈ 131 GiB，≥ 70 GiB、< 160 GiB 且非 A100 → max_num_batched_tokens 8192', inputs: [vllm-v032-arg-utils, nvidia-h200], verified: 2026-10-20 }
+    maxConcurrentBatches: { value: 2, status: derived, formula: 'vLLM v0.32.0 預設開啟 async scheduling（沒有 pooling、不相容的 speculative decoding 或 PP > 1 時），PP = 1 → max_concurrent_batches = 2，max_in_flight_tokens = 2 × max_num_batched_tokens', inputs: [vllm-v032-vllm-config], verified: 2026-10-20 }
+    kvBlockSize: { value: 16, status: derived, formula: 'vLLM v0.32.0 CacheConfig.DEFAULT_BLOCK_SIZE = 16；未指定 --block-size 時取「所有 attention backend 都接受的最小 block」，Hopper（SM90）的預設 backend（FLASH_ATTN（FA3，MultipleOf(16)））接受 16 的倍數，所以維持 16', inputs: [vllm-v032-block-size, vllm-v032-block-size-backend, vllm-v032-cuda-backend-priority], verified: 2026-10-20 }
+    mlaKvBlockSize:
+      fp8Kv: { value: 64, status: derived, formula: 'Hopper（SM90）MLA backend 優先序 FLASH_ATTN_MLA → FLASHMLA → …；FLASH_ATTN_MLA 的 KV dtype 只有 auto／float16／bfloat16，FP8 KV 時落到 FLASHMLA（Hopper dense，接受 fp8），其 kernel block 只有 64，不接受 16 → 64', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+      bf16Kv: { value: 16, status: derived, formula: 'Hopper（SM90）MLA backend 優先序第一的 FLASH_ATTN_MLA 接受 16-bit KV，kernel block 為 MultipleOf(16)，接受預設 16 → 16', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+
+- id: nano5-h100
+  name: H100
+  sub: nano5
+  group: nchc
+  unit: gpu
+  hardware: h100-sxm
+  gpusPerNode: { value: 8, unit: GPU, status: official, source: nchc-nano5-page, verified: 2026-10-19 }
+  nodes: { value: 21, unit: node, status: official, source: nchc-nano5-page, verified: 2026-10-19 }
+  tpOptions: [1, 2, 4, 8]
+  calibration: nvidia-default
+  vllmDefaults:
+    maxNumSeqs: { value: 1024, status: derived, formula: 'vLLM v0.32.0 API server 預設：H100 80 GB（以十進位的 80e9 bytes 計約 74.5 GiB，裝置實際回報的總量只會更大），≥ 70 GiB、< 160 GiB 且非 A100 → max_num_seqs 1024', inputs: [vllm-v032-arg-utils, nvidia-h100], verified: 2026-10-20 }
+    maxNumBatchedTokens: { value: 8192, status: derived, formula: 'vLLM v0.32.0 API server 預設：H100 80 GB（以十進位的 80e9 bytes 計約 74.5 GiB，裝置實際回報的總量只會更大），≥ 70 GiB、< 160 GiB 且非 A100 → max_num_batched_tokens 8192', inputs: [vllm-v032-arg-utils, nvidia-h100], verified: 2026-10-20 }
+    maxConcurrentBatches: { value: 2, status: derived, formula: 'vLLM v0.32.0 預設開啟 async scheduling（沒有 pooling、不相容的 speculative decoding 或 PP > 1 時），PP = 1 → max_concurrent_batches = 2，max_in_flight_tokens = 2 × max_num_batched_tokens', inputs: [vllm-v032-vllm-config], verified: 2026-10-20 }
+    kvBlockSize: { value: 16, status: derived, formula: 'vLLM v0.32.0 CacheConfig.DEFAULT_BLOCK_SIZE = 16；未指定 --block-size 時取「所有 attention backend 都接受的最小 block」，Hopper（SM90）的預設 backend（FLASH_ATTN（FA3，MultipleOf(16)））接受 16 的倍數，所以維持 16', inputs: [vllm-v032-block-size, vllm-v032-block-size-backend, vllm-v032-cuda-backend-priority], verified: 2026-10-20 }
+    mlaKvBlockSize:
+      fp8Kv: { value: 64, status: derived, formula: 'Hopper（SM90）MLA backend 優先序 FLASH_ATTN_MLA → FLASHMLA → …；FLASH_ATTN_MLA 的 KV dtype 只有 auto／float16／bfloat16，FP8 KV 時落到 FLASHMLA（Hopper dense，接受 fp8），其 kernel block 只有 64，不接受 16 → 64', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+      bf16Kv: { value: 16, status: derived, formula: 'Hopper（SM90）MLA backend 優先序第一的 FLASH_ATTN_MLA 接受 16-bit KV，kernel block 為 MultipleOf(16)，接受預設 16 → 16', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+
+- id: nano5-h200
+  name: H200
+  sub: nano5
+  group: nchc
+  unit: gpu
+  hardware: h200-sxm
+  gpusPerNode: { value: 8, unit: GPU, status: official, source: nchc-nano5-page, verified: 2026-10-19 }
+  nodes: { value: 16, unit: node, status: official, source: nchc-nano5-page, verified: 2026-10-19 }
+  tpOptions: [1, 2, 4, 8]
+  calibration: nvidia-default
+  scheduling: Slurm partition normal2
+  vllmDefaults:
+    maxNumSeqs: { value: 1024, status: derived, formula: 'vLLM v0.32.0 API server 預設：H200 141 GB ≈ 131 GiB，≥ 70 GiB、< 160 GiB 且非 A100 → max_num_seqs 1024', inputs: [vllm-v032-arg-utils, nvidia-h200], verified: 2026-10-20 }
+    maxNumBatchedTokens: { value: 8192, status: derived, formula: 'vLLM v0.32.0 API server 預設：H200 141 GB ≈ 131 GiB，≥ 70 GiB、< 160 GiB 且非 A100 → max_num_batched_tokens 8192', inputs: [vllm-v032-arg-utils, nvidia-h200], verified: 2026-10-20 }
+    maxConcurrentBatches: { value: 2, status: derived, formula: 'vLLM v0.32.0 預設開啟 async scheduling（沒有 pooling、不相容的 speculative decoding 或 PP > 1 時），PP = 1 → max_concurrent_batches = 2，max_in_flight_tokens = 2 × max_num_batched_tokens', inputs: [vllm-v032-vllm-config], verified: 2026-10-20 }
+    kvBlockSize: { value: 16, status: derived, formula: 'vLLM v0.32.0 CacheConfig.DEFAULT_BLOCK_SIZE = 16；未指定 --block-size 時取「所有 attention backend 都接受的最小 block」，Hopper（SM90）的預設 backend（FLASH_ATTN（FA3，MultipleOf(16)））接受 16 的倍數，所以維持 16', inputs: [vllm-v032-block-size, vllm-v032-block-size-backend, vllm-v032-cuda-backend-priority], verified: 2026-10-20 }
+    mlaKvBlockSize:
+      fp8Kv: { value: 64, status: derived, formula: 'Hopper（SM90）MLA backend 優先序 FLASH_ATTN_MLA → FLASHMLA → …；FLASH_ATTN_MLA 的 KV dtype 只有 auto／float16／bfloat16，FP8 KV 時落到 FLASHMLA（Hopper dense，接受 fp8），其 kernel block 只有 64，不接受 16 → 64', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+      bf16Kv: { value: 16, status: derived, formula: 'Hopper（SM90）MLA backend 優先序第一的 FLASH_ATTN_MLA 接受 16-bit KV，kernel block 為 MultipleOf(16)，接受預設 16 → 16', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+
+- id: nano4-gb200
+  name: GB200
+  sub: nano4
+  group: nchc
+  unit: gpu
+  hardware: gb200
+  # Not stated directly by NCHC: 72 GPU per NVL72 rack / 18 compute nodes per rack.
+  gpusPerNode: { value: 4, unit: GPU, status: derived, formula: '72 GPU / 18 node per rack', inputs: [nchc-nano4-manual], verified: 2026-10-19 }
+  nodes: { value: 36, unit: node, status: official, source: nchc-nano4-manual, verified: 2026-10-19 }
+  tpOptions: [1, 2, 4]
+  calibration: nvidia-default
+  # Platform-level override of the calibration profile: GB200 4-GPU small-message NCCL ring AllReduce.
+  # Ruling R23 (spec §5.4): valid only at p = 4 GPUs, the count it was measured at. TP=2 slightly overestimates;
+  # if TP=8 or cross-node is enabled later, add a separate value measured at that GPU count.
+  allreduceLatencyUs: { value: 11.0, unit: µs, status: measured, source: arxiv-2607.16100, verified: 2026-10-19 }
+  vllmDefaults:
+    maxNumSeqs: { value: 1024, status: derived, formula: 'vLLM v0.32.0 API server 預設：GB200 每 GPU 186 GB ≈ 173 GiB，≥ 160 GiB → max_num_seqs 1024', inputs: [vllm-v032-arg-utils, nvidia-gb200-nvl72], verified: 2026-10-20 }
+    maxNumBatchedTokens: { value: 16384, status: derived, formula: 'vLLM v0.32.0 API server 預設：GB200 每 GPU 186 GB ≈ 173 GiB，≥ 160 GiB → max_num_batched_tokens 16384', inputs: [vllm-v032-arg-utils, nvidia-gb200-nvl72], verified: 2026-10-20 }
+    maxConcurrentBatches: { value: 2, status: derived, formula: 'vLLM v0.32.0 預設開啟 async scheduling（沒有 pooling、不相容的 speculative decoding 或 PP > 1 時），PP = 1 → max_concurrent_batches = 2，max_in_flight_tokens = 2 × max_num_batched_tokens', inputs: [vllm-v032-vllm-config], verified: 2026-10-20 }
+    kvBlockSize: { value: 16, status: derived, formula: 'vLLM v0.32.0 CacheConfig.DEFAULT_BLOCK_SIZE = 16；未指定 --block-size 時取「所有 attention backend 都接受的最小 block」，Blackwell（SM100）的預設 backend（FLASHINFER（16／32／64））接受 16 的倍數，所以維持 16', inputs: [vllm-v032-block-size, vllm-v032-block-size-backend, vllm-v032-cuda-backend-priority], verified: 2026-10-20 }
+    mlaKvBlockSize:
+      fp8Kv: { value: 32, status: derived, formula: 'Blackwell（SM100）MLA backend 優先序第一為 FLASHINFER_MLA（接受 fp8 KV；要求 qk_nope_head_dim ∈ {64, 128, 192}），kernel block 為 32 或 64，不接受 16 → 取最小 32', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+      bf16Kv: { value: 32, status: derived, formula: 'Blackwell（SM100）MLA backend 優先序第一為 FLASHINFER_MLA（接受 16-bit KV；要求 qk_nope_head_dim ∈ {64, 128, 192}），kernel block 為 32 或 64，不接受 16 → 取最小 32', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+      # final-review M26: FLASHINFER_MLA refuses other qk_nope_head_dim values (flashinfer_mla.py L228-L250); vLLM then
+      # tries TOKENSPEED_MLA (DeepSeek R1 dims only, so it refuses them too) and CUTLASS_MLA (block 128) (cuda.py L120-L131).
+      qkNopeHeadDims: [64, 128, 192]
+      otherwise:
+        fp8Kv: { value: 128, status: derived, formula: 'qk_nope_head_dim 不在 {64, 128, 192} 時 FLASHINFER_MLA 不接受；SM100 優先序下一個 TOKENSPEED_MLA 只接受 DeepSeek R1 維度（qk_nope 128、qk_rope 64、v 128，而 128 在集合內，所以不會走到這裡）且只支援 fp8 KV；再下一個 CUTLASS_MLA（SM100，接受 fp8／16-bit KV）kernel block 只有 128 → 128', inputs: [vllm-v032-cutlass-mla, vllm-v032-cuda-backend-priority, vllm-v032-mla-backends], verified: 2026-10-21 }
+        bf16Kv: { value: 128, status: derived, formula: 'qk_nope_head_dim 不在 {64, 128, 192} 時 FLASHINFER_MLA 不接受；TOKENSPEED_MLA 只支援 fp8 KV 與 DeepSeek R1 維度；CUTLASS_MLA（SM100，接受 16-bit KV）kernel block 只有 128 → 128', inputs: [vllm-v032-cutlass-mla, vllm-v032-cuda-backend-priority, vllm-v032-mla-backends], verified: 2026-10-21 }
+
+- id: mac-studio-m5u-512
+  name: Mac Studio
+  sub: M5 Ultra 512GB
+  group: self
+  unit: machine
+  hardware: m5-ultra-512
+  gpusPerNode: { value: 1, unit: machine, status: official, source: apple-mac-studio-specs, verified: 2026-10-19 }
+  tpOptions: [1]
+  calibration: mac-mlx
+
+- id: dgx-spark
+  name: DGX Spark
+  sub: GB10 128GB
+  group: self
+  unit: machine
+  hardware: gb10-spark
+  gpusPerNode: { value: 1, unit: machine, status: official, source: nvidia-dgx-spark, verified: 2026-10-19 }
+  tpOptions: [1]
+  calibration: spark-default
+  vllmDefaults:
+    maxNumSeqs: { value: 1024, status: estimate, basis: '依 vLLM v0.32.0 的記憶體規則，以 128 GB ≈ 119 GiB（≥ 70 GiB、< 160 GiB、非 A100）推得 1024／8192；GB10 是統一記憶體，NVML 回報的 total 未在 Spark 上實測', evidence: [vllm-v032-arg-utils, nvidia-dgx-spark], verified: 2026-10-20 }
+    maxNumBatchedTokens: { value: 8192, status: estimate, basis: '依 vLLM v0.32.0 的記憶體規則，以 128 GB ≈ 119 GiB（≥ 70 GiB、< 160 GiB、非 A100）推得 1024／8192；GB10 是統一記憶體，NVML 回報的 total 未在 Spark 上實測', evidence: [vllm-v032-arg-utils, nvidia-dgx-spark], verified: 2026-10-20 }
+    maxConcurrentBatches: { value: 2, status: derived, formula: 'vLLM v0.32.0 預設開啟 async scheduling（沒有 pooling、不相容的 speculative decoding 或 PP > 1 時），PP = 1 → max_concurrent_batches = 2，max_in_flight_tokens = 2 × max_num_batched_tokens', inputs: [vllm-v032-vllm-config], verified: 2026-10-20 }
+    kvBlockSize: { value: 16, status: derived, formula: 'vLLM v0.32.0 CacheConfig.DEFAULT_BLOCK_SIZE = 16；未指定 --block-size 時取「所有 attention backend 都接受的最小 block」，GB10（SM 12.x）的預設 backend（FLASH_ATTN（FA2，MultipleOf(16)））接受 16 的倍數，所以維持 16', inputs: [vllm-v032-block-size, vllm-v032-block-size-backend, vllm-v032-cuda-backend-priority], verified: 2026-10-20 }
+    mlaKvBlockSize:
+      fp8Kv: { value: 16, status: derived, formula: 'GB10（compute capability 12.x）的 MLA backend 優先序第一為 TRITON_MLA（接受 fp8 KV），kernel block 為 MultipleOf(16)，接受預設 16 → 16', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+      bf16Kv: { value: 16, status: derived, formula: 'GB10（compute capability 12.x）的 MLA backend 優先序第一為 TRITON_MLA（接受 16-bit KV），kernel block 為 MultipleOf(16)，接受預設 16 → 16', inputs: [vllm-v032-mla-backends, vllm-v032-cuda-backend-priority, vllm-v032-block-size-backend], verified: 2026-10-20 }
+
+- id: mac-mini-m5pro-64
+  name: Mac mini
+  sub: M5 Pro 64GB
+  group: self
+  unit: machine
+  hardware: m5-pro-64
+  gpusPerNode: { value: 1, unit: machine, status: official, source: apple-mac-mini-specs, verified: 2026-10-19 }
+  tpOptions: [1]
+  calibration: mac-mini-mlx
+
+- id: mac-mini-m6-32
+  name: Mac mini
+  sub: M6 32GB
+  group: self
+  unit: machine
+  hardware: m6-32
+  gpusPerNode: { value: 1, unit: machine, status: official, source: apple-mac-mini-specs, verified: 2026-10-19 }
+  tpOptions: [1]
+  calibration: mac-mini-mlx

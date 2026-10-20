@@ -1,0 +1,41 @@
+excludedCountries: [CN, HK, MO]
+excludedOrgs:
+  - { org: Qwen, country: CN }
+  - { org: deepseek-ai, country: CN }
+  - { org: moonshotai, country: CN }
+  - { org: THUDM, country: CN }
+  - { org: zai-org, country: CN }
+  - { org: baichuan-inc, country: CN }
+  - { org: 01-ai, country: CN }
+  - { org: internlm, country: CN }
+  - { org: MiniMaxAI, country: CN }
+  - { org: tencent, country: CN }
+  - { org: baidu, country: CN }
+  - { org: ByteDance, country: CN }
+  - { org: ByteDance-Seed, country: CN }
+  - { org: stepfun-ai, country: CN }
+  - { org: XiaomiMiMo, country: CN }
+  - { org: inclusionAI, country: CN }
+  - { org: OpenGVLab, country: CN }
+  - { org: openbmb, country: CN }
+  - { org: BAAI, country: CN }
+  - { org: Skywork, country: CN }
+  - { org: Kwaipilot, country: CN }
+  - { org: Kwai-Kolors, country: CN }
+  - { org: PaddlePaddle, country: CN }
+  - { org: Alibaba-NLP, country: CN }
+  - { org: meituan-longcat, country: CN }
+  - { org: Tencent-Hunyuan, country: CN }
+  - { org: xverse, country: CN }
+  - { org: zhipuai, country: CN }
+  - { org: FreedomIntelligence, country: CN }
+  - { org: hkunlp, country: HK }
+  - { org: hkust-nlp, country: HK }
+  - { org: HKUSTAudio, country: HK }
+  - { org: hkuds, country: HK }
+  - { org: PolyU-ChenLab, country: HK }
+  - { org: SenseTime, country: HK }
+  - { org: sensenova, country: HK }
+decision:
+  value: 國網中心明確禁止在計算機集群使用紅色供應鏈模型
+  source: nchc-model-policy

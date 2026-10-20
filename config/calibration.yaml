@@ -1,0 +1,1262 @@
+# Calibration profiles (platform × engine efficiency factors) and calibration data points.
+# etaBw / etaBwLow give the expected / conservative bandwidth efficiency; the pair is the source of result ranges.
+#
+# Calibration decision 2026-10-20 (Ruling R41, spec §5.6; R30: values are set from declared fit points only, validate
+# points judge). NVIDIA fit set: InferenceX H200 TP=1 1k/1k c=4, gpt-oss-120b MXFP4 and Llama-3.3-70B-Instruct-FP8
+# (decode + TTFT); 36 other H100/H200 points validate. Decode structures compared (fit on the two decode fit points):
+#   (0) as before (η_bw 0.70, t_fixed 0): validate decode mean |err| 76%, 5 of 18 within ±25%;
+#   (a) constant per-step t_fixed 2.9 ms, η unchanged: 15% mean, 16 of 18 (out: gpt-oss 8k/1k c=32 +35%, c=64 +65%);
+#   (b) per-layer t_fixed = layers × 69 µs: 17%, 15 of 18 (TP-scaled Llama −18..−23%);
+#   (c) joint η_bw 0.835 + t_fixed 3.6 ms: 19%, 16 of 18 (high-TP gpt-oss −16..−24%, c=64 +86%);
+#   (c') joint η_bw + per-layer τ: needs η_bw 1.34 > 1, unphysical;
+#   (d) MXFP4-expert-only η 0.29, t_fixed 0: 34%, 11 of 18 (cannot reproduce the TP floor: TP=8 +93..+132%).
+#   Chosen: (a). Best validate residuals, one parameter, η unchanged, and physical: vLLM decode runs as one CUDA graph,
+#   so what does not shrink with TP or the model is the per-step host work (scheduling, input preparation, sampling,
+#   output processing) plus the graph's serial kernel chain; the TP=8 floor (~3.7 ms for both models) shows it.
+# TTFT: a per-request overhead ttftOverheadSec 74 ms (fit on the two TTFT fit points, both within 2%: gpt-oss −0.3%, Llama +1.4%) is added; it
+#   brings validate TTFT from 66% mean |err| (1 of 18 within ±25%, all under-predicted) to 54% (3 of 18), but
+#   over-predicts short prompts at TP ≥ 2 (+22..+111%) and still under-predicts 8k prompts (−13..−54%) and high
+#   concurrency (mean TTFT includes the burst at the start). The validate points look like c + k / TP with c ≈ 30-40 ms
+#   and a model-specific prefill efficiency; two TTFT fit points cannot identify that, so it is left to issue #10.
+#   A single η_compute (0.18) or per-format η_compute (MXFP4 0.09 / FP8 0.32) fitted on the same points did worse on
+#   8k prompts and dense TTFT, and was not adopted. η_bw, η_bw,low and η_compute are unchanged.
+# MLX and DGX Spark profiles keep t_fixed and the TTFT overhead at 0: the fit points are NVIDIA vLLM ones.
+
+profiles:
+  - id: nvidia-default
+    engine: vllm
+    etaBw: { value: 0.70, status: estimate, basis: 尚未以國網實測校正, evidence: [martin-alderson-speed, apple-mlx-distributed], verified: 2026-10-19 }
+    etaBwLow: { value: 0.55, status: estimate, basis: 尚未以國網實測校正, evidence: [martin-alderson-speed, apple-mlx-distributed], verified: 2026-10-19 }
+    etaCompute: { value: 0.50, status: estimate, basis: 尚未以國網實測校正, evidence: [martin-alderson-speed, apple-mlx-distributed], verified: 2026-10-19 }
+    # vLLM v0.32.0 default gpu_memory_utilization (v0.10.0 was 0.9); the verify command pins it. vLLM budgets
+    # ceil(cudaMemGetInfo total × util), the calculator memGB (vendor decimal GB) × util: spec §5.1 known simplification.
+    memUtil: { value: 0.92, status: official, source: vllm-v032-cache-config, verified: 2026-10-20 }
+    # Ruling R23 (spec §5.4): this whole small-message all-reduce time is valid only at the GPU count it was measured
+    # at (p = 4, GB200 NCCL ring). TP=2 slightly overestimates (2 α instead of 6); TP=8 or cross-node needs a
+    # separate value measured there. H100/H200 platforms already offer tp 8, which extrapolates this 4-GPU value.
+    # Ruling R41 (2026-10-20): kept. The H100/H200 small-message numbers disagree (H100 4-GPU nccl-tests 16-23 µs vs H200
+    # 4.7-8.9 µs, GPU count unknown); the TP=2/4/8 validate points are within ±25% at 11 µs and drift to −14..−28% at
+    # 16-23 µs, which leans to ≤ 11 µs (vLLM's custom all-reduce, not NCCL, for small NVLink messages), but validate
+    # points do not set values (R30). Left to NCHC nccl-tests at p = 2, 4, 8 (issue #10).
+    allreduceLatencyUs: { value: 11.0, unit: µs, status: estimate, basis: '取 GB200 NCCL ring 4-GPU 小訊息實測。H100／H200 的公開數字互相矛盾（H100 4-GPU nccl-tests 8 B：eager 22.7 µs、CUDA graph 16.1 µs；H200 論文 4.7–8.9 µs，GPU 數未寫明），不採用；InferenceX TP=2／4／8 的 validate 點在 11 µs 時都在 ±25% 內，改用 16–23 µs 會系統性低估 14–28%（Ruling R41），但 validate 點不用來設定數值，待國網以 nccl-tests 在 p = 2、4、8 量測（GitHub issue #10）', evidence: [arxiv-2607.16100, nccl-collectives-bench-h100, arxiv-2606.05951], verified: 2026-10-20 }
+    # Ruling R41: fitted on the two decode fit points (η_bw 0.70 unchanged). Also applies to nano4-gb200 (same profile):
+    # an extrapolation, GB200 has no vLLM measurement (issue #11).
+    tFixedSec: { value: 0.0029, unit: s, status: derived, formula: 'η_bw 0.70 不變，以兩個 decode fit 點做對數最小平方：min Σ ln²((t_step⁰ + t_fixed) ÷ 實測 TPOT)，t_step⁰ = 計算機 t_fixed = 0 時的每步時間（H200 TP1 c4 922/922：gpt-oss-120b 3.22 ms 對實測 6.342 ms、Llama-3.3-70B-FP8 21.27 ms 對實測 21.47 ms）→ 2.925 ms → 0.0029 s（Ruling R41）', inputs: [ix-h200-gptoss-mxfp4-tp1-1k1k-c4, ix-h200-llama70b-fp8-tp1-1k1k-c4], verified: 2026-10-20 }
+    # Ruling R41: fitted on the two TTFT fit points with t_fixed 0.0029; once per request.
+    ttftOverheadSec: { value: 0.074, unit: s, status: derived, formula: 't_fixed = 0.0029 s 下，以兩個 TTFT fit 點做對數最小平方：min Σ ln²((TTFT⁰ + t_req) ÷ 實測 TTFT)，TTFT⁰ = 計算機不含每請求開銷的 TTFT（gpt-oss-120b 0.0220 s 對實測 0.0963 s、Llama-3.3-70B-FP8 0.1316 s 對實測 0.2028 s）→ 73.5 ms → 0.074 s（Ruling R41）', inputs: [ix-h200-gptoss-mxfp4-tp1-1k1k-c4-ttft, ix-h200-llama70b-fp8-tp1-1k1k-c4-ttft], verified: 2026-10-20 }
+
+  - id: mac-mlx
+    engine: mlx
+    # Only the catalog-model row of the Apple MLX table is used (Mistral Medium 3.5 128B FP8 @ 8K): decode tok/s × the
+    # bytes the calculator's decode step reads (weights + the KV cache at the average decode context) ÷ nominal bandwidth.
+    # See docs/research/apple-silicon.md §4. Still circular: the fit point below is this same decode figure.
+    etaBw: { value: 0.86, status: derived, formula: 'M5 Ultra、MLX、Mistral Medium 3.5 128B FP8 @ 8K：7.70 tok/s × 133.37 GB ÷ 1.2 TB/s ≈ 0.856 → 0.86。133.37 GB = 133.61 GB（原生 FP8 checkpoint 權重檔大小）− 3.22 GB（不共用的 BF16 輸入 embedding 131072 × 12288 × 2 bytes，每步只讀 1 列 24576 bytes，Ruling R39）+ 2.98 GB KV（2 × 88 層 × 8 KV 頭 × 128 × 2 bytes（MLX fp16 KV）× 8256 token，8192 輸入 + 128 輸出 ÷ 2），與計算機 decode 每步讀取量一致。2026-10-20 重算三次：0.82 → 0.86（原生權重大小）→ 0.88（加入 KV 讀取，審查 L11，即 136.58 GB）→ 0.86（輸入 embedding 只讀查到的列）', inputs: [apple-mlx-distributed, apple-mac-studio-specs], verified: 2026-10-20 }
+    etaBwLow: { value: 0.81, status: derived, formula: 'M3 Ultra（上一代）、MLX、Mistral Medium 3.5 128B FP8 @ 8K：4.95 tok/s × 133.37 GB（133.61 GB 權重 − 3.22 GB 只讀 1 列的輸入 embedding + 2.98 GB fp16 KV，同 etaBw）÷ 819 GB/s ≈ 0.806 → 0.81（2026-10-20 重算：0.77 → 0.81 原生權重大小 → 0.83 加入 KV 讀取（審查 L11，136.58 GB）→ 0.81 輸入 embedding 只讀查到的列，Ruling R39）', inputs: [apple-mlx-distributed], verified: 2026-10-20 }
+    # Apple `effective` TFLOPS is already a measured achievable rate, so no further efficiency factor.
+    etaCompute: { value: 1.0, status: derived, formula: 'effective 已是實測（llama.cpp pp512 推算），不再乘效率：1.0', inputs: [llamacpp-4167], verified: 2026-10-19 }
+    # No official source: Apple does not publish the default GPU wired-memory limit (Metal recommendedMaxWorkingSetSize).
+    memUtil: { value: 0.75, status: estimate, basis: '0.75 取自 Apple 開發者論壇一位使用者的說法（「Apple 預設 GPU 可用上限約為實體記憶體 75%」）；Apple 未公布此比例，沒有任何官方來源明載。mac-llm-calculator 只說 macOS 約保留 3 GB，不支持 75% 這個數字', evidence: [apple-forum-max-working-set, mac-llm-calculator], verified: 2026-10-19 }
+    # Mac platforms are single-machine tp=1 in this plan, so there is no all-reduce.
+    allreduceLatencyUs: { value: 0, unit: µs, status: derived, formula: '單機 tp=1，沒有 all-reduce：0', inputs: [apple-mac-studio-specs, apple-mac-mini-specs], verified: 2026-10-19 }
+    tFixedSec: { value: 0, unit: s, status: estimate, basis: 'unmeasured placeholder（未量測的佔位值）：0 只表示不加每步固定開銷，沒有任何來源支持 0；Ruling R41 的 2.9 ms 是 NVIDIA vLLM 的擬合，不適用此引擎／平台。待國網量測（GitHub issue #12）', evidence: [gh-issue-12-mac-spark-calibration], verified: 2026-10-21 }
+    ttftOverheadSec: { value: 0, unit: s, status: estimate, basis: 'unmeasured placeholder（未量測的佔位值）：0 只表示不加每個請求的首字開銷，沒有任何來源支持 0；Ruling R41 的 74 ms 是 NVIDIA vLLM 的擬合，不適用此引擎／平台。待國網量測（GitHub issue #12）', evidence: [gh-issue-12-mac-spark-calibration], verified: 2026-10-21 }
+    # Ruling R32: MLX keeps the KV cache in the model's activation dtype regardless of the weight quantization
+    # (no FP8 KV cache like vLLM's --kv-cache-dtype fp8). docs/research/apple-silicon.md §4 "KV cache dtype".
+    kvBytesPerElemOverride: { value: 2, unit: B, status: derived, formula: 'mlx-lm KVCache 以 keys／values 的 dtype 配置（模型激活 dtype，fp16／bf16 = 2 bytes）；mlx_lm.server --kv-bits 預設 None，不量化 KV：2', inputs: [mlx-lm-kv-cache, mlx-lm-server-kv-bits], verified: 2026-10-19 }
+    # mlx-lm KVCache grows in steps of 256 tokens (full / MLA layers hold ceil(ctx / 256) × 256); RotatingKVCache (sliding
+    # layers) grows by the same step up to the window and then keeps exactly the window (spec §5.1).
+    mlxDefaults:
+      kvCacheStep: { value: 256, unit: token, status: official, source: mlx-lm-kv-cache-step, verified: 2026-10-20 }
+      # mlx_lm.server --prefill-step-size (default 2048): a prompt runs in chunks of it, each re-reading the weights (Ruling R38).
+      prefillStepSize: { value: 2048, unit: token, status: official, source: mlx-lm-prefill-step, verified: 2026-10-20 }
+
+  - id: mac-mini-mlx
+    engine: mlx
+    # Mac mini (M5 Pro / M6): no Mac mini MLX measurement exists, so the bandwidth efficiency borrows the Mac Studio
+    # M5 Ultra / M3 Ultra values and is an estimate, not derived (docs/research/dgx-spark-mac-mini.md §頻寬效率; review).
+    etaBw: { value: 0.86, status: estimate, basis: '沿用 Mac Studio M5 Ultra 的 MLX 推算值（mac-mlx.etaBw 0.86，含 KV 讀取、輸入 embedding 只讀查到的列）；Mac mini 沒有 MLX 實測，晶片與記憶體組態不同', evidence: [apple-mlx-distributed, apple-mac-mini-specs], verified: 2026-10-20 }
+    etaBwLow: { value: 0.81, status: estimate, basis: '沿用 M3 Ultra 的 MLX 推算值（mac-mlx.etaBwLow 0.81，含 KV 讀取、輸入 embedding 只讀查到的列）；Mac mini 沒有 MLX 實測', evidence: [apple-mlx-distributed, apple-mac-mini-specs], verified: 2026-10-20 }
+    etaCompute: { value: 1.0, status: derived, formula: 'effective 已是實測（llama.cpp pp512 推算），不再乘效率：1.0', inputs: [llamacpp-4167], verified: 2026-10-20 }
+    memUtil: { value: 0.75, status: estimate, basis: '同 mac-mlx：0.75 取自 Apple 開發者論壇一位使用者的說法；Apple 未公布此比例', evidence: [apple-forum-max-working-set, mac-llm-calculator], verified: 2026-10-20 }
+    allreduceLatencyUs: { value: 0, unit: µs, status: derived, formula: '單機 tp=1，沒有 all-reduce：0', inputs: [apple-mac-mini-specs], verified: 2026-10-20 }
+    tFixedSec: { value: 0, unit: s, status: estimate, basis: 'unmeasured placeholder（未量測的佔位值）：0 只表示不加每步固定開銷，沒有任何來源支持 0；Ruling R41 的 2.9 ms 是 NVIDIA vLLM 的擬合，不適用此引擎／平台。待國網量測（GitHub issue #12）', evidence: [gh-issue-12-mac-spark-calibration], verified: 2026-10-21 }
+    ttftOverheadSec: { value: 0, unit: s, status: estimate, basis: 'unmeasured placeholder（未量測的佔位值）：0 只表示不加每個請求的首字開銷，沒有任何來源支持 0；Ruling R41 的 74 ms 是 NVIDIA vLLM 的擬合，不適用此引擎／平台。待國網量測（GitHub issue #12）', evidence: [gh-issue-12-mac-spark-calibration], verified: 2026-10-21 }
+    kvBytesPerElemOverride: { value: 2, unit: B, status: derived, formula: 'mlx-lm KVCache 以 keys／values 的 dtype 配置（模型激活 dtype，fp16／bf16 = 2 bytes）；mlx_lm.server --kv-bits 預設 None，不量化 KV：2', inputs: [mlx-lm-kv-cache, mlx-lm-server-kv-bits], verified: 2026-10-20 }
+    # mlx-lm KVCache grows in steps of 256 tokens (full / MLA layers hold ceil(ctx / 256) × 256); RotatingKVCache (sliding
+    # layers) grows by the same step up to the window and then keeps exactly the window (spec §5.1).
+    mlxDefaults:
+      kvCacheStep: { value: 256, unit: token, status: official, source: mlx-lm-kv-cache-step, verified: 2026-10-20 }
+      prefillStepSize: { value: 2048, unit: token, status: official, source: mlx-lm-prefill-step, verified: 2026-10-20 }
+
+  - id: spark-default
+    engine: vllm
+    etaBw: { value: 0.68, status: derived, formula: '23.2 tok/s × 8.03 GB ÷ 273 GB/s', inputs: [storagereview-dgx-spark], verified: 2026-10-19 }
+    etaBwLow: { value: 0.55, status: estimate, basis: '保守頻寬效率比照 NVIDIA 預設（nvidia-default 的 etaBwLow 0.55）；Spark 只有單一實測點，無法推算保守值', evidence: [storagereview-dgx-spark], verified: 2026-10-19 }
+    etaCompute: { value: 0.8, status: estimate, basis: 'MAMF 已是實測的可達矩陣算力，0.8 用來涵蓋非矩陣運算開銷', evidence: [storagereview-dgx-spark], verified: 2026-10-19 }
+    # vLLM v0.32.0 default gpu_memory_utilization (v0.10.0 was 0.9); the verify command pins it. vLLM budgets
+    # ceil(cudaMemGetInfo total × util), the calculator memGB (vendor decimal GB) × util: spec §5.1 known simplification.
+    memUtil: { value: 0.92, status: official, source: vllm-v032-cache-config, verified: 2026-10-20 }
+    allreduceLatencyUs: { value: 0, unit: µs, status: derived, formula: '單機 tp=1，沒有 all-reduce：0', inputs: [nvidia-dgx-spark], verified: 2026-10-19 }
+    tFixedSec: { value: 0, unit: s, status: estimate, basis: 'unmeasured placeholder（未量測的佔位值）：0 只表示不加每步固定開銷，沒有任何來源支持 0；Ruling R41 的 2.9 ms 是 NVIDIA vLLM 的擬合，不適用此引擎／平台。待國網量測（GitHub issue #12）', evidence: [gh-issue-12-mac-spark-calibration], verified: 2026-10-21 }
+    ttftOverheadSec: { value: 0, unit: s, status: estimate, basis: 'unmeasured placeholder（未量測的佔位值）：0 只表示不加每個請求的首字開銷，沒有任何來源支持 0；Ruling R41 的 74 ms 是 NVIDIA vLLM 的擬合，不適用此引擎／平台。待國網量測（GitHub issue #12）', evidence: [gh-issue-12-mac-spark-calibration], verified: 2026-10-21 }
+
+# Calibration / validation data points (spec §10.1). Points reference catalog models.
+# role fit: the point was used to set η (reported only, never a warning); role validate: an independent check.
+# tp: the tensor-parallel size the benchmark ran; the prediction is evaluated at it and at B = concurrency (closed loop,
+# with the R36 queueing), not at the calculator's own shape. conditions: engine version, flags, environment, length
+# sampling (uniform → the workload holds the mean), run link and every deviation from what the calculator models.
+# Do NOT tune η to make points fit; changing η is a separate calibration decision based on fit points.
+points:
+  # Apple ML Research, MLX distributed inference: M5 Ultra 512GB, single machine, 8K prompt, 128 generated tokens.
+  # docs/research/apple-silicon.md §3 table (decode tok/s with TTFT in brackets). NOTE: mac-mlx.etaBw (0.86) was derived
+  # from this same decode figure, so this fit point is circular by construction.
+  - id: apple-m5u-mistral128b-fp8-8k
+    role: fit
+    platform: mac-studio-m5u-512
+    model: mistral-medium-3.5-128b
+    quant: fp8
+    workload: { inputTokens: 8192, outputTokens: 128, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 1
+    metric: decodeTokPerSec
+    measured: { value: 7.70, unit: tok/s, status: measured, source: apple-mlx-distributed, verified: 2026-10-19 }
+    engine: mlx
+  - id: apple-m5u-mistral128b-fp8-8k-ttft
+    role: validate
+    platform: mac-studio-m5u-512
+    model: mistral-medium-3.5-128b
+    quant: fp8
+    workload: { inputTokens: 8192, outputTokens: 128, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 1
+    metric: ttftSec
+    measured: { value: 24.6, unit: s, status: measured, source: apple-mlx-distributed, verified: 2026-10-19 }
+    engine: mlx
+
+  # --- NVIDIA H100 / H200: SemiAnalysis InferenceX public raw results (docs/research/nvidia-calibration-candidates.md) ---
+  # Retrieved 2026-10-20 from GET https://inferencex.semianalysis.com/api/v1/benchmarks (per-run, exactRun=true).
+  # decodeTokPerSec = 1 / mean TPOT (per-request TPOT averaged over the run); ttftSec = mean TTFT. Lengths: each request's
+  # input and output are drawn uniformly from [floor(0.8 L), L]; the workload holds the mean (922 for 1k, 7373 for 8k).
+  # FIT SET (Ruling R41, declared before any value was fitted): the H200 TP=1 1k/1k c=4 points of gpt-oss-120b (MXFP4
+  # MoE) and of Llama-3.3-70B-Instruct-FP8 (dense FP8), decode and TTFT. Why: TP=1 has no all-reduce (its latency is
+  # itself uncertain), c=4 has no queueing and little prefill interference, and 1k/1k keeps the KV reads small next to
+  # the weights, so what is left is the per-step overhead and the read efficiency. Two very different models on the same
+  # GPU are what can tell a model-independent overhead from a format-specific efficiency. Every other point validates.
+  # Not adopted: H200 TP=1 8k/1k c=16 (mean TTFT 10.98 s vs median 1.31 s, TPOT off the c=8..32 trend; see skipped).
+  - id: ix-h200-gptoss-mxfp4-tp1-1k1k-c4
+    role: fit
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 157.7, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 6.342 ms（每個 request 的 TPOT 平均；median 6.357 ms）；fit 點（Ruling R41，擬合前宣告）：TP=1 沒有 all-reduce、c=4 沒有排隊且預填干擾小、1k/1k 的 KV 讀取遠小於權重，所以殘差主要是每步固定開銷與頻寬效率；與另一個 fit 點同在 H200，一個是 dense FP8、一個是 MoE MXFP4，可以分開「與模型無關的開銷」和「格式專屬的效率」'
+  - id: ix-h200-gptoss-mxfp4-tp1-1k1k-c4-ttft
+    role: fit
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0963, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.0963 s（median 0.0821 s）；fit 點（Ruling R41，擬合前宣告）：TP=1 沒有 all-reduce、c=4 沒有排隊且預填干擾小、1k/1k 的 KV 讀取遠小於權重，所以殘差主要是每步固定開銷與頻寬效率；與另一個 fit 點同在 H200，一個是 dense FP8、一個是 MoE MXFP4，可以分開「與模型無關的開銷」和「格式專屬的效率」'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 139.8, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 7.152 ms（每個 request 的 TPOT 平均；median 7.213 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.4176, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.4176 s（median 0.3487 s）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c8
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 8
+    metric: decodeTokPerSec
+    measured: { value: 96, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 8', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 8 --num-prompts 80 --num-warmups 16'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 8（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 80 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 8 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 10.421 ms（每個 request 的 TPOT 平均；median 10.523 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c8-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 8
+    metric: ttftSec
+    measured: { value: 0.5006, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 8', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 8 --num-prompts 80 --num-warmups 16'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 8（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 80 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 8 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.5006 s（median 0.3497 s）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c32
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 32
+    metric: decodeTokPerSec
+    measured: { value: 40.2, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 32', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 32 --num-prompts 320 --num-warmups 64'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 32（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 320 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 32 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 24.905 ms（每個 request 的 TPOT 平均；median 25.483 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c32-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 32
+    metric: ttftSec
+    measured: { value: 0.9826, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 32', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 32 --num-prompts 320 --num-warmups 64'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 32（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 320 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 32 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.9826 s（median 0.3971 s）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c64
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 64
+    metric: decodeTokPerSec
+    measured: { value: 23.9, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 64', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 64 --num-prompts 640 --num-warmups 128'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 64（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 640 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 64 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 41.855 ms（每個 request 的 TPOT 平均；median 43.020 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c64-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 64
+    metric: ttftSec
+    measured: { value: 1.524, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 64', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 9472']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 64 --num-prompts 640 --num-warmups 128'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 64（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 640 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 64 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 1.5240 s（median 0.4374 s）'
+  - id: ix-h200-gptoss-mxfp4-tp2-1k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 205.6, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 4.865 ms（每個 request 的 TPOT 平均；median 4.900 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp2-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0664, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.0664 s（median 0.0566 s）'
+  - id: ix-h200-gptoss-mxfp4-tp4-1k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 248.7, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 4.021 ms（每個 request 的 TPOT 平均；median 4.031 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp4-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0479, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.0479 s（median 0.0407 s）'
+  - id: ix-h200-gptoss-mxfp4-tp8-1k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 8
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 270.6, unit: tok/s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 3.695 ms（每個 request 的 TPOT 平均；median 3.701 ms）'
+  - id: ix-h200-gptoss-mxfp4-tp8-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 8
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0401, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.22.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/26696231118/attempts/1
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.22.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.22.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.0401 s（median 0.0344 s）'
+  - id: ix-h100-gptoss-mxfp4-tp2-1k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 194.6, unit: tok/s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 5.138 ms（每個 request 的 TPOT 平均；median 5.159 ms）'
+  - id: ix-h100-gptoss-mxfp4-tp2-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0704, unit: s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.0704 s（median 0.0580 s）'
+  - id: ix-h100-gptoss-mxfp4-tp2-8k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 176.9, unit: tok/s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 5.654 ms（每個 request 的 TPOT 平均；median 5.716 ms）'
+  - id: ix-h100-gptoss-mxfp4-tp2-8k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.2779, unit: s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.2779 s（median 0.2391 s）'
+  - id: ix-h100-gptoss-mxfp4-tp4-1k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 244.1, unit: tok/s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 4.096 ms（每個 request 的 TPOT 平均；median 4.107 ms）'
+  - id: ix-h100-gptoss-mxfp4-tp4-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.05, unit: s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.0500 s（median 0.0445 s）'
+  - id: ix-h100-gptoss-mxfp4-tp8-1k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 8
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 266.7, unit: tok/s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 3.750 ms（每個 request 的 TPOT 平均；median 3.754 ms）'
+  - id: ix-h100-gptoss-mxfp4-tp8-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 8
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0391, unit: s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40 --num-warmups 8'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.0391 s（median 0.0353 s）'
+  - id: ix-h100-gptoss-mxfp4-tp2-1k1k-c64
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 64
+    metric: decodeTokPerSec
+    measured: { value: 67.4, unit: tok/s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 64', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 64 --num-prompts 640 --num-warmups 128'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 64（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 640 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 64 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 14.834 ms（每個 request 的 TPOT 平均；median 15.017 ms）'
+  - id: ix-h100-gptoss-mxfp4-tp2-1k1k-c64-ttft
+    role: validate
+    platform: nano5-h100
+    model: gpt-oss-120b
+    quant: mxfp4
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 64
+    metric: ttftSec
+    measured: { value: 0.215, unit: s, status: measured, source: inferencex-gptoss-h100-v021, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.21.0
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 64', '--no-enable-prefix-caching', '--max-cudagraph-capture-size 2048', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { VLLM_MXFP4_USE_MARLIN: '1', TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'InferenceX utils/bench_serving/benchmark_serving.py --dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 64 --num-prompts 640 --num-warmups 128'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/25956497716/attempts/2
+      deviations:
+        - 'VLLM_MXFP4_USE_MARLIN=1 強制 Marlin MXFP4 MoE kernel（vLLM v0.21.0 oracle/mxfp4.py；預設 auto 在 Hopper 會選 OAI Triton kernel）；v0.32.0 已移除這個環境變數，對應的是 --moe-backend marlin。計算機的驗證指令用 v0.32.0 預設 kernel（docs/research/vllm-tp-kv-precision.md §9）'
+        - 'vLLM v0.21.0（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 64（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '每個 concurrency 只有 640 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 64 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.2150 s（median 0.0871 s）'
+  - id: ix-h200-llama70b-fp8-tp1-1k1k-c4
+    role: fit
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 46.6, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 21.466 ms（每個 request 的 TPOT 平均；median 21.495 ms）；fit 點（Ruling R41，擬合前宣告）：TP=1 沒有 all-reduce、c=4 沒有排隊且預填干擾小、1k/1k 的 KV 讀取遠小於權重，所以殘差主要是每步固定開銷與頻寬效率；與另一個 fit 點同在 H200，一個是 dense FP8、一個是 MoE MXFP4，可以分開「與模型無關的開銷」和「格式專屬的效率」'
+  - id: ix-h200-llama70b-fp8-tp1-1k1k-c4-ttft
+    role: fit
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.2028, unit: s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.2028 s（median 0.1745 s）；fit 點（Ruling R41，擬合前宣告）：TP=1 沒有 all-reduce、c=4 沒有排隊且預填干擾小、1k/1k 的 KV 讀取遠小於權重，所以殘差主要是每步固定開銷與頻寬效率；與另一個 fit 點同在 H200，一個是 dense FP8、一個是 MoE MXFP4，可以分開「與模型無關的開銷」和「格式專屬的效率」'
+  - id: ix-h200-llama70b-fp8-tp1-8k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 38.3, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-8k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 9416']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924487526/attempts/3
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 26.136 ms（每個 request 的 TPOT 平均；median 26.333 ms）'
+  - id: ix-h200-llama70b-fp8-tp1-8k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 7373, outputTokens: 922, cacheHitRate: 0 }
+    tp: 1
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 1.3448, unit: s, status: measured, source: inferencex-llama70b-fp8-8k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 9416']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 8192, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924487526/attempts/3
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 1.3448 s（median 1.1659 s）'
+  - id: ix-h200-llama70b-fp8-tp2-1k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 71.9, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 13.914 ms（每個 request 的 TPOT 平均；median 13.930 ms）'
+  - id: ix-h200-llama70b-fp8-tp2-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.1213, unit: s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.1213 s（median 0.1100 s）'
+  - id: ix-h200-llama70b-fp8-tp4-1k1k-c4
+    role: validate
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 101.5, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: '1 ÷ mean TPOT 9.854 ms（每個 request 的 TPOT 平均；median 9.863 ms）'
+  - id: ix-h200-llama70b-fp8-tp4-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h200
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0906, unit: s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 2068']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H200 runner（CoreWeave／DGX Cloud HGX H200）對到 nano5-h200（同為 H200 SXM 141 GB）'
+    note: 'mean TTFT 0.0906 s（median 0.0817 s）'
+  - id: ix-h100-llama70b-fp8-tp2-1k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 57.4, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'max-model-len 10240（InferenceX 70b_fp8_h100_*.sh 在 config.yaml 寫死 10240，不像 H200 腳本以 1024 + 1024 + 20 = 2068 計算；計算機為 輸入 + 輸出 + 256。只影響 KV 容量與啟動檢查，concurrency 4 遠低於上限）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 17.407 ms（每個 request 的 TPOT 平均；median 17.425 ms）'
+  - id: ix-h100-llama70b-fp8-tp2-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 2
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.1213, unit: s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'max-model-len 10240（InferenceX 70b_fp8_h100_*.sh 在 config.yaml 寫死 10240，不像 H200 腳本以 1024 + 1024 + 20 = 2068 計算；計算機為 輸入 + 輸出 + 256。只影響 KV 容量與啟動檢查，concurrency 4 遠低於上限）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.1213 s（median 0.1081 s）'
+  - id: ix-h100-llama70b-fp8-tp4-1k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 84.9, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'max-model-len 10240（InferenceX 70b_fp8_h100_*.sh 在 config.yaml 寫死 10240，不像 H200 腳本以 1024 + 1024 + 20 = 2068 計算；計算機為 輸入 + 輸出 + 256。只影響 KV 容量與啟動檢查，concurrency 4 遠低於上限）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 11.776 ms（每個 request 的 TPOT 平均；median 11.779 ms）'
+  - id: ix-h100-llama70b-fp8-tp4-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 4
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0805, unit: s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'max-model-len 10240（InferenceX 70b_fp8_h100_*.sh 在 config.yaml 寫死 10240，不像 H200 腳本以 1024 + 1024 + 20 = 2068 計算；計算機為 輸入 + 輸出 + 256。只影響 KV 容量與啟動檢查，concurrency 4 遠低於上限）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.0805 s（median 0.0723 s）'
+  - id: ix-h100-llama70b-fp8-tp8-1k1k-c4
+    role: validate
+    platform: nano5-h100
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 8
+    concurrency: 4
+    metric: decodeTokPerSec
+    measured: { value: 109.7, unit: tok/s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'max-model-len 10240（InferenceX 70b_fp8_h100_*.sh 在 config.yaml 寫死 10240，不像 H200 腳本以 1024 + 1024 + 20 = 2068 計算；計算機為 輸入 + 輸出 + 256。只影響 KV 容量與啟動檢查，concurrency 4 遠低於上限）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: '1 ÷ mean TPOT 9.114 ms（每個 request 的 TPOT 平均；median 9.095 ms）'
+  - id: ix-h100-llama70b-fp8-tp8-1k1k-c4-ttft
+    role: validate
+    platform: nano5-h100
+    model: llama-3.3-70b-instruct-fp8
+    quant: fp8
+    workload: { inputTokens: 922, outputTokens: 922, cacheHitRate: 0 }
+    tp: 8
+    concurrency: 4
+    metric: ttftSec
+    measured: { value: 0.0704, unit: s, status: measured, source: inferencex-llama70b-fp8-1k1k-v0102, verified: 2026-10-20 }
+    engine: vllm
+    conditions:
+      engineVersion: v0.10.2
+      engineArgs: ['--gpu-memory-utilization 0.9', '--max-num-seqs 4', '--kv-cache-dtype fp8', '--async-scheduling', '--no-enable-prefix-caching', '--max-num-batched-tokens 8192', '--max-model-len 10240']
+      engineEnv: { TORCH_CUDA_ARCH_LIST: '9.0' }
+      client: 'kimbochen/bench_serving benchmark_serving.py（run 時 git clone，未固定 commit）--dataset-name random --random-range-ratio 0.8 --request-rate inf --ignore-eos --max-concurrency 4 --num-prompts 40'
+      lengths: { sampling: uniform, rangeRatio: 0.8, nominalInputTokens: 1024, nominalOutputTokens: 1024 }
+      runUrl: https://github.com/SemiAnalysisAI/InferenceX/actions/runs/18924448230/attempts/2
+      deviations:
+        - 'vLLM v0.10.2（計算機引用 v0.32.0）'
+        - 'max-model-len 10240（InferenceX 70b_fp8_h100_*.sh 在 config.yaml 寫死 10240，不像 H200 腳本以 1024 + 1024 + 20 = 2068 計算；計算機為 輸入 + 輸出 + 256。只影響 KV 容量與啟動檢查，concurrency 4 遠低於上限）'
+        - 'gpu-memory-utilization 0.9（計算機 0.92；只影響 KV 容量，這些 concurrency 遠低於上限）'
+        - 'max-num-seqs = concurrency 4（計算機用 vLLM 預設 1024；同時請求數 ≤ concurrency，不影響每步）'
+        - '客戶端 kimbochen/bench_serving 在 run 時才 clone，沒有固定 commit；長度抽樣假設與 InferenceX 腳本相同（0.8–1.0 均勻）'
+        - 'async-scheduling 明確開啟（v0.10.2 預設關閉；v0.32.0 預設開啟）'
+        - '每個 concurrency 只有 40 個 request，平均值有抽樣雜訊；mean TTFT 含開頭 4 個 request 同時送出時的排隊'
+        - '平台對應：InferenceX 的 H100 runner（DGX Cloud／CoreWeave HGX H100）對到 nano5-h100（同為 H100 SXM 80 GB）'
+    note: 'mean TTFT 0.0704 s（median 0.0646 s）'
+
+# Published measurements that are NOT evaluated (Ruling R28), kept with their source so the report says why.
+# StorageReview DGX Spark review (docs/research/dgx-spark-mac-mini.md, "StorageReview 測試條件查證"): the article labels
+# the benchmark "vLLM Online Serving" (engine vLLM; no vLLM version or launch flags given), output tok/s at concurrency 1.
+# It states no input/output lengths for the per-model results (only for its separate prefill-heavy / decode-heavy test,
+# model unnamed), so the calculator cannot be run under the same conditions.
+skipped:
+  - id: storagereview-spark-llama8b-fp8-c1
+    role: fit
+    platform: dgx-spark
+    # The article names no exact repo (base or Instruct), so the publisher is given instead (final-review I4).
+    modelName: Llama 3.1 8B (the article does not say base or Instruct)
+    modelOrigin: { developer: Meta, country: US }
+    quant: fp8
+    concurrency: 1
+    metric: decodeTokPerSec
+    measured: { value: 23.2, unit: tok/s, status: measured, source: storagereview-dgx-spark, verified: 2026-10-19 }
+    reason: 'Llama 3.1 8B 是 gated 模型，未匯入模型目錄；文章也未載明輸入／輸出長度。另外 spark-default.etaBw 0.68 就是由這個點推得，即使納入也是循環驗證'
+  - id: storagereview-spark-llama8b-bf16-c1
+    role: validate
+    platform: dgx-spark
+    # The article names no exact repo (base or Instruct), so the publisher is given instead (final-review I4).
+    modelName: Llama 3.1 8B (the article does not say base or Instruct)
+    modelOrigin: { developer: Meta, country: US }
+    quant: bf16
+    concurrency: 1
+    metric: decodeTokPerSec
+    measured: { value: 13.6, unit: tok/s, status: measured, source: storagereview-dgx-spark, verified: 2026-10-19 }
+    reason: 'Llama 3.1 8B 是 gated 模型，未匯入模型目錄；文章也未載明輸入／輸出長度'
+  - id: storagereview-spark-mistralsmall31-fp8-c1
+    role: validate
+    platform: dgx-spark
+    # The article names the model, not the repo; it is the catalog's mistral-small-3.1-24b-instruct-2503 (final-review I4).
+    modelName: Mistral Small 3.1 24B (catalog id mistral-small-3.1-24b-instruct-2503)
+    modelOrigin: { developer: Mistral AI, country: FR }
+    quant: fp8
+    concurrency: 1
+    metric: decodeTokPerSec
+    measured: { value: 8.8, unit: tok/s, status: measured, source: storagereview-dgx-spark, verified: 2026-10-19 }
+    reason: '模型在目錄中，但文章未載明各模型測試的輸入／輸出長度（只有另一組 prefill／decode 測試寫了 8192/512 與 512/8192，且未說用哪個模型），不得自行假設'
+
+  # InferenceX H200 TP=1 8k/1k c=16 (same run as the gpt-oss H200 points): an outlier, not evaluated.
+  - id: ix-h200-gptoss-mxfp4-tp1-8k1k-c16-ttft
+    role: validate
+    platform: nano5-h200
+    modelRepo: openai/gpt-oss-120b
+    quant: mxfp4
+    concurrency: 16
+    metric: ttftSec
+    measured: { value: 10.983, unit: s, status: measured, source: inferencex-gptoss-h200-v022, verified: 2026-10-20 }
+    reason: 'mean TTFT 10.98 s 是 median 1.31 s 的 8 倍（同 run 的 c=8 為 0.50 s、c=32 為 0.98 s），TPOT 12.18 ms 也不在 c=8（10.42）到 c=32（24.90）的趨勢上；疑似單次異常（例如少數 request 卡住），不採用'
+
+# Platform families with no usable public measurement yet; to be filled by NCHC's own runs.
+gaps:
+  - id: nvidia-gb200
+    platforms: [nano4-gb200]
+    note: 'GB200 目前沒有可用的公開實測點，待國網實測（InferenceX 的 GB200 gpt-oss 只有 Dynamo + TensorRT-LLM disaggregated／multi-node，TensorRT-LLM perf overview 沒有 concurrency）；nvidia-default 的 t_fixed 與 TTFT 開銷（Ruling R41，H100／H200 擬合）在 GB200 上是外推'

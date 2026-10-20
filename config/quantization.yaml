@@ -1,0 +1,104 @@
+# Weight quantization formats. `description` is copied from the demo (docs/prototypes/calculator-demo-v7.html, QUANT).
+# kvBytesPerElem is what the deployment stores per KV-cache element:
+#   fp8      → deploy vLLM with `--kv-cache-dtype fp8` (1 byte)
+#   bf16/int4 → vLLM `--kv-cache-dtype auto` keeps the model's 16-bit activation dtype (2 bytes)
+# vllmServe is how the verify command starts vLLM so it reproduces the computed scenario (spec §3):
+#   args: flags appended to `vllm serve` when the checkpoint is not already in this format;
+#   nativeOnly: vLLM loads this format only from a checkpoint already in it (exactly one of args / nativeOnly);
+#   checkpoint: model path when the catalog's hfRepo is not the one to serve (`{hfRepo}` is replaced);
+#   note: sourced comment line printed with args (required with checkpoint);
+#   nativeNote: sourced comment line printed when the model's checkpoint is natively in this format
+#     (Model.nativeQuant): vLLM detects quantization_config itself, so no args are passed;
+#   kvCacheArgs: the flag that reproduces kvBytesPerElem on vLLM (review 7d: data, not a core constant).
+#   Flags verified against vLLM v0.32.0 (commit 5df63a7; docs/research/prior-art-calculators.md §C; first checked
+#   against v0.10.0 on 2026-10-19, re-verified 2026-10-20).
+# nativeForUnquantized: the format an unquantized checkpoint (no quantization_config) is served in; the API's
+#   `quant: 'native'` resolves to it for such models (exactly one entry sets it).
+
+- id: bf16
+  name: BF16
+  bytesPerParam: { value: 2, unit: bytes, status: official, source: google-bfloat16, verified: 2026-10-19 }
+  computeDtype: bf16
+  # The catalog's checkpoints without a quantization_config are BF16 (config.json dtype / torch_dtype bfloat16).
+  nativeForUnquantized: true
+  description: 原始精度；每個參數 2 bytes，記憶體用量最多
+  kvBytesPerElem: { value: 2, unit: bytes, status: derived, formula: 'vLLM --kv-cache-dtype auto 沿用模型 dtype（BF16）：16 bits / 8 = 2', inputs: [vllm-quantized-kv-cache, google-bfloat16], verified: 2026-10-19 }
+  embeddingBytesPerParam: { value: 2, unit: bytes, status: official, source: google-bfloat16, verified: 2026-10-20 }
+  # vLLM v0.32.0 ModelConfig.dtype (vllm/config/model.py L99, L196): "bfloat16" is one of the --dtype choices (default "auto").
+  vllmServe:
+    args: { value: '--dtype bfloat16', status: official, source: vllm-optimization-docs, verified: 2026-10-19 }
+
+- id: fp8
+  name: FP8
+  bytesPerParam: { value: 1, unit: bytes, status: official, source: arxiv-2209.05433, verified: 2026-10-19 }
+  computeDtype: fp8
+  description: 記憶體約為 BF16 的一半；H100 以上原生支援。品質影響依模型而異
+  kvBytesPerElem: { value: 1, unit: bytes, status: derived, formula: '部署時加 vLLM --kv-cache-dtype fp8：8 bits / 8 = 1', inputs: [vllm-quantized-kv-cache, arxiv-2209.05433], verified: 2026-10-19 }
+  embeddingBytesPerParam: { value: 2, unit: bytes, status: derived, formula: 'vLLM 線上 FP8 只量化 Linear 與 MoE 層（Fp8Config.get_quant_method）；embedding／lm_head 不是 Linear 層，維持 BF16：16 bits / 8 = 2', inputs: [vllm-fp8-quant-method, vllm-vocab-embedding, google-bfloat16], verified: 2026-10-20 }
+  # vLLM v0.32.0 docs/features/quantization/online.md: BF16/FP16 → FP8 at load time, Linear and MoE weights only,
+  # activations scaled dynamically, via `--quantization fp8_per_tensor` (L1-L6, L38, L51). The v0.10.0 flag
+  # `--quantization fp8` still works in v0.32.0 but is deprecated for online quantization and mapped to fp8_per_tensor
+  # with a warning (weight_utils.py L351-L357), so the command uses the new name (changed 2026-10-20). It is only
+  # printed for an unquantized checkpoint: a natively FP8 one is served as-is (nativeNote), and a checkpoint in another
+  # native format gets no command at all, because vLLM refuses a mismatching --quantization (v0.32.0 config/model.py
+  # ModelConfig._verify_quantization L1443-L1448, "does not match").
+  # Native FP8 checkpoints (Mistral Medium 3.5, Small 4): vLLM takes quant_method fp8 from config.json (L1440-L1442).
+  vllmServe:
+    args: { value: '--quantization fp8_per_tensor', status: official, source: vllm-fp8-docs, verified: 2026-10-20 }
+    note: { value: 'FP8 = vLLM 線上動態量化（以 BF16 checkpoint 啟動，載入時轉 FP8）', status: official, source: vllm-fp8-docs, verified: 2026-10-20 }
+    # ModelOpt <= 0.29 checkpoints (nvidia/Llama-3.3-70B-Instruct-FP8) keep the config in hf_quant_config.json instead;
+    # vLLM reads that file when config.json has none and serves it as quant_method modelopt (vllm-v032-hf-quant-config).
+    nativeNote: { value: 'checkpoint 本身已是 FP8（config.json 有 quantization_config，或 ModelOpt 的 hf_quant_config.json），vLLM 會自動偵測量化方式，所以不加 --quantization／--dtype', status: official, source: vllm-config-quant-detect, evidence: [vllm-v032-hf-quant-config], verified: 2026-10-20 }
+    kvCacheArgs: { value: '--kv-cache-dtype fp8', status: official, source: vllm-quantized-kv-cache, verified: 2026-10-20 }
+
+- id: int4-awq
+  name: INT4（AWQ）
+  bytesPerParam: { value: 0.53125, unit: bytes, status: estimate, basis: '4-bit 權重 + 每 128 個參數一組 FP16 scale 與 zero → (4+32/128)/8，上限估計；未量化的 embedding 未計；vLLM 實際以 4-bit 打包 zero，實際約 0.52；0.53125 為上限估計（保守）', evidence: [arxiv-2306.00978, vllm-awq-linear], verified: 2026-10-19 }
+  computeDtype: bf16
+  description: 記憶體約為 BF16 的四分之一；品質影響依模型而異
+  # AWQ is weight-only quantization: activations (and thus the KV cache under `auto`) stay 16-bit.
+  kvBytesPerElem: { value: 2, unit: bytes, status: derived, formula: 'AWQ 只量化權重；vLLM --kv-cache-dtype auto 沿用 16-bit activation dtype：16 bits / 8 = 2', inputs: [vllm-quantized-kv-cache, google-bfloat16, arxiv-2306.00978], verified: 2026-10-19 }
+  embeddingBytesPerParam: { value: 2, unit: bytes, status: derived, formula: 'vLLM AWQ（awq.py AWQConfig.get_quant_method）只量化 LinearBase 與 FusedMoE；embedding／lm_head 維持 16-bit：16 bits / 8 = 2', inputs: [vllm-awq-linear, vllm-vocab-embedding, google-bfloat16], verified: 2026-10-20 }
+  # vLLM v0.32.0 runs an AWQ checkpoint with `--quantization auto_awq` (docs/features/quantization/auto_awq.md L46-L53);
+  # `awq` is an alias of the same AutoAWQConfig (quantization/__init__.py L157-L159), so the command keeps `awq`.
+  # vLLM does not quantize to AWQ online: the BF16 hfRepo cannot be served this way, so the command names a placeholder.
+  # Kernel (changed since v0.10.0, where an explicit `awq` was "forcing awq"): v0.32.0 AutoAWQConfig maps awq /
+  # awq_marlin / auto_awq to one config and uses the Marlin kernel on CUDA when supported (auto_awq.py L262-L335).
+  vllmServe:
+    args: { value: '--quantization awq', status: official, source: vllm-awq-docs, verified: 2026-10-19 }
+    checkpoint: '<AWQ checkpoint of {hfRepo}>'
+    note: { value: 'INT4（AWQ）：vLLM 不會線上轉成 AWQ，請把 <AWQ checkpoint of …> 換成該模型的 AWQ 量化 checkpoint（本機路徑或 HF repo）後才能執行；vLLM v0.32.0 的 awq／awq_marlin／auto_awq 都是同一個 AutoAWQConfig，CUDA 上支援時自動使用 Marlin kernel（AutoAWQConfig.get_quant_method）', status: official, source: vllm-awq-docs, evidence: [vllm-awq-marlin], verified: 2026-10-20 }
+
+# OCP Microscaling MXFP4 (OCP MX v1.0 §5.1, Table 1): blocks of k = 32 FP4 (E2M1, d = 4 bits) elements share one
+# E8M0 scale (w = 8 bits); a block takes w + k·d = 136 bits → 4.25 bits = 0.53125 bytes per parameter.
+# Native format of gpt-oss (config.json quant_method mxfp4; attention, router, embeddings and lm_head stay BF16 per
+# modules_to_not_convert). For a model whose checkpoint is natively MXFP4 the weight memory is the checkpoint's own
+# size (Model.nativeQuant.checkpointWeightBytes), so bytesPerParam only applies to other models (see nativeOnly).
+# computeDtype bf16 (vLLM v0.32.0 vllm/model_executor/layers/quantization/mxfp4.py, re-verified 2026-10-20):
+#   - Mxfp4Config.get_supported_act_dtypes → [torch.bfloat16] (L78-L80).
+#   - gpt-oss MoE backends are tried BF16-activation variant first within each family (FLASHINFER_TRTLLM_MXFP4_BF16
+#     before ..._MXFP8, TRITON, Marlin; fused_moe/oracle/mxfp4.py L389-L422), so the default path keeps BF16
+#     activations; MXFP8 activations are an opt-in (the vLLM GPT-OSS recipe's Blackwell setting) and NOT modelled.
+#   So the peak used is the hardware's dense BF16 TFLOPS (attention is BF16 anyway).
+# Not modelled: Blackwell kernels may pad expert hidden / intermediate sizes (gpt-oss 2880 → 3072 in v0.10.1's
+#   FlashInfer path), so in GPU memory the expert weights can be up to (3072/2880)^2 ≈ 1.14x the checkpoint's.
+# History: vLLM v0.10.0 has no mxfp4 (no mxfp4.py and no registry entry): gpt-oss needs vLLM >= 0.10.1.
+- id: mxfp4
+  name: MXFP4
+  bytesPerParam: { value: 0.53125, unit: bytes, status: derived, formula: 'OCP MX v1.0 MXFP4：每 32 個 FP4（E2M1，4 bits）元素共用 1 個 E8M0 scale（8 bits）→ (8 + 32 × 4) / 32 / 8 = 0.53125', inputs: [ocp-mx-spec], verified: 2026-10-20 }
+  computeDtype: bf16
+  description: gpt-oss 的原生格式（專家權重 4-bit，每 32 個共用一個 scale）；計算機只估算原生 MXFP4 checkpoint
+  kvBytesPerElem: { value: 2, unit: bytes, status: derived, formula: 'vLLM MXFP4 只支援 bfloat16 activation（Mxfp4Config.get_supported_act_dtypes）；--kv-cache-dtype auto 沿用模型 dtype：16 bits / 8 = 2', inputs: [vllm-mxfp4-src, vllm-quantized-kv-cache, google-bfloat16], verified: 2026-10-20 }
+  embeddingBytesPerParam: { value: 2, unit: bytes, status: derived, formula: 'vLLM MXFP4 只量化 MoE 權重（一般 Linear 層回到 UnquantizedLinearMethod）；embedding／lm_head 維持 BF16：16 bits / 8 = 2', inputs: [vllm-mxfp4-src, vllm-vocab-embedding, google-bfloat16], verified: 2026-10-20 }
+  # nativeOnly (corrected 2026-10-20): v0.10.1 had no online path (Linear raised NotImplementedError). v0.32.0 has one,
+  # `--quantization mxfp4` (vllm/config/quantization.py L192-L235: MXFP4 Linear and MoE weights, used when the
+  # checkpoint has no quantization metadata), but its MoE backends on SM100+ prefer FP4 / MXFP8 activations
+  # (fused_moe/oracle/mxfp4.py L425-L448) and Linear activations depend on the backend: a compute recipe the
+  # calculator does not model. So sizing only native MXFP4 checkpoints is the calculator's own restriction (estimate).
+  # The vLLM GPT-OSS recipe runs `vllm serve openai/gpt-oss-120b` with no quantization flag.
+  vllmServe:
+    nativeOnly: { value: true, status: estimate, basis: '計算機的限制，不是 vLLM 的：v0.32.0 可用 --quantization mxfp4 線上轉換，但其 MoE backend 在 SM100 以上優先 FP4／MXFP8 activation、Linear 的 activation 依 backend 而定，算力與精度都未建模；所以只估算原生 MXFP4 checkpoint（gpt-oss 的 BF16 activation 路徑）', evidence: [vllm-mxfp4-src, vllm-v032-online-quant], verified: 2026-10-20 }
+    # MoE kernel (Ruling R41, docs/research/vllm-tp-kv-precision.md §9): the command keeps vLLM v0.32.0's default backend
+    # (--moe-backend auto; on Hopper the OAI Triton kernel) because the fitted t_fixed is format-independent; the note says
+    # the NVIDIA calibration points ran Marlin and how to reproduce that.
+    nativeNote: { value: 'checkpoint 本身已是 MXFP4（config.json 有 quantization_config），vLLM 會自動偵測量化方式，所以不加 --quantization／--dtype；需要 vLLM v0.10.1 以上（v0.10.0 沒有 mxfp4）。MoE kernel 用 vLLM 預設（--moe-backend auto，Hopper 上是 OAI Triton）；計算機的 NVIDIA 校正點是以 Marlin kernel 量測的（InferenceX 設 VLLM_MXFP4_USE_MARLIN=1，v0.32.0 已移除這個環境變數），要和校正點比對時加 --moe-backend marlin', status: derived, formula: '由各項出處組成的說明（final-review M27）：自動偵測 quantization_config（vllm-config-quant-detect）、v0.10.1 起支援 mxfp4（vllm-mxfp4-v0101、vllm-gpt-oss-recipe）、v0.32.0 預設 MoE backend（vllm-v032-mxfp4-moe-backend）、VLLM_MXFP4_USE_MARLIN 的棄用與對應的 --moe-backend marlin（vllm-v022-mxfp4-marlin-env）、InferenceX 的 gpt-oss run 設了 VLLM_MXFP4_USE_MARLIN=1（inferencex-gptoss-h200-v022、inferencex-gptoss-h100-v021）', inputs: [vllm-config-quant-detect, vllm-mxfp4-v0101, vllm-gpt-oss-recipe, vllm-v032-mxfp4-moe-backend, vllm-v022-mxfp4-marlin-env, inferencex-gptoss-h200-v022, inferencex-gptoss-h100-v021], verified: 2026-10-21 }

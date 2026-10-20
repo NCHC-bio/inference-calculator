@@ -1,0 +1,24 @@
+workloads:
+  - id: fx-chat
+    name: Fixture chat
+    kind: chat
+    inputTokens: { value: 1000, status: measured, source: fx-src, verified: 2026-10-19 }
+    outputTokens: { value: 100, status: measured, source: fx-src, verified: 2026-10-19 }
+    cacheHitRate: { value: 0, status: measured, source: fx-src, verified: 2026-10-19 }
+    description: fixture
+    tierNote: { value: fixture, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    tierModels: [fx-model]
+    demoText: fixture
+speedPresets:
+  - id: fx-speed
+    name: Fixture speed
+    minTokensPerSec: { value: 10, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    maxTtftSec: { value: 5, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+    description: fixture
+concurrency:
+  agentGeneratingShare: { value: 0.05, status: measured, source: fx-src, verified: 2026-10-19 }
+  chatRule: { value: fixture, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
+  agentRule: { value: fixture, status: derived, formula: f, inputs: [fx-src], verified: 2026-10-19 }
+  queueRule: { value: fixture, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-20 }
+benchmark:
+  maxModelLenMarginTokens: { value: 0, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }

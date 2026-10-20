@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # pnpm version comes from the packageManager pin in package.json.
+      - name: Enable corepack
+        run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      # Fails on schema, reference, sourcing or model-policy errors.
+      - run: pnpm data:build
+      - run: pnpm test
+      # Writes packages/data/dist/accuracy.json; out-of-tolerance validate points only WARN (exit 0, spec §10.1).
+      - run: pnpm calibrate

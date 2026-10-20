@@ -1,0 +1,10 @@
+- id: fx-fp8
+  name: FP8
+  bytesPerParam: { value: 1, status: estimate, basis: fixture without evidence, verified: 2026-10-19 }
+  computeDtype: fp8
+  nativeForUnquantized: true
+  description: fixture
+  kvBytesPerElem: { value: 1, status: official, source: fx-src, verified: 2026-10-19 }
+  embeddingBytesPerParam: { value: 2, status: official, source: fx-src, verified: 2026-10-19 }
+  vllmServe:
+    args: { value: --quantization fp8, status: official, source: fx-src, verified: 2026-10-19 }
