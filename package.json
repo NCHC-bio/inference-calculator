@@ -4,7 +4,7 @@
   "type": "module",
   "packageManager": "pnpm@12.9.1",
   "scripts": {
-    "test": "vitest run",
+    "test": "pnpm data:build && vitest run",
     "typecheck": "pnpm -r exec tsc -b",
     "data:build": "tsx packages/data/src/build.ts",
     "data:import": "tsx packages/data/src/hf-import.ts",

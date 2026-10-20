@@ -1,12 +1,28 @@
-import { App as AntApp, ConfigProvider, Segmented } from 'antd';
+import { App as AntApp, ConfigProvider, Segmented, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getBundle } from './bundle';
-import { langFromUrl, useT } from './i18n';
+import { useLang, useT } from './i18n';
 import { antdTheme, useDarkMode } from './theme';
 
 type Mode = 'need' | 'have';
+
+/** antd does not paint body: sync page background, text colour and color-scheme from the theme tokens. */
+function PageTheme({ dark }: { dark: boolean }) {
+  const { token } = theme.useToken();
+  const lang = useLang();
+  useEffect(() => {
+    const { body, documentElement } = document;
+    body.style.background = token.colorBgLayout;
+    body.style.color = token.colorText;
+    documentElement.style.colorScheme = dark ? 'dark' : 'light';
+  }, [token.colorBgLayout, token.colorText, dark]);
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
+  return null;
+}
 
 function Shell() {
   const tr = useT();
@@ -30,13 +46,15 @@ function Shell() {
 
 export function App() {
   const dark = useDarkMode();
+  const lang = useLang();
   return (
     <ConfigProvider
       theme={antdTheme(dark)}
       button={{ autoInsertSpace: false }}
-      locale={langFromUrl() === 'en' ? enUS : zhTWLocale}
+      locale={lang === 'en' ? enUS : zhTWLocale}
     >
       <AntApp>
+        <PageTheme dark={dark} />
         <Shell />
       </AntApp>
     </ConfigProvider>

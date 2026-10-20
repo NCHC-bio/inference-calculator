@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import en from './en';
 import zhTW from './zh-TW';
 
@@ -20,8 +21,12 @@ export function langFromUrl(): Lang {
   return new URLSearchParams(window.location.search).get('lang') === 'en' ? 'en' : 'zh-TW';
 }
 
-/** Task 3 will read the language from the central store instead of the URL. */
+/** Single source of the active language. Task 3 will read it from the central store instead of the URL. */
+export function useLang(): Lang {
+  return langFromUrl();
+}
+
 export function useT(): TFn {
-  const lang = langFromUrl();
-  return (key, vars) => t(lang, key, vars);
+  const lang = useLang();
+  return useMemo<TFn>(() => (key, vars) => t(lang, key, vars), [lang]);
 }
