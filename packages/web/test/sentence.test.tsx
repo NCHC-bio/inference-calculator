@@ -1,8 +1,10 @@
+import { quantOptions } from '@nchc/core';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
+import { HAVE_MAX, USERS_MAX } from '../src/state/state';
 import { setMedia } from './setup';
 
 // antd 6 puts aria-label on the combobox <input>; the displayed selection is the surrounding .ant-select-content.
@@ -69,5 +71,18 @@ describe('Sentence', () => {
     await u.click(await screen.findByTitle(`${mac.name} ${mac.sub}`));
     expect(text()).toContain('台');
     expect(text()).not.toContain('張');
+  });
+  it('quant options describe the quantization (its description, not its name again)', async () => {
+    setMedia({ hoverNone: true }); render(<App />);
+    await userEvent.click(screen.getByLabelText('模型精度'));
+    const q = getBundle().quantization[quantOptions(getBundle(), getBundle().models['llama-3.3-70b-instruct-fp8']!.id)[0]!]!;
+    await shown(q.description);
+  });
+  it('count inputs announce their range', async () => {
+    render(<App />);
+    expect(screen.getByLabelText('同時人數')).toHaveAttribute('aria-valuemin', '1');
+    expect(screen.getByLabelText('同時人數')).toHaveAttribute('aria-valuemax', String(USERS_MAX));
+    await userEvent.click(screen.getByText('我已有的能撐多少'));
+    expect(screen.getByLabelText('數量')).toHaveAttribute('aria-valuemax', String(HAVE_MAX));
   });
 });

@@ -13,7 +13,8 @@ type CountProps = { value: number; max: number; ariaLabel: string; width: number
 /**
  * Integer input. Every edit is dispatched and the reducer keeps the last valid value; the draft only mirrors
  * what is typed, and blur shows the store's value again. No min/max on InputNumber itself: it would clamp an
- * out-of-range entry on blur (0 → 1) and dispatch that, overwriting the last valid value.
+ * out-of-range entry on blur (0 → 1) and dispatch that, overwriting the last valid value. The range is still
+ * announced through aria-valuemin / aria-valuemax.
  */
 function CountInput({ value, max, ariaLabel, width, onChange }: CountProps) {
   const [draft, setDraft] = useState<number | null>(value);
@@ -21,6 +22,8 @@ function CountInput({ value, max, ariaLabel, width, onChange }: CountProps) {
   return (
     <InputNumber<number>
       aria-label={ariaLabel}
+      aria-valuemin={1}
+      aria-valuemax={max}
       variant="underlined"
       size="large"
       precision={0}
@@ -86,8 +89,8 @@ export function Sentence(): JSX.Element {
   const quants = useMemo<Opt[]>(
     () =>
       quantOptions(b, s.model).map((id) => {
-        const name = b.quantization[id]!.name;
-        return { value: id, label: name, desc: name };
+        const q = b.quantization[id]!;
+        return { value: id, label: q.name, desc: q.description };
       }),
     [b, s.model],
   );
