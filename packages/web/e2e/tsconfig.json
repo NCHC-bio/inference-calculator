@@ -1,0 +1,21 @@
+{
+  // Separate project: the e2e specs import @nchc/data (bundle built from config/), which the web app must not.
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../dist/tsc-e2e",
+    "tsBuildInfoFile": "../dist/tsc-e2e/.tsbuildinfo",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+  },
+  // The specs reuse these React-free app modules for their expectations.
+  "include": [
+    ".",
+    "../playwright.config.ts",
+    "../src/components/answerText.ts",
+    "../src/i18n/t.ts",
+    "../src/i18n/en.ts",
+    "../src/i18n/zh-TW.ts",
+    "../src/state/state.ts"
+  ],
+  "references": [{ "path": "../../schema" }, { "path": "../../core/tsconfig.src.json" }, { "path": "../../data" }]
+}

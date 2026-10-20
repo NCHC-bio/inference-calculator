@@ -1,22 +1,8 @@
 import { useMemo } from 'react';
 import { useCalc } from '../state/store';
-import en from './en';
-import zhTW from './zh-TW';
+import { t, type Lang, type TFn } from './t';
 
-export type Lang = 'zh-TW' | 'en';
-export type MsgKey = keyof typeof zhTW;
-export type TFn = (key: MsgKey, vars?: Record<string, string | number>) => string;
-
-const messages: Record<Lang, Record<MsgKey, string>> = { 'zh-TW': zhTW, en };
-
-/** Looks up a message and interpolates `{name}` placeholders. */
-export function t(lang: Lang, key: MsgKey, vars?: Record<string, string | number>): string {
-  const msg = messages[lang][key];
-  if (!vars) return msg;
-  return msg.replace(/\{(\w+)\}/g, (m, name: string) => (name in vars ? String(vars[name]) : m));
-}
-
-export const tZh: TFn = (key, vars) => t('zh-TW', key, vars);
+export { t, tZh, type Lang, type MsgKey, type TFn } from './t';
 
 /** Single source of the active language: the central store (seeded from the `lang` URL param). */
 export function useLang(): Lang {

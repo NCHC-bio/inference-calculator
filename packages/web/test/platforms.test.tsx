@@ -42,7 +42,7 @@ describe('PlatformList', () => {
     render(<App />);
     const row = rows().find((x) => x.dataset.platform === 'mac-mini-m6-32')!;
     const tag = within(row).getByText(/^✗ /); await userEvent.click(tag);
-    expect(await screen.findByRole('tooltip')).toBeVisible();
+    await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
     expect(within(row).queryByTestId('capacity')).toBeNull();
     expect(tag).toHaveTextContent('✗ 模型放不下');
     const detail = mac.expected.ok ? '' : mac.expected.detail;

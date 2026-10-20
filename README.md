@@ -7,9 +7,9 @@
 ![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6?logo=typescript&logoColor=white)
 ![Node](https://img.shields.io/badge/node-24-5FA04E?logo=nodedotjs&logoColor=white)
 ![pnpm](https://img.shields.io/badge/pnpm-12.9.1-F69220?logo=pnpm&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-461%20passed-brightgreen?logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-568%20passed-brightgreen?logo=vitest&logoColor=white)
 ![Models](https://img.shields.io/badge/models-14-2A6DB2)
-![Status](https://img.shields.io/badge/status-core%20done%20%C2%B7%20web%20%26%20MCP%20pending-orange)
+![Status](https://img.shields.io/badge/status-core%20%C2%B7%20web%20done%20%C2%B7%20MCP%20pending-orange)
 
 </div>
 
@@ -48,9 +48,11 @@ pnpm install
 pnpm data:build    # 驗證 config/，輸出 packages/data/dist/bundle.json
 pnpm test
 pnpm calibrate     # 與公開實測的誤差報告
+pnpm web:dev       # 本機開啟網站（Vite，http://localhost:5173）
+pnpm web:e2e       # 以 Playwright 在桌面與手機尺寸跑真實瀏覽器測試
 ```
 
-網站與 MCP 尚未開始；[docs/prototypes/](docs/prototypes/) 裡的是靜態 UI 原型，沒有接上計算核心。
+網站（[packages/web](packages/web/)，純靜態，`pnpm web:build` 輸出到 `packages/web/dist/`）已完成主畫面：填空句輸入、一行答案、每個平台一列，點開看使用率、記憶體組成與打字示範，也能反過來問「我已有的能撐多少人」。引用、專家檢視、HF 匯入與自訂輸入尚未開始；MCP 也尚未開始。[docs/prototypes/](docs/prototypes/) 裡的是早期的靜態 UI 原型。
 
 ## 🗺️ 架構
 
@@ -61,11 +63,14 @@ flowchart LR
     DATA["packages/data<br/>驗證 · 出處"]
     BUNDLE[("bundle.json")]
     CORE["packages/core<br/>計算 · 驗證指令"]
-    APPS["apps/web · apps/mcp<br/>（尚未開始）"]
+    WEB["packages/web<br/>靜態網站 · React · D3"]
+    APPS["apps/mcp<br/>（尚未開始）"]
 
     HF -- "data:import" --> CFG
     CFG -- "data:build" --> DATA
     DATA --> BUNDLE --> CORE
+    BUNDLE --> WEB
+    CORE --> WEB
     CORE -.-> APPS
 
     style APPS stroke-dasharray: 5 5

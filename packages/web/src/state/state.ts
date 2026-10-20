@@ -1,6 +1,6 @@
 import type { Bundle } from '@nchc/schema';
 import { quantOptions } from '@nchc/core';
-import type { Lang } from '../i18n';
+import type { Lang } from '../i18n/t';
 
 export type Mode = 'need' | 'have';
 export type CalcState = {

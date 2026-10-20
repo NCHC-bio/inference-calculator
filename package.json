@@ -10,7 +10,8 @@
     "data:import": "tsx packages/data/src/hf-import.ts",
     "calibrate": "tsx packages/data/src/calibrate.ts",
     "web:dev": "pnpm --filter @nchc/web dev",
-    "web:build": "pnpm --filter @nchc/web build"
+    "web:build": "pnpm --filter @nchc/web build",
+    "web:e2e": "pnpm --filter @nchc/web exec playwright test"
   },
   "devDependencies": {
     "@types/node": "25.9.9",
