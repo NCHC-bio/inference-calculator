@@ -57,6 +57,23 @@ const zhTW = {
   'status.estimate': '推估',
   'status.unverified': '未查證',
   'status.user': '自訂',
+  // Platform rows (spec §8.3.3-4).
+  'platforms.self': '自建',
+  'platforms.count.gpu': '張 GPU',
+  'platforms.count.machine': '台',
+  'platforms.conservative': '保守 {n} {unit}',
+  'platforms.conservativeNone': '保守 —',
+  'platforms.isotype.gpu': '每個圖示是 1 個 node（{perNode} 張 GPU）：實心 {expected} 個為預期，虛線 {extra} 個為保守估計多出的',
+  'platforms.isotype.machine': '每個圖示是 1 台：實心 {expected} 台為預期，虛線 {extra} 台為保守估計多出的',
+  'capacity.text': '同時 {users} / {max} 人',
+  'capacity.tip': '目前人數 / 這些機器在你要求的速度下最多能同時服務的人數',
+  'why.context': '上下文超過模型上限',
+  'why.tp': '無法切分到這台機器',
+  'why.weights': '模型放不下',
+  'why.mem': '記憶體不夠所有人用',
+  'why.bw': '每人速度不夠',
+  'why.compute': '算力不夠',
+  'why.ttft': '首字等太久',
 };
 
 export default zhTW;

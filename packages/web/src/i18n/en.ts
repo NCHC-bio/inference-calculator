@@ -57,6 +57,22 @@ const en = {
   'status.estimate': 'Estimate',
   'status.unverified': 'Unverified',
   'status.user': 'Custom',
+  'platforms.self': 'Self-hosted',
+  'platforms.count.gpu': 'GPUs',
+  'platforms.count.machine': 'machines',
+  'platforms.conservative': 'Conservative {n} {unit}',
+  'platforms.conservativeNone': 'Conservative —',
+  'platforms.isotype.gpu': 'Each icon is 1 node ({perNode} GPUs): {expected} solid are expected, {extra} dashed are the extra the conservative estimate needs',
+  'platforms.isotype.machine': 'Each icon is 1 machine: {expected} solid are expected, {extra} dashed are the extra the conservative estimate needs',
+  'capacity.text': '{users} / {max} people at the same time',
+  'capacity.tip': 'Current users / the most people these machines can serve at the same time at the speed you asked for',
+  'why.context': 'Context exceeds the model limit',
+  'why.tp': 'Cannot be split across this machine',
+  'why.weights': 'The model does not fit',
+  'why.mem': 'Not enough memory for everyone',
+  'why.bw': 'Too slow per person',
+  'why.compute': 'Not enough compute',
+  'why.ttft': 'First word takes too long',
 } satisfies Record<keyof typeof zhTW, string>;
 
 export default en;
