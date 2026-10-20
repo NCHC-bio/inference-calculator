@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/tsc/src",
+    "tsBuildInfoFile": "dist/tsc/src/.tsbuildinfo",
+    // Core is pure (spec §10): no Node globals or types, so `process`, `Buffer`, `node:*` imports fail to compile.
+    "types": []
+  },
+  "include": ["src"],
+  "references": [{ "path": "../schema" }]
+}

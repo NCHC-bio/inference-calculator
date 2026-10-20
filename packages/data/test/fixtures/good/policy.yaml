@@ -1,0 +1,5 @@
+excludedCountries: [CN]
+excludedOrgs:
+  - { org: fx-excluded-a, country: CN }
+  - { org: fx-excluded-b, country: CN }
+decision: { value: fixture, source: fx-src }

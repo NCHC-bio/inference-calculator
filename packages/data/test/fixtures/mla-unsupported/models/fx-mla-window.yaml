@@ -1,0 +1,16 @@
+# Synthetic MLA model with a sliding window: the MLA KV formula would ignore the window (Ruling R22).
+id: fx-mla-window
+name: Fixture MLA with sliding window
+hfRepo: example/fx-mla-window
+origin: { developer: Example Lab, country: US }
+totalParamsB: { value: 16, status: official, source: fx-src, verified: 2026-10-19 }
+layers: 4
+heads: 16
+kvHeads: 16
+headDim: 128
+hidden: 2048
+attention: mla
+mla: { kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 128, vHeadDim: 128 }
+slidingWindow: 4096
+source: fx-src
+verified: 2026-10-19

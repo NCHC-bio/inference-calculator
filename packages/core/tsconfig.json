@@ -1,0 +1,6 @@
+{
+  // Solution file: src and test are separate projects. @nchc/data references core src (it calls the
+  // core API for `pnpm calibrate`) and core tests reference data, so one project would be a cycle.
+  "files": [],
+  "references": [{ "path": "./tsconfig.src.json" }, { "path": "./test" }]
+}

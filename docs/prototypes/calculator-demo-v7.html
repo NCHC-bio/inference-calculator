@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>國網推論算力計算機</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@5.29.3/dist/reset.css">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/antd@5.29.3/dist/antd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ant-design/icons@5.6.1/dist/index.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<style>
+  html,body{margin:0}
+  .sent .ant-input-number-input{font-weight:700!important;color:inherit!important;font-size:18px!important}
+  .sent .clause{white-space:nowrap}
+  .typing-cursor{display:inline-block;width:2px;height:1em;vertical-align:-0.15em;animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function(){
+const {useState,useEffect,useMemo,useRef}=React;
+const {ConfigProvider,theme,App:AntApp,Card,Segmented,InputNumber,Select,Typography,Tag,Button,Space,Popover,Tooltip,Progress,Row,Col,Divider,Drawer,Modal,Input,Form,Alert,List,Flex,message}=antd;
+const {InfoCircleOutlined,CopyOutlined,RightOutlined,DownOutlined,CloudDownloadOutlined,EditOutlined}=icons;
+const html=htm.bind(React.createElement);
+const {Text,Title,Paragraph}=Typography;
+
+// ================= 出處（每個數值的依據） =================
+const SRC={
+ hf:{t:'Hugging Face 模型設定檔 config.json 與 safetensors 參數量',st:'official'},
+ azure:{t:'Azure LLM 推論紀錄，對話類請求中位數：輸入 1,020、輸出 129 token（Patel et al., Splitwise, arXiv 2311.18677）',st:'measured'},
+ mooncake:{t:'Mooncake 公開對話紀錄平均：輸入 12,035、輸出 343 token（Mooncake, FAST 2025）',st:'measured'},
+ tracelab:{t:'TraceLab 真實 Agent 使用紀錄：每步上下文中位數 126,180、輸出 252 token、快取命中 95.7%、LLM 生成佔工作階段時間 3.3%（arXiv 2606.30560）',st:'measured'},
+ allgen:{t:'對話類：「同時最多 N 人」視為 N 人同時在等回覆（最保守的上限）',st:'estimate'},
+ agentN:{t:'研究助理類：「同時最多 N 人」視為 N 個工作階段同時開著、上下文保留在記憶體；其中同時在生成的比例取 TraceLab 實測 3.3%',st:'derived'},
+ speed:{t:'「流暢」= 每人每秒 ≥20 token、首字 ≤5 秒；「可接受」= ≥8 token、≤15 秒。依多人服務規劃討論中常見期望值（Level1Techs 論壇），非產業標準',st:'estimate'},
+ tier:{t:'任務對應的模型等級：依 BixBench、BiomniBench、TMMLU+、SWE-bench 等評測綜合判斷，非單一來源',st:'estimate'},
+ nvidia:{t:'NVIDIA 官方規格（dense 值）：H100 80GB／3.35TB/s、H200 141GB／4.8TB/s、GB200 186GB／8TB/s；FP8 1,979／1,979／5,000 TFLOPS',st:'official'},
+ gb200node:{t:'國網 nano4 手冊：GB200 NVL72 共 2 櫃 36 node，推算每 node 4 GPU',st:'derived'},
+ apple:{t:'Apple 官方規格：Mac Studio M5 Ultra 最高 512GB、1.2TB/s；有效算力約 66.6 TFLOPS 由 llama.cpp 實測推算',st:'derived'},
+ eta_nv:{t:'NVIDIA 頻寬效率 0.70（保守 0.55）、算力效率 0.50：尚未以國網實測校正',st:'estimate'},
+ eta_mac:{t:'Mac 頻寬效率 0.82（保守 0.77）：由 Apple MLX 實測推算（Apple ML Research 2026-10-15）',st:'derived'},
+ util:{t:'可用記憶體比例 90%：vLLM 預設 gpu_memory_utilization；Mac 取 75%（系統保留）',st:'official'},
+ kvfp8:{t:'KV cache 以 FP8 儲存；讀入（prefill）與生成共用算力，以穩態平均計入；未計 GPU 間通訊、排隊等待與框架開銷',st:'estimate'},
+ tok:{t:'打字示範以 1 token ≈ 1 個中文字呈現',st:'estimate'},
+ cost:{t:'尚未包含費用；「GPU 最少」僅比較 GPU 張數，待國網費率確定後改為依費用比較',st:'official'},
+ user:{t:'使用者自訂的值',st:'user'}
+};
+const ST={official:['官方','blue'],measured:['實測','green'],derived:['推算','purple'],estimate:['推估（參考用）','orange'],unverified:['未查證','red'],user:['自訂','geekblue']};
+
+// ================= 資料 =================
+const BASE_MODELS=[
+ {id:'llama-3.1-8b',nm:'Llama 3.1 8B',P:8.03,L:32,nh:32,kvh:8,hd:128,src:'hf'},
+ {id:'llama-3.3-70b',nm:'Llama 3.3 70B',P:70.55,L:80,nh:64,kvh:8,hd:128,src:'hf'},
+ {id:'llama-3.1-405b',nm:'Llama 3.1 405B',P:405.85,L:126,nh:128,kvh:8,hd:128,src:'hf'},
+ // gpt-oss：sliding window(128) 與 full attention 交替；demo 以 full 層數 kvL 近似 KV（忽略 128 token 的 sliding 層）
+ {id:'gpt-oss-20b',nm:'gpt-oss-20b（MoE）',P:20.91,L:24,kvL:12,nh:64,kvh:8,hd:64,moe:{E:32,k:4,ep:3*2880*2880},src:'hf'},
+ {id:'gpt-oss-120b',nm:'gpt-oss-120b（MoE）',P:116.83,L:36,kvL:18,nh:64,kvh:8,hd:64,moe:{E:128,k:4,ep:3*2880*2880},src:'hf'}
+];
+const QUANT={bf16:{nm:'BF16',b:2,d:'原始精度；每個參數 2 bytes，記憶體用量最多'},fp8:{nm:'FP8',b:1,d:'記憶體約為 BF16 的一半；H100 以上原生支援。品質影響依模型而異'},int4:{nm:'INT4',b:4.25/8,d:'記憶體約為 BF16 的四分之一；品質影響依模型而異'}};
+const WL={
+ chat:{nm:'一般對話問答',inT:1020,outT:129,hit:0,src:'azure',kind:'chat',d:'一問一答，例如寫信、查資料。每次約讀入 1,020、回覆 129 token（Azure 實測）',
+  tier:'小型模型即可（如 Gemma-3-TAIDE-12B、Gemma 4 12B／31B、gpt-oss-20b）',demo:'可以的！以下是改善研究計畫摘要的三個建議：第一，開頭先點出研究問題的重要性；第二，具體寫出方法與資料來源；第三，用一句話總結預期貢獻。'},
+ doc:{nm:'長文件問答',inT:12035,outT:343,hit:0,src:'mooncake',kind:'chat',d:'把報告或法規交給 AI 再提問。每次約讀入 1.2 萬、回覆 343 token（Mooncake 公開紀錄）',
+  tier:'中型、長上下文模型（如 Muse-Glimmer-30B、Granite 4.2 30B、Gemma 4 31B）',demo:'根據您提供的《個人資料保護法》第 6 條與第 15 條，研究機構蒐集健康資料時，須符合學術研究目的並經去識別化處理；若涉及跨境傳輸，另須依第 21 條評估。'},
+ assist:{nm:'研究助理',inT:126180,outT:252,hit:0.957,src:'tracelab',kind:'agent',d:'AI 一步步幫你跑分析、寫程式、看結果（如 scRNA 分析）。每步讀入約 12.6 萬（96% 可重複利用）、回覆 252 token（TraceLab 實測）',
+  tier:'前沿等級模型（如 Muse-Spark-Open、Inkling、Nemotron 3 Ultra；生資評測尚無公開分數）',demo:'第 3 群細胞高度表現 CD3E、CD8A 與 GZMB，推測為細胞毒性 T 細胞。建議以 UMAP 檢視其與第 5 群的相對位置，再做軌跡分析確認分化關係。'}
+};
+const SPEED={smooth:{nm:'流暢',tps:20,ttft:5,d:'每人每秒至少 20 token，送出後 5 秒內開始回覆（推估標準）'},ok:{nm:'可接受',tps:8,ttft:15,d:'每人每秒至少 8 token，15 秒內開始回覆（推估標準）'},custom:{nm:'自訂…',d:'自己設定每秒 token 數與等待時間'}};
+const PL={
+ h200:{nm:'H200',sub:'nano4',g:'nchc',unit:'node',gpn:8,mem:141,bw:4.8,F:1979,tdp:700,eta:.70,lo:.55,etac:.5,util:.9,src:'nvidia',d:'每 node 8 張 H200，每張 141 GB'},
+ h100:{nm:'H100',sub:'nano5',g:'nchc',unit:'node',gpn:8,mem:80,bw:3.35,F:1979,tdp:700,eta:.70,lo:.55,etac:.5,util:.9,src:'nvidia',d:'每 node 8 張 H100，每張 80 GB'},
+ gb200:{nm:'GB200',sub:'nano4',g:'nchc',unit:'node',gpn:4,mem:186,bw:8,F:5000,tdp:null,eta:.70,lo:.55,etac:.5,util:.9,src:'gb200node',d:'每 node 4 張 GB200，每張 186 GB（每 node 張數為推算）'},
+ mac:{nm:'Mac Studio',sub:'M5 Ultra 512GB',g:'self',unit:'台',gpn:1,mem:512,bw:1.2,F:66.6,tdp:300,eta:.82,lo:.77,etac:1,util:.75,src:'apple',d:'單機，M5 Ultra、512 GB 統一記憶體'}
+};
+const ORDER=['h200','h100','gb200','mac'];
+
+// ================= 計算核心（純函數） =================
+const expT=m=>m.moe?m.moe.E*m.moe.ep*m.L/1e9:0;
+const active=m=>m.moe?m.P-expT(m)*(1-m.moe.k/m.moe.E):m.P;
+const kvTok=m=>m.kvTokGB||2*(m.kvL||m.L)*m.kvh*m.hd/1e9;
+const Wgb=(m,q)=>m.P*QUANT[q].b;
+function Wread(m,q,B){if(!m.moe)return Wgb(m,q);const f=1-Math.pow(1-m.moe.k/m.moe.E,B);return ((m.P-expT(m))+expT(m)*f)*QUANT[q].b;}
+// 一個「副本」使用 t 張 GPU（同一 node 內張量平行，t ∈ {1,2,4,8} 且不超過每 node 卡數）；Mac 以整台為單位
+const TPS=k=>PL[k].unit=='台'?[1]:[1,2,4,8].filter(t=>t<=PL[k].gpn);
+let T_=null; // 目前計算中的每副本 GPU 數
+function nd(k){const p=PL[k],t=T_||(p.unit=='台'?1:p.gpn);return {mem:p.mem*t,bw:p.bw*t,F:p.F*t};}
+function step(c,k,Bg,eta){const {m,q,w}=c,n=nd(k),p=PL[k],ctx=w.inT+w.outT/2;
+  const tbw=(Wread(m,q,Bg)+Bg*ctx*kvTok(m))/(n.bw*1e3*eta);
+  const tdec=(2*active(m)*1e9*Bg+4*m.L*m.nh*m.hd*ctx*Bg)/(n.F*1e12*p.etac);
+  const nw=w.inT*(1-w.hit);
+  const tpre=Bg*(nw/w.outT)*(2*active(m)*1e9+4*m.L*m.nh*m.hd*(w.inT-nw/2))/(n.F*1e12*p.etac);
+  const tc=tdec+tpre;return {tbw,tc,t:Math.max(tbw,tc)};}
+function ttft(c,k){const {m,w}=c,n=nd(k),p=PL[k],nw=w.inT*(1-w.hit);return (2*active(m)*1e9*nw+4*m.L*m.nh*m.hd*nw*(w.inT-nw/2))/(n.F*1e12*p.etac);}
+function cap(c,k){const n=nd(k);return Math.floor((n.mem*PL[k].util-Wgb(c.m,c.q))/((c.w.inT+c.w.outT)*kvTok(c.m)));}
+function conc(N,w){return w.kind=='chat'?{gen:N,mem:N}:{gen:Math.max(1,Math.ceil(N*0.033)),mem:N};}
+function check(c,k,n,N,eta){const cc=conc(N,c.w),Bg=Math.ceil(cc.gen/n),Bm=Math.ceil(cc.mem/n),cp=cap(c,k),s=step(c,k,Bg,eta),tps=1/s.t,tt=ttft(c,k);
+  const why=Bm>cp?'mem':tps<c.spd.tps?(s.tbw>=s.tc?'bw':'compute'):tt>c.spd.ttft?'ttft':null;
+  return {ok:!why,why,tps,ttft:tt,Bg,Bm,cap:cp,s};}
+function withT(t,f){const s=T_;T_=t;try{return f();}finally{T_=s;}}
+// 找出 GPU 總數最少的配置：n 個副本 × 每副本 t 張
+function need(c,k,eta,N){const ts=TPS(k),tMax=ts[ts.length-1];
+  const big=withT(tMax,()=>({n:nd(k),c1:check(c,k,1,1,eta)})),W=Wgb(c.m,c.q);
+  if(W>big.n.mem*PL[k].util)return {ok:false,short:'放不下模型',long:`模型需要 ${W.toFixed(0)} GB，${PL[k].unit=='台'?'單台':'一個 node'} 只有 ${(big.n.mem*PL[k].util).toFixed(0)} GB 可用（跨 node 切分尚未支援）`};
+  if(big.c1.ttft>c.spd.ttft)return {ok:false,short:`首字要等 ${fmtS(big.c1.ttft)}`,long:`就算只有 1 人，送出後也要等約 ${fmtS(big.c1.ttft)} 才開始回覆，超過要求的 ${c.spd.ttft} 秒`};
+  if(big.c1.tps<c.spd.tps)return {ok:false,short:`太慢（${big.c1.tps.toFixed(0)} token/秒）`,long:`就算只有 1 人，每秒也只有約 ${big.c1.tps.toFixed(0)} token，低於要求的 ${c.spd.tps}`};
+  let best=null;
+  for(const t of ts){for(let n=1;n<=999;n++){if(best&&n*t>=best.gpus)break;const r=withT(t,()=>check(c,k,n,N,eta));if(r.ok){best=Object.assign(r,{n,t,gpus:n*t});break;}}}
+  return best||{ok:false,short:'需要過多 GPU',long:'需要超過 999 個副本'};}
+function maxUsersT(c,k,n,t,eta){return withT(t,()=>{if(!check(c,k,n,1,eta).ok)return 0;let lo=1,hi=1e7;while(hi-lo>1){const mid=Math.floor((lo+hi)/2);if(check(c,k,n,mid,eta).ok)lo=mid;else hi=mid;}return lo;});}
+// 給定 G 張 GPU（或 G 台 Mac），找最能服務人數的切法
+function maxUsersG(c,k,G,eta){let best={N:0,n:0,t:0};for(const t of TPS(k)){const n=Math.floor(G/t);if(n<1)continue;const N=maxUsersT(c,k,n,t,eta);if(N>best.N)best={N,n,t};}return best;}
+const unitOf=k=>PL[k].unit=='台'?'台':'GPU';
+function fmtN(x){return x>=1e4?(x/1e4).toFixed(x>=1e5?0:1).replace(/\.0$/,'')+' 萬':x.toLocaleString('zh-TW');}
+function fmtS(s){return s<1?'< 1 秒':s<60?s.toFixed(s<10?1:0)+' 秒':(s/60).toFixed(1)+' 分';}
+const WHY={mem:'記憶體容量',bw:'記憶體頻寬',compute:'算力',ttft:'首字等待'};
+
+// ================= 小元件 =================
+function Opt({title,desc}){return html`<div style=${{padding:'2px 0',whiteSpace:'normal'}}><div>${title}</div>${desc&&html`<div style=${{fontSize:12,opacity:.65,lineHeight:1.4}}>${desc}</div>`}</div>`;}
+function StatusTag({st}){const s=ST[st];return html`<${Tag} color=${s[1]} style=${{marginInlineEnd:6}}>${s[0]}<//>`;}
+function Machines({n,lo,mac,gpn}){const {token}=theme.useToken();const tot=Math.min(Math.max(n,lo||0),16),w=mac?20:10,h=mac?13:20,gap=i=>mac?i*(w+4):i*(w+3)+Math.floor(i/(gpn||8))*6;
+  return html`<${Tooltip} title=${mac?'每個方塊 = 1 台；實心為預期需要，虛線為保守估計多出的台數':'每個方塊 = 1 張 GPU（每 '+gpn+' 張為一個 node）；實心為預期需要，虛線為保守估計多出的張數'}>
+    <svg width=${gap(tot)+(Math.max(n,lo||0)>16?30:0)} height="24" style=${{display:'block'}}>
+      ${Array.from({length:tot}).map((_,i)=>html`<rect key=${i} x=${gap(i)} y=${23-h} width=${w} height=${h} rx="2"
+        fill=${i<n?(mac?token.colorTextTertiary:token.colorPrimary):'none'} stroke=${mac?token.colorTextTertiary:token.colorPrimary} stroke-dasharray=${i<n?null:'3 2'}/>`)}
+      ${Math.max(n,lo||0)>16&&html`<text x=${gap(16)+2} y="18" font-size="11" fill=${token.colorTextSecondary}>+${Math.max(n,lo)-16}</text>`}
+    </svg><//>`;}
+function Typing({text,tps,ttft}){const [out,setOut]=useState('');const {token}=theme.useToken();
+  useEffect(()=>{let t0=performance.now();const wait=Math.min(ttft,6);const id=setInterval(()=>{const e=(performance.now()-t0)/1000-wait;
+    if(e<0){setOut('⏳ '+(wait+e).toFixed(1));return;}let n=Math.floor(e*tps);if(n>text.length+tps*2){t0=performance.now();n=0;}setOut(text.slice(0,Math.min(n,text.length)));},50);return ()=>clearInterval(id);},[text,tps,ttft]);
+  return html`<div style=${{background:token.colorFillTertiary,borderRadius:token.borderRadius,padding:'10px 12px',minHeight:84,lineHeight:1.7}}>${out}<span class="typing-cursor" style=${{background:token.colorPrimary}}></span></div>`;}
+
+// ================= 主程式 =================
+function Calculator(){
+  const {token}=theme.useToken();const {message:msg}=AntApp.useApp();
+  const [mode,setMode]=useState('need');const [N,setN]=useState(15);const [haveN,setHaveN]=useState(16);const [haveK,setHaveK]=useState('h200');
+  const [wk,setWk]=useState('assist');const [wo,setWo]=useState(null);const [models,setModels]=useState(BASE_MODELS);const [mid,setMid]=useState('llama-3.3-70b');
+  const [q,setQ]=useState('fp8');const [sp,setSp]=useState('smooth');const [spc,setSpc]=useState({tps:30,ttft:2});
+  const [open,setOpen]=useState(null);const [basis,setBasis]=useState(false);const [cite,setCite]=useState(false);
+  const [hfOpen,setHfOpen]=useState(false);const [hfRepo,setHfRepo]=useState('');const [hfBusy,setHfBusy]=useState(false);const [hfErr,setHfErr]=useState(null);
+  const [manOpen,setManOpen]=useState(false);const [form]=Form.useForm();const [wlOpen,setWlOpen]=useState(false);const [spOpen,setSpOpen]=useState(false);
+  const m=models.find(x=>x.id==mid);
+  const w=wo?Object.assign({},WL[wk],wo):WL[wk];
+  const spd=sp=='custom'?spc:SPEED[sp];
+  const c={m,q,w,spd};
+  const notes=useMemo(()=>{const a=[];const add=k=>{if(!a.includes(k))a.push(k);};
+    add(w.kind=='chat'?'allgen':'agentN');if(w.kind!='chat')add('tracelab');add(wo?'user':w.src);add(sp=='custom'?'user':'speed');add('tier');add(m.src=='user'?'user':'hf');
+    ['nvidia','gb200node','apple','eta_nv','eta_mac','util','kvfp8','tok','cost'].forEach(add);return a;},[wk,wo,sp,mid]);
+  const hasUser=notes.includes('user');
+  const rows=ORDER.map(k=>{const r=need(c,k,PL[k].eta,N),lo=need(c,k,PL[k].lo,N);return {k,r,lo,mx:r.ok?maxUsersT(c,k,r.n,r.t,PL[k].eta):0};});
+  const best=rows.filter(d=>d.r.ok&&PL[d.k].g=='nchc').sort((a,b)=>a.r.gpus-b.r.gpus)[0];
+  const modelOk=mm=>ORDER.filter(k=>need({m:mm,q,w,spd},k,PL[k].eta,1).ok).length;
+
+  async function hfImport(repo){setHfBusy(true);setHfErr(null);
+    try{const r1=await fetch('https://huggingface.co/'+repo+'/resolve/main/config.json');if(r1.status==401||r1.status==403)throw new Error('gated');if(!r1.ok)throw new Error('notfound');
+      const cfg0=await r1.json(),cfg=cfg0.text_config||cfg0;const r2=await fetch('https://huggingface.co/api/models/'+repo+'?expand[]=safetensors&expand[]=sha');const meta=await r2.json();
+      const L=cfg.num_hidden_layers,nh=cfg.num_attention_heads,kvh=cfg.num_key_value_heads||nh,hd=cfg.head_dim||(cfg.hidden_size&&nh?cfg.hidden_size/nh:null),P=meta.safetensors&&meta.safetensors.total?meta.safetensors.total/1e9:null;
+      const miss=[];if(!L)miss.push('層數');if(!nh)miss.push('注意力頭數');if(!hd)miss.push('head 維度');if(!P)miss.push('參數量');
+      const E=cfg.num_experts||cfg.num_local_experts||cfg.n_routed_experts,k=cfg.num_experts_per_tok,mi=cfg.moe_intermediate_size;
+      const mm={id:'hf:'+repo,nm:repo,P,L,nh,kvh,hd,src:'hf'};if(cfg.kv_lora_rank)mm.kvTokGB=L*(cfg.kv_lora_rank+(cfg.qk_rope_head_dim||0))/1e9;
+      if(E){if(k&&mi&&cfg.hidden_size)mm.moe={E,k,ep:3*cfg.hidden_size*mi};else miss.push('MoE 專家維度');}
+      if(miss.length){setHfErr('無法自動解析：'+miss.join('、')+'。請改用「自訂模型」補齊。');form.setFieldsValue({nm:repo,P:P&&+P.toFixed(2),L,nh,kvh,hd});return;}
+      setModels(ms=>ms.filter(x=>x.id!=mm.id).concat([mm]));setMid(mm.id);setHfOpen(false);msg.success('已匯入 '+repo);}
+    catch(e){setHfErr(e.message=='gated'?'這個模型需要授權（gated），無法直接讀取。可改用「自訂模型」手動輸入。':'找不到或無法讀取「'+repo+'」，請確認名稱（格式：組織/模型）。');}
+    finally{setHfBusy(false);}}
+  function saveManual(v){const mm={id:'user:'+Date.now(),nm:v.nm+'（自訂）',P:v.P,L:v.L,nh:v.nh,kvh:v.kvh,hd:v.hd,src:'user'};
+    if(v.E&&v.k&&v.ep)mm.moe={E:v.E,k:v.k,ep:v.ep*1e6/v.L};setModels(ms=>ms.concat([mm]));setMid(mm.id);setManOpen(false);}
+
+  const ctrl={variant:'underlined',size:'large'};
+  const sel=(value,onChange,options,width,extra)=>html`<${Select} ...${ctrl} value=${value} onChange=${onChange} options=${options}
+      style=${{minWidth:width}} popupMatchSelectWidth=${false} labelRender=${o=>html`<b style=${{color:token.colorPrimary}}>${o.label}</b>`}
+      optionRender=${o=>html`<${Opt} title=${o.data.label} desc=${o.data.desc}/>`} dropdownStyle=${{maxWidth:380}} ...${extra||{}}/>`;
+
+  const modelOptions=models.map(x=>{const ok=modelOk(x);return {value:x.id,label:x.nm,desc:ok?`可在 ${ok} 種機台上執行`:'目前設定下所有機台都跑不動'};});
+  const sentence=html`<div className="sent" style=${{fontSize:20,lineHeight:2.4,color:token.colorText}}>
+    ${mode=='need'?html`<span className="clause">同時最多有 <${InputNumber} ...${ctrl} style=${{width:110,color:token.colorPrimary}} min=${1} max=${1000000} value=${N} onChange=${v=>v&&setN(Math.round(v))}/> 人會使用，</span>`
+      :html`<span className="clause">我有 <${InputNumber} ...${ctrl} min=${1} max=${999} value=${haveN} onChange=${v=>v&&setHaveN(Math.round(v))} style=${{width:80,color:token.colorPrimary}}/> ${haveK=='mac'?'台':'張'} ${sel(haveK,setHaveK,ORDER.map(k=>({value:k,label:PL[k].nm+'（'+PL[k].sub+'）',desc:PL[k].d})),150)}，</span>`}
+    <span className="clause">做 ${sel(wk,v=>{if(v=='__custom'){setWo(wo||{inT:WL[wk].inT,outT:WL[wk].outT,hit:WL[wk].hit});setWlOpen(true);}else{setWk(v);setWo(null);}},
+        Object.keys(WL).map(k=>({value:k,label:WL[k].nm,desc:WL[k].d})).concat([{value:'__custom',label:'自訂…',desc:'自己設定每次讀入與回覆的長度'}]),130)} 任務，</span>
+    <span className="clause">模型用 ${sel(mid,setMid,modelOptions,190,{showSearch:true,optionFilterProp:'label',
+        dropdownRender:menu=>html`<div>
+          <${Alert} type="warning" showIcon=${false} style=${{margin:'4px 4px 6px',fontSize:12,padding:'4px 8px'}} message=${'這類任務建議：'+w.tier+'（推估）'}/>
+          ${menu}<${Divider} style=${{margin:'6px 0'}}/>
+          <${Flex} vertical gap=${2} style=${{padding:'0 4px 4px'}}>
+            <${Button} type="text" icon=${html`<${CloudDownloadOutlined}/>`} style=${{textAlign:'left',height:'auto',padding:'4px 8px'}} onClick=${()=>{setHfErr(null);setHfOpen(true);}}><${Opt} title="從 Hugging Face 匯入" desc="輸入模型名稱（如 openai/gpt-oss-20b），自動讀取架構與參數量"/><//>
+            <${Button} type="text" icon=${html`<${EditOutlined}/>`} style=${{textAlign:'left',height:'auto',padding:'4px 8px'}} onClick=${()=>{form.resetFields();setManOpen(true);}}><${Opt} title="自訂模型" desc="手動填寫參數量、層數、注意力頭數等（支援 MoE）"/><//>
+          <//></div>`})}，</span>
+    <span className="clause">模型精度用 ${sel(q,setQ,Object.keys(QUANT).map(k=>({value:k,label:QUANT[k].nm,desc:QUANT[k].d})),90)}，</span>
+    <span className="clause">希望回應速度 ${sel(sp,v=>{setSp(v);if(v=='custom')setSpOpen(true);},Object.keys(SPEED).map(k=>({value:k,label:SPEED[k].nm,desc:SPEED[k].d})),100)}</span>
+  </div>`;
+
+  // 答案
+  let answer,ansSub;
+  if(mode=='have'){const mx=maxUsersG(c,haveK,haveN,PL[haveK].eta).N,mxl=maxUsersG(c,haveK,haveN,PL[haveK].lo).N,r1=need(c,haveK,PL[haveK].eta,1);
+    answer=mx?html`<span>同時最多 <span style=${{color:token.colorPrimary}}>${fmtN(mx)} 人</span></span>`:html`<span style=${{color:token.colorError}}>${r1.short||'不可行'}</span>`;
+    ansSub=mx?'保守 '+fmtN(mxl)+' 人':(r1.long||'');}
+  else if(best){answer=html`<span><span style=${{color:token.colorPrimary}}>${PL[best.k].nm} × ${best.r.gpus} 張</span> <${Text} type="secondary" style=${{fontSize:15,fontWeight:500}}>${PL[best.k].sub}${best.r.gpus>=PL[best.k].gpn?' · '+(best.r.gpus/PL[best.k].gpn).toFixed(best.r.gpus%PL[best.k].gpn?1:0)+' node':''}<//></span>`;
+    ansSub='保守 × '+(best.lo.ok?best.lo.gpus+' 張':'—');}
+  else{answer=html`<span style=${{color:token.colorError}}>國網機台都不可行</span>`;ansSub='可嘗試較小的模型、較低精度或放寬速度';}
+  const estList=notes.filter(k=>SRC[k].st=='estimate');
+  const answerRow=html`<${Flex} align="center" gap=${12} wrap="wrap" style=${{borderTop:'1px solid '+token.colorBorderSecondary,paddingTop:14,marginTop:6}}>
+    <div><div style=${{fontSize:26,fontWeight:800,lineHeight:1.2}}>${answer}</div><${Text} type="secondary">${ansSub}<//></div>
+    <${Popover} title="這個結果用到的推估" content=${html`<div style=${{maxWidth:340}}>${estList.map(k=>html`<div key=${k} style=${{fontSize:12,margin:'4px 0'}}>• ${SRC[k].t}</div>`)}<a onClick=${()=>setBasis(true)}>查看全部依據 →</a></div>`}>
+      <${Tag} color="orange" style=${{borderStyle:'dashed',cursor:'pointer'}}>推估<//><//>
+    ${hasUser&&html`<${Tooltip} title="結果用到你自訂的值"><${Tag} color="geekblue">自訂<//><//>`}
+    <div style=${{flex:1}}></div>
+    <${Button} icon=${html`<${InfoCircleOutlined}/>`} onClick=${()=>setBasis(true)}>依據<//>
+    <${Button} icon=${html`<${CopyOutlined}/>`} onClick=${()=>setCite(true)}>引用<//>
+  <//>`;
+
+  // 細節（點開一列）
+  function Detail({k,n,t,Nn}){return withT(t,()=>DetailT({k,n,t,Nn}));}
+  function DetailT({k,n,t,Nn}){const r=check(c,k,n,Nn,PL[k].eta),nn=nd(k),s=r.s,W=Wgb(m,q),per=(w.inT+w.outT)*kvTok(m);
+    const memU=(W+r.Bm*per)/(nn.mem*PL[k].util)*100;const u=[['記憶體',memU,'模型與所有使用者上下文佔用的記憶體'],['頻寬',s.tbw/s.t*100,'每產生一個字要讀取的資料量佔頻寬的比例'],['算力',s.tc/s.t*100,'讀入與生成所需的計算量佔算力的比例'],['首字',r.ttft/spd.ttft*100,'首字等待時間佔你要求上限的比例']].map(x=>[x[0],Math.min(100,x[1]),x[2]]);
+    const mx=Math.max(...u.map(x=>x[1]));
+    return html`<${Row} gutter=${[24,12]} style=${{padding:'4px 8px 16px'}}>
+      <${Col} xs=${24} md=${13}><${Typing} text=${WL[wk].demo} tps=${r.tps} ttft=${r.ttft}/>
+        <${Text} type="secondary" style=${{fontSize:12}}>每人 ${r.tps.toFixed(0)} token/秒 · 首字 ${fmtS(r.ttft)}<//><//>
+      <${Col} xs=${24} md=${11}>
+        ${u.map(x=>html`<${Tooltip} key=${x[0]} title=${x[2]} placement="left"><${Flex} align="center" gap=${8}>
+          <${Text} style=${{width:44,fontSize:12,fontWeight:x[1]==mx?700:400}} type=${x[1]==mx?'danger':'secondary'}>${x[0]}<//>
+          <${Progress} status="normal" percent=${Math.round(x[1])} size="small" strokeColor=${x[1]==mx?token.colorError:undefined} format=${p=>p+'%'} style=${{flex:1,margin:0}}/><//><//>`)}
+        <${Tooltip} title=${`紫：模型 ${W.toFixed(0)} GB；藍：使用者上下文（每人 ${per.toFixed(1)} GB）`}>
+          <div><${Progress} status="normal" percent=${Math.min(100,(W+r.Bm*per)/nn.mem*100)} success=${{percent:W/nn.mem*100,strokeColor:'#722ed1'}} showInfo=${false} size="small"/></div><//>
+        <${Text} type="secondary" style=${{fontSize:12}}>記憶體組成${PL[k].unit=='台'?'':` · 每副本 ${t} 張 GPU × ${n} 個副本`}${PL[k].tdp?` · 峰值功耗約 ${(n*t*PL[k].tdp/1000).toFixed(1)} kW`:''}<//>
+      <//><//>`;}
+
+  const list=mode=='need'?html`<div>${rows.map((d,i)=>{const p=PL[d.k],isOpen=open==d.k&&d.r.ok,isBest=best&&best.k==d.k;
+      return html`<div key=${d.k}>
+        ${p.g=='self'&&html`<${Divider} orientation="left" plain style=${{margin:'8px 0',fontSize:12}}>自建<//>`}
+        <div onClick=${()=>d.r.ok&&setOpen(isOpen?null:d.k)} style=${{cursor:d.r.ok?'pointer':'default',padding:'12px 8px',borderRadius:token.borderRadiusLG,borderLeft:'3px solid '+(isBest?token.colorPrimary:'transparent'),background:isBest?token.colorFillTertiary:'transparent'}}>
+        <${Row} align="middle" gutter=${[12,8]} wrap=${true}>
+          <${Col} xs=${12} md=${5}><div style=${{fontWeight:700}}>${p.nm}</div><${Text} type="secondary" style=${{fontSize:12}}>${p.sub}<//><//>
+          <${Col} xs=${0} md=${7}>${d.r.ok&&html`<${Machines} n=${d.r.gpus} lo=${d.lo.ok?d.lo.gpus:d.r.gpus} mac=${p.unit=='台'} gpn=${p.gpn}/>`}<//>
+          <${Col} xs=${12} md=${3} style=${{textAlign:'right'}}>${d.r.ok&&html`<div style=${{fontSize:24,fontWeight:800,lineHeight:1}}>${d.r.gpus}</div><${Text} type="secondary" style=${{fontSize:11}}>${d.lo.ok&&d.lo.gpus>d.r.gpus?'保守 '+d.lo.gpus+' '+(p.unit=='台'?'台':'張'):(p.unit=='台'?'台':'張 GPU')}<//>`}<//>
+          <${Col} xs=${22} md=${8}>${d.r.ok?html`<${Tooltip} title=${'目前人數 / 這些機器在你要求的速度下最多能同時服務的人數'}><div>
+              <${Progress} status="normal" percent=${Math.min(100,Math.round(N/Math.max(1,d.mx)*100))} showInfo=${false} size="small" style=${{margin:0}}/>
+              <${Text} type="secondary" style=${{fontSize:12}}>${fmtN(N)} / ${fmtN(d.mx)} 人<//></div><//>`
+            :html`<${Tooltip} title=${d.r.long}><${Tag} color="error">✗ ${d.r.short}<//><//>`}<//>
+          <${Col} xs=${2} md=${1} style=${{textAlign:'right'}}>${d.r.ok&&(isOpen?html`<${DownOutlined} style=${{color:token.colorTextTertiary}}/>`:html`<${RightOutlined} style=${{color:token.colorTextTertiary}}/>`)}<//>
+        <//></div>
+        ${isOpen&&html`<${Detail} k=${d.k} n=${d.r.n} t=${d.r.t} Nn=${N}/>`}
+      </div>`;})}</div>`
+    :(()=>{const g=maxUsersG(c,haveK,haveN,PL[haveK].eta),mx=g.N;return mx?html`<div><${Text} type="secondary" style=${{paddingLeft:8}}>滿載時（同時 ${fmtN(mx)} 人）<//><${Detail} k=${haveK} n=${g.n} t=${g.t} Nn=${mx}/></div>`
+      :html`<${Alert} type="error" message=${need(c,haveK,PL[haveK].eta,1).long||'不可行'}/>`;})();
+
+  const citeText=best?`依國網推論算力計算機（資料版本 2026-10-19）估算：以 ${m.nm}（${QUANT[q].nm}）提供「${w.nm||WL[wk].nm}」服務，同時最多 ${fmtN(N)} 名使用者，在每人每秒至少 ${spd.tps} token、首字等待不超過 ${spd.ttft} 秒的條件下，建議申請 ${PL[best.k].nm}（${PL[best.k].sub}）${best.r.gpus} 張 GPU（${best.r.n} 個副本、每副本 ${best.r.t} 張），保守估計 ${best.lo.ok?best.lo.gpus:'—'} 張 GPU。\n\n主要假設與來源：\n`+notes.map((k,i)=>`[${i+1}] ${SRC[k].t}（${ST[SRC[k].st][0]}）`).join('\n'):'目前設定下國網機台不可行。';
+
+  return html`<div style=${{maxWidth:920,margin:'0 auto',padding:16}}>
+    <${Card} style=${{marginBottom:12}}>
+      <${Segmented} value=${mode} onChange=${v=>{setMode(v);setOpen(null);}} options=${[{label:'我需要多少',value:'need'},{label:'我已有的能撐多少',value:'have'}]}/>
+      ${sentence}
+      ${answerRow}
+    <//>
+    <${Card} styles=${{body:{padding:12}}}>${list}<//>
+
+    <${Drawer} title="計算依據" open=${basis} onClose=${()=>setBasis(false)} width=${Math.min(520,window.innerWidth)}>
+      <${Space} direction="vertical" style=${{width:'100%'}} size="middle">
+        <${Card} size="small" title="可修改的假設">
+          <${Space} direction="vertical">
+            <a onClick=${()=>{setWo(wo||{inT:WL[wk].inT,outT:WL[wk].outT,hit:WL[wk].hit});setWlOpen(true);}}><${EditOutlined}/> 每次讀入 ${fmtN(w.inT)}、回覆 ${fmtN(w.outT)} token${w.hit?`（${Math.round(w.hit*100)}% 可重複利用）`:''}</a>
+            <a onClick=${()=>{setSp('custom');setSpOpen(true);}}><${EditOutlined}/> 速度：每人 ≥ ${spd.tps} token/秒、首字 ≤ ${spd.ttft} 秒</a>
+          <//><//>
+        <${List} size="small" dataSource=${notes} renderItem=${(k,i)=>html`<${List.Item}><div><${Text} type="secondary">${i+1}.<//> <${StatusTag} st=${SRC[k].st}/>${SRC[k].t}</div><//>`}/>
+      <//><//>
+    <${Modal} title="可貼進申請書／報告的文字" open=${cite} onCancel=${()=>setCite(false)} footer=${null} width=${640}>
+      <${Paragraph} copyable=${{text:citeText,tooltips:['複製','已複製']}} style=${{whiteSpace:'pre-wrap',background:token.colorFillTertiary,padding:12,borderRadius:8}}>${citeText}<//><//>
+    <${Modal} title="從 Hugging Face 匯入模型" open=${hfOpen} onCancel=${()=>setHfOpen(false)} okText="匯入" cancelText="取消" confirmLoading=${hfBusy} onOk=${()=>hfRepo.trim()&&hfImport(hfRepo.trim())}>
+      <${Input} placeholder="例如 openai/gpt-oss-20b" value=${hfRepo} onChange=${e=>setHfRepo(e.target.value)} onPressEnter=${()=>hfRepo.trim()&&hfImport(hfRepo.trim())}/>
+      <${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:6}}>會讀取模型的 config.json 與參數量。需要授權（gated）的模型無法直接讀取。<//>
+      ${hfErr&&html`<${Alert} type="warning" style=${{marginTop:8}} message=${hfErr} action=${html`<${Button} size="small" onClick=${()=>{setHfOpen(false);setManOpen(true);}}>自訂模型<//>`}/>`}<//>
+    <${Modal} title="自訂模型" open=${manOpen} onCancel=${()=>setManOpen(false)} okText="加入" cancelText="取消" onOk=${()=>form.submit()}>
+      <${Form} form=${form} layout="vertical" onFinish=${saveManual} initialValues=${{nm:'我的模型'}}>
+        <${Form.Item} name="nm" label="名稱" rules=${[{required:true}]}><${Input}/><//>
+        <${Row} gutter=${12}>
+          ${[['P','總參數（十億）'],['L','層數'],['nh','注意力頭數'],['kvh','KV 頭數'],['hd','head 維度']].map(f=>html`<${Col} span=${12} key=${f[0]}><${Form.Item} name=${f[0]} label=${f[1]} rules=${[{required:true,message:'必填'}]}><${InputNumber} min=${0} style=${{width:'100%'}}/><//><//>`)}
+        <//>
+        <${Divider} plain orientation="left" style=${{fontSize:12}}>MoE（選填）<//>
+        <${Row} gutter=${12}>${[['E','專家數'],['k','每次啟用'],['ep','每個專家參數（百萬，全部層合計）']].map(f=>html`<${Col} span=${8} key=${f[0]}><${Form.Item} name=${f[0]} label=${f[1]}><${InputNumber} min=${0} style=${{width:'100%'}}/><//><//>`)}<//>
+      <//><//>
+    <${Modal} title="自訂工作" open=${wlOpen} onCancel=${()=>setWlOpen(false)} onOk=${()=>setWlOpen(false)} okText="完成" cancelButtonProps=${{style:{display:'none'}}}>
+      <${Space} direction="vertical" style=${{width:'100%'}}>
+        ${[['inT','每次讀入（token）'],['outT','每次回覆（token）']].map(f=>html`<div key=${f[0]}><${Text}>${f[1]}<//><${InputNumber} min=${1} style=${{width:'100%'}} value=${w[f[0]]} onChange=${v=>v&&setWo(Object.assign({},w,{[f[0]]:v}))}/></div>`)}
+        <div><${Text}>可重複利用的比例（快取命中，%）<//><${InputNumber} min=${0} max=${99} style=${{width:'100%'}} value=${Math.round(w.hit*100)} onChange=${v=>v!=null&&setWo(Object.assign({},w,{hit:v/100}))}/></div>
+        <a onClick=${()=>{setWo(null);setWlOpen(false);}}>還原為「${WL[wk].nm}」的預設值</a>
+      <//><//>
+    <${Modal} title="自訂速度" open=${spOpen} onCancel=${()=>setSpOpen(false)} onOk=${()=>setSpOpen(false)} okText="完成" cancelButtonProps=${{style:{display:'none'}}}>
+      <${Space} direction="vertical" style=${{width:'100%'}}>
+        <div><${Text}>每人每秒至少（token）<//><${InputNumber} min=${1} style=${{width:'100%'}} value=${spc.tps} onChange=${v=>v&&setSpc(Object.assign({},spc,{tps:v}))}/></div>
+        <div><${Text}>送出後最多等幾秒開始回覆<//><${InputNumber} min=${0.5} step=${0.5} style=${{width:'100%'}} value=${spc.ttft} onChange=${v=>v&&setSpc(Object.assign({},spc,{ttft:v}))}/></div>
+      <//><//>
+  </div>`;
+}
+
+function Root(){const mq=window.matchMedia('(prefers-color-scheme: dark)');const [dark,setDark]=useState(mq.matches);
+  useEffect(()=>{const f=e=>setDark(e.matches);mq.addEventListener('change',f);return ()=>mq.removeEventListener('change',f);},[]);
+  useEffect(()=>{document.body.style.background=dark?'#141414':'#f5f5f5';},[dark]);
+  return html`<${ConfigProvider} theme=${{algorithm:dark?theme.darkAlgorithm:theme.defaultAlgorithm}}><${AntApp}><${Calculator}/><//><//>`;}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${Root}/>`);
+})();
+</script>
+</body>
+</html>

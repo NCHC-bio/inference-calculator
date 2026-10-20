@@ -1,0 +1,17 @@
+- id: fx-node
+  name: Fixture node
+  sub: fixture
+  group: nchc
+  unit: gpu
+  hardware: fx-gpu
+  gpusPerNode: { value: 8, status: official, source: fx-src, verified: 2026-10-19 }
+  tpOptions: [1, 2, 4, 8]
+  calibration: fx-cal
+  vllmDefaults:
+    maxNumSeqs: { value: 1024, status: official, source: fx-src, verified: 2026-10-20 }
+    maxNumBatchedTokens: { value: 8192, status: official, source: fx-src, verified: 2026-10-20 }
+    maxConcurrentBatches: { value: 2, status: official, source: fx-src, verified: 2026-10-20 }
+    kvBlockSize: { value: 16, status: official, source: fx-src, verified: 2026-10-20 }
+    mlaKvBlockSize:
+      fp8Kv: { value: 64, status: official, source: fx-src, verified: 2026-10-20 }
+      bf16Kv: { value: 16, status: official, source: fx-src, verified: 2026-10-20 }

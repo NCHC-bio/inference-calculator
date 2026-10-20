@@ -1,0 +1,11 @@
+{
+  "metadata": {
+    "total_parameters": 119401317952,
+    "total_size": 120922770560
+  },
+  "weight_map": {
+    "language_model.lm_head.weight": "model-00001-of-00003.safetensors",
+    "language_model.model.layers.14.mlp.experts.gate_up_proj": "model-00002-of-00003.safetensors",
+    "language_model.model.layers.29.mlp.experts.gate_up_proj": "model-00003-of-00003.safetensors"
+  }
+}

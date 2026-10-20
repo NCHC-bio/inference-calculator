@@ -1,0 +1,169 @@
+{
+  "id": "mistralai/Mistral-Small-4-119B-2603",
+  "sha": "a11f36bebf709121056b1dbcc943d1c6afbe494d",
+  "siblings": [
+    {
+      "rfilename": ".gitattributes",
+      "size": 1939
+    },
+    {
+      "rfilename": "README.md",
+      "size": 16483
+    },
+    {
+      "rfilename": "SYSTEM_PROMPT.txt",
+      "size": 2372
+    },
+    {
+      "rfilename": "chat_template.jinja",
+      "size": 15168
+    },
+    {
+      "rfilename": "config.json",
+      "size": 2436
+    },
+    {
+      "rfilename": "consolidated-00001-of-00007.safetensors",
+      "size": 20000632534,
+      "lfs": {
+        "size": 20000632534
+      }
+    },
+    {
+      "rfilename": "consolidated-00002-of-00007.safetensors",
+      "size": 19997737172,
+      "lfs": {
+        "size": 19997737172
+      }
+    },
+    {
+      "rfilename": "consolidated-00003-of-00007.safetensors",
+      "size": 19997736948,
+      "lfs": {
+        "size": 19997736948
+      }
+    },
+    {
+      "rfilename": "consolidated-00004-of-00007.safetensors",
+      "size": 19997737108,
+      "lfs": {
+        "size": 19997737108
+      }
+    },
+    {
+      "rfilename": "consolidated-00005-of-00007.safetensors",
+      "size": 19997738276,
+      "lfs": {
+        "size": 19997738276
+      }
+    },
+    {
+      "rfilename": "consolidated-00006-of-00007.safetensors",
+      "size": 19861887138,
+      "lfs": {
+        "size": 19861887138
+      }
+    },
+    {
+      "rfilename": "consolidated-00007-of-00007.safetensors",
+      "size": 1073741920,
+      "lfs": {
+        "size": 1073741920
+      }
+    },
+    {
+      "rfilename": "consolidated.safetensors.index.json",
+      "size": 3619748
+    },
+    {
+      "rfilename": "generation_config.json",
+      "size": 132
+    },
+    {
+      "rfilename": "images/aime.png",
+      "size": 601172,
+      "lfs": {
+        "size": 601172
+      }
+    },
+    {
+      "rfilename": "images/image2.png",
+      "size": 152184,
+      "lfs": {
+        "size": 152184
+      }
+    },
+    {
+      "rfilename": "images/image3.png",
+      "size": 220228,
+      "lfs": {
+        "size": 220228
+      }
+    },
+    {
+      "rfilename": "images/lcr.png",
+      "size": 586377,
+      "lfs": {
+        "size": 586377
+      }
+    },
+    {
+      "rfilename": "images/livecode.png",
+      "size": 571479,
+      "lfs": {
+        "size": 571479
+      }
+    },
+    {
+      "rfilename": "model-00001-of-00003.safetensors",
+      "size": 49078433296,
+      "lfs": {
+        "size": 49078433296
+      }
+    },
+    {
+      "rfilename": "model-00002-of-00003.safetensors",
+      "size": 49132710896,
+      "lfs": {
+        "size": 49132710896
+      }
+    },
+    {
+      "rfilename": "model-00003-of-00003.safetensors",
+      "size": 22711829744,
+      "lfs": {
+        "size": 22711829744
+      }
+    },
+    {
+      "rfilename": "model.safetensors.index.json",
+      "size": 159870
+    },
+    {
+      "rfilename": "params.json",
+      "size": 1510
+    },
+    {
+      "rfilename": "processor_config.json",
+      "size": 701
+    },
+    {
+      "rfilename": "tekken.json",
+      "size": 16275354,
+      "lfs": {
+        "size": 16275354
+      }
+    },
+    {
+      "rfilename": "tokenizer.json",
+      "size": 17077420,
+      "lfs": {
+        "size": 17077420
+      }
+    },
+    {
+      "rfilename": "tokenizer_config.json",
+      "size": 21140
+    }
+  ]
+}

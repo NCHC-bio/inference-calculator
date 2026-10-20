@@ -1,0 +1,226 @@
+{
+  "id": "openai/gpt-oss-120b",
+  "sha": "b5c939de8f754692c1647ca79fbf85e8c1e70f8a",
+  "siblings": [
+    {
+      "rfilename": ".gitattributes",
+      "size": 1570
+    },
+    {
+      "rfilename": "LICENSE",
+      "size": 11357
+    },
+    {
+      "rfilename": "README.md",
+      "size": 7111
+    },
+    {
+      "rfilename": "USAGE_POLICY",
+      "size": 201
+    },
+    {
+      "rfilename": "chat_template.jinja",
+      "size": 16738
+    },
+    {
+      "rfilename": "config.json",
+      "size": 2089
+    },
+    {
+      "rfilename": "generation_config.json",
+      "size": 177
+    },
+    {
+      "rfilename": "metal/model.bin",
+      "size": 65238253568,
+      "lfs": {
+        "size": 65238253568
+      }
+    },
+    {
+      "rfilename": "model-00000-of-00014.safetensors",
+      "size": 4625017896,
+      "lfs": {
+        "size": 4625017896
+      }
+    },
+    {
+      "rfilename": "model-00001-of-00014.safetensors",
+      "size": 4115586736,
+      "lfs": {
+        "size": 4115586736
+      }
+    },
+    {
+      "rfilename": "model-00002-of-00014.safetensors",
+      "size": 4625017888,
+      "lfs": {
+        "size": 4625017888
+      }
+    },
+    {
+      "rfilename": "model-00003-of-00014.safetensors",
+      "size": 4115586752,
+      "lfs": {
+        "size": 4115586752
+      }
+    },
+    {
+      "rfilename": "model-00004-of-00014.safetensors",
+      "size": 4625017896,
+      "lfs": {
+        "size": 4625017896
+      }
+    },
+    {
+      "rfilename": "model-00005-of-00014.safetensors",
+      "size": 4115586696,
+      "lfs": {
+        "size": 4115586696
+      }
+    },
+    {
+      "rfilename": "model-00006-of-00014.safetensors",
+      "size": 4625017856,
+      "lfs": {
+        "size": 4625017856
+      }
+    },
+    {
+      "rfilename": "model-00007-of-00014.safetensors",
+      "size": 4060267176,
+      "lfs": {
+        "size": 4060267176
+      }
+    },
+    {
+      "rfilename": "model-00008-of-00014.safetensors",
+      "size": 4625017896,
+      "lfs": {
+        "size": 4625017896
+      }
+    },
+    {
+      "rfilename": "model-00009-of-00014.safetensors",
+      "size": 4170906304,
+      "lfs": {
+        "size": 4170906304
+      }
+    },
+    {
+      "rfilename": "model-00010-of-00014.safetensors",
+      "size": 4625017896,
+      "lfs": {
+        "size": 4625017896
+      }
+    },
+    {
+      "rfilename": "model-00011-of-00014.safetensors",
+      "size": 4115586752,
+      "lfs": {
+        "size": 4115586752
+      }
+    },
+    {
+      "rfilename": "model-00012-of-00014.safetensors",
+      "size": 4064660808,
+      "lfs": {
+        "size": 4064660808
+      }
+    },
+    {
+      "rfilename": "model-00013-of-00014.safetensors",
+      "size": 4625017896,
+      "lfs": {
+        "size": 4625017896
+      }
+    },
+    {
+      "rfilename": "model-00014-of-00014.safetensors",
+      "size": 4115586736,
+      "lfs": {
+        "size": 4115586736
+      }
+    },
+    {
+      "rfilename": "model.safetensors.index.json",
+      "size": 54511
+    },
+    {
+      "rfilename": "original/config.json",
+      "size": 377
+    },
+    {
+      "rfilename": "original/dtypes.json",
+      "size": 19658
+    },
+    {
+      "rfilename": "original/model--00001-of-00007.safetensors",
+      "size": 10544040680,
+      "lfs": {
+        "size": 10544040680
+      }
+    },
+    {
+      "rfilename": "original/model--00002-of-00007.safetensors",
+      "size": 10488721680,
+      "lfs": {
+        "size": 10488721680
+      }
+    },
+    {
+      "rfilename": "original/model--00003-of-00007.safetensors",
+      "size": 10488721688,
+      "lfs": {
+        "size": 10488721688
+      }
+    },
+    {
+      "rfilename": "original/model--00004-of-00007.safetensors",
+      "size": 10488721672,
+      "lfs": {
+        "size": 10488721672
+      }
+    },
+    {
+      "rfilename": "original/model--00005-of-00007.safetensors",
+      "size": 10488721680,
+      "lfs": {
+        "size": 10488721680
+      }
+    },
+    {
+      "rfilename": "original/model--00006-of-00007.safetensors",
+      "size": 10433402600,
+      "lfs": {
+        "size": 10433402600
+      }
+    },
+    {
+      "rfilename": "original/model--00007-of-00007.safetensors",
+      "size": 2316539800,
+      "lfs": {
+        "size": 2316539800
+      }
+    },
+    {
+      "rfilename": "original/model.safetensors.index.json",
+      "size": 37796
+    },
+    {
+      "rfilename": "special_tokens_map.json",
+      "size": 98
+    },
+    {
+      "rfilename": "tokenizer.json",
+      "size": 27868174,
+      "lfs": {
+        "size": 27868174
+      }
+    },
+    {
+      "rfilename": "tokenizer_config.json",
+      "size": 4200
+    }
+  ]
+}

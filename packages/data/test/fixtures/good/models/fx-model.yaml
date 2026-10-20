@@ -1,0 +1,13 @@
+id: fx-model
+name: Fixture model
+hfRepo: example/fx-model
+origin: { developer: Example Lab, country: US }
+totalParamsB: { value: 8, status: official, source: fx-src, verified: 2026-10-19 }
+layers: 32
+heads: 32
+kvHeads: 8
+headDim: 128
+hidden: 4096
+attention: gqa
+source: fx-src
+verified: 2026-10-19
