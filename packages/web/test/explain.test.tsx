@@ -19,6 +19,27 @@ describe('Explain', () => {
     await shown('說明');
   });
 
+  it('mouse: a click while hover-opened keeps it open (click is open-only for a mouse; final review)', async () => {
+    render(<Explain content="說明"><button>x</button></Explain>); const u = userEvent.setup(); const el = screen.getByText('x');
+    await u.hover(el);
+    await shown('說明');
+    fireEvent.pointerDown(el, { pointerType: 'mouse' });
+    fireEvent.click(el);
+    await new Promise((r) => setTimeout(r, 300));
+    await shown('說明');
+    // A second mouse click does not toggle it closed either.
+    fireEvent.pointerDown(el, { pointerType: 'mouse' });
+    fireEvent.click(el);
+    await new Promise((r) => setTimeout(r, 300));
+    await shown('說明');
+  });
+  it('mouse: a click on a closed trigger opens it', async () => {
+    render(<Explain content="說明"><button>x</button></Explain>); const el = screen.getByText('x');
+    fireEvent.pointerDown(el, { pointerType: 'mouse' });
+    fireEvent.click(el);
+    await shown('說明');
+  });
+
   // Touch: a tapped button may get no focus and no reliable mouseleave, so the popover needs other ways out.
   const openByTap = async () => {
     setMedia({ hoverNone: true });

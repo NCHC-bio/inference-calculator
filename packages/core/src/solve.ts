@@ -152,9 +152,11 @@ export function kvSizing(
  * Why a shape / scenario is infeasible. 'tp': no tensor-parallel size vLLM accepts fits the platform (head
  * divisibility, t ≤ gpusPerNode); 'context': input + output beyond the model's maxContext; 'weights': the weights
  * fit on no single-node shape; 'mem': the KV cache does not fit beside them; 'bw' / 'compute': per-user speed
- * below target, by the decode bottleneck; 'ttft': first-token time above target.
+ * below target, by the decode bottleneck; 'ttft': first-token time above target; 'scale': a deployment exists but its
+ * GPU (machine) count exceeds MAX_GPUS, the bound every public entry point accepts for a GPU or replica count (final
+ * review I2: that one platform is reported infeasible instead of the request throwing).
  */
-export type Why = 'tp' | 'context' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft';
+export type Why = 'tp' | 'context' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft' | 'scale';
 
 /**
  * Prefill queueing behind vLLM max_num_batched_tokens (Ruling R36, spec §5.2, §5.3), per replica / DP rank.
@@ -231,6 +233,8 @@ export function ctxWeightBytes(ctx: Pick<Ctx, 'model' | 'bytesPerParam' | 'weigh
   return ctx.weights?.resident ?? weightBytes(ctx.model, ctx.bytesPerParam);
 }
 export const MAX_N = 1e7;
+/** Largest GPU (machine) count, and so replica count, a result may use: the public API's input bound (api.ts schemas). */
+export const MAX_GPUS = 1e5;
 
 /**
  * KV-head counts the TP divisibility rule applies to: every attention layer group's kvHeads (falling back to the
@@ -435,7 +439,7 @@ export function shapeUsage(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, n
   };
 }
 
-const GB =(bytes: number) => (bytes / 1e9).toFixed(0);
+const GB = (bytes: number) => (bytes / 1e9).toFixed(0);
 
 /** input + output beyond the model's maxContext (review C3); a model without maxContext never exceeds. */
 export function exceedsMaxContext(m: Pick<Model, 'maxContext'>, w: Pick<WorkloadIn, 'inputTokens' | 'outputTokens'>): boolean {
@@ -528,6 +532,7 @@ export function singleUserWhy(
  * model ('context', review C3). Then a single user is checked at every legal t; if none works, the
  * reason comes from the t that got furthest: weights, then one sequence's KV beside the weights
  * ('mem', Ruling R25), then TTFT (independent of n and replicas), then per-user speed (Ruling R24).
+ * A fewest-GPU shape above MAX_GPUS GPUs (machines) is reported as 'scale' (final review I2).
  * Basis: spec §10.2 (allocation), §8.3.3 (concurrency).
  */
 export function solveMinGpus(
@@ -573,6 +578,10 @@ export function solveMinGpus(
   }
   // The single-user pre-check found a t where one user works, so one user per replica always does.
   if (!best) throw new Error('solveMinGpus: no feasible shape although one user fits (unreachable)');
+  if (best.gpus > MAX_GPUS) {
+    const what = platform.unit === 'machine' ? '需要的機器數' : '需要的 GPU 數';
+    return { ok: false, why: 'scale', detail: `${what}（${best.gpus}）超過計算上限（${MAX_GPUS}）` };
+  }
   return { ok: true, shape: best.shape, gpus: best.gpus, check: best.check };
 }
 

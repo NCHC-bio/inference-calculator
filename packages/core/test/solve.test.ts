@@ -5,6 +5,7 @@ import {
   checkShape,
   kvSizing,
   legalTpOptions,
+  MAX_GPUS,
   maxConcurrent,
   maxConcurrentForGpus,
   shapeUsage,
@@ -236,14 +237,20 @@ describe('checkShape and solver details', () => {
     expect(maxConcurrentForGpus(chatCtx, mac, 3, 'expected')).toEqual({ n: 0, shape: null });
     expect(maxConcurrentForGpus(chatCtx, h200, 0, 'expected')).toEqual({ n: 0, shape: null });
   });
-  it('no replica cap: 10 million users get an answer, consistent with the capacity path (review: old 999 cap)', () => {
-    const r = solveMinGpus(chatCtx, h200, 1e7, 'expected');
+  it('no replica cap: 1 million users get an answer, consistent with the capacity path (review: old 999 cap)', () => {
+    const r = solveMinGpus(chatCtx, h200, 1e6, 'expected');
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('unreachable');
     expect(r.shape.replicas).toBeGreaterThan(999);
+    expect(r.gpus).toBeLessThanOrEqual(MAX_GPUS);
     // The capacity of exactly that many GPUs covers the users, and one replica fewer does not.
-    expect(maxConcurrent(chatCtx, h200, r.shape, 'expected')).toBeGreaterThanOrEqual(1e7);
-    expect(maxConcurrent(chatCtx, h200, { ...r.shape, replicas: r.shape.replicas - 1 }, 'expected')).toBeLessThan(1e7);
+    expect(maxConcurrent(chatCtx, h200, r.shape, 'expected')).toBeGreaterThanOrEqual(1e6);
+    expect(maxConcurrent(chatCtx, h200, { ...r.shape, replicas: r.shape.replicas - 1 }, 'expected')).toBeLessThan(1e6);
+  });
+  it("a fewest-GPU shape above MAX_GPUS is 'scale', naming the bound (final review I2)", () => {
+    const r = solveMinGpus(chatCtx, h200, 1e7, 'expected');
+    expect(r).toMatchObject({ ok: false, why: 'scale' });
+    expect(!r.ok && r.detail).toMatch(/^需要的 GPU 數（\d+）超過計算上限（100000）$/);
   });
   it('includeComm defaults on and only slows things down', () => {
     const on = checkShape({ ...chatCtx, includeComm: undefined }, h200, { tp: 8, replicas: 1 }, 100, 'expected');

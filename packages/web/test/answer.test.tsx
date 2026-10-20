@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { shown } from './helpers';
@@ -53,6 +53,21 @@ describe('AnswerLine', () => {
     expect(screen.getAllByText(est.text, { exact: false }).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByText('查看全部依據 →'));
     await waitFor(() => expect(screen.getAllByTestId('basis-item').length).toBeGreaterThan(0));
+  });
+  it('estimate tag popover also lists unverified inputs, each with its status tag (spec §2.1 rule 2; final review I4)', async () => {
+    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const unv = r.basis.find((x) => x.status === 'unverified')!;
+    const est = r.basis.find((x) => x.status === 'estimate')!;
+    expect(unv).toBeDefined();
+    render(<App />); await userEvent.click(screen.getByText('推估'));
+    await shown('查看全部依據 →');
+    const pop = screen.getByRole('tooltip');
+    const items = within(pop).getAllByTestId('estimate-item');
+    const unvItem = items.find((x) => x.textContent!.includes(unv.text))!;
+    expect(unvItem).toBeDefined();
+    expect(within(unvItem).getByText('未查證')).toBeInTheDocument();
+    const estItem = items.find((x) => x.textContent!.includes(est.text))!;
+    expect(within(estItem).getByText('推估')).toBeInTheDocument();
   });
   it('cite button is present but disabled', () => {
     render(<App />); expect(screen.getByRole('button', { name: /引用/ })).toBeDisabled();

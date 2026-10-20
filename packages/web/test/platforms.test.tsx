@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
@@ -74,6 +74,42 @@ describe('PlatformList', () => {
     await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
     expect(screen.getByRole('tooltip')).toHaveTextContent('目前人數 / 這些機器在你要求的速度下最多能同時服務的人數');
     expect(within(row).getByTestId('row-toggle')).toHaveAttribute('aria-expanded', 'false');
+  });
+  it('machine icons explain themselves on tap and on focus, without toggling the row (spec §8.3.3; final review I5)', async () => {
+    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const p = r.perPlatform.find((x) => x.platform === r.best)!;
+    const plat = b.platforms[r.best!]!;
+    const per = plat.gpusPerNode.value;
+    if (!p.expected.ok) throw new Error('best is feasible');
+    const cons = p.conservative.ok ? Math.max(0, Math.ceil(p.conservative.gpus / per) - Math.ceil(p.expected.gpus / per)) : 0;
+    const label = `每個圖示是 1 個 node（${per} 張 GPU）：實心 ${Math.ceil(p.expected.gpus / per)} 個為預期，虛線 ${cons} 個為保守估計多出的`;
+    setMedia({ hoverNone: true });
+    render(<App />); const row = bestRow();
+    // Hidden from the role query in jsdom: antd's xs={0} column rule applies without media-query evaluation.
+    const icons = within(row).getByRole('img', { name: label, hidden: true });
+    expect(icons).toHaveAttribute('tabindex', '0');
+    await userEvent.click(icons);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
+    expect(screen.getByRole('tooltip')).toHaveTextContent(label);
+    expect(within(row).getByTestId('row-toggle')).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
+    // jsdom will not focus inside a display:none column, so the focus event is dispatched directly.
+    fireEvent.focusIn(icons);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
+  });
+  it("a platform beyond the size bound shows ✗ 規模超出上限 with core's detail (final review I2)", async () => {
+    const url = '?m=gemma-4-26b-a4b-it&q=bf16&w=chat&n=200000';
+    const b = getBundle(); const r = (computeView(b, decodeUrl(b, url)) as NeedView).result;
+    const spark = r.perPlatform.find((x) => x.platform === 'dgx-spark')!;
+    expect(!spark.expected.ok && spark.expected.why).toBe('scale');
+    history.replaceState(null, '', '/' + url);
+    render(<App />);
+    const row = rows().find((x) => x.dataset.platform === 'dgx-spark')!;
+    const tag = within(row).getByText(/^✗ /);
+    expect(tag).toHaveTextContent('✗ 規模超出上限');
+    await userEvent.click(tag);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(spark.expected.ok ? '' : spark.expected.detail));
   });
   it('have mode shows no platform rows', async () => {
     render(<App />);

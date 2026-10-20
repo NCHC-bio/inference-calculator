@@ -15,6 +15,7 @@ import {
   capacityWhy,
   checkShape,
   legalTpOptions,
+  MAX_GPUS,
   MAX_N,
   mlaBackendBlocks,
   shapeProfile,
@@ -46,7 +47,6 @@ export { CoreInputError, type CoreInputErrorCode } from './errors';
 // ---------------------------------------------------------------------------------------------
 
 const MAX_USERS = 1e7;
-const MAX_GPUS = 1e5;
 const MAX_TOKENS = 1e7;
 
 /** Bounded positive integer: bounds keep every product in the formulas finite. */
@@ -1225,6 +1225,10 @@ function verifyFor(
     // vLLM accepts no TP size for this model on this platform, so there is nothing to run (review M-10).
     return { verifyCommand: '', verifyNote: `${solved.detail}，沒有可執行的驗證指令` };
   }
+  if (!solved.ok && solved.why === 'scale') {
+    // More GPUs (machines) than the bound: no command is generated for a deployment beyond it (final review I2).
+    return { verifyCommand: '', verifyNote: `${solved.detail}，沒有產生驗證指令` };
+  }
   if (!solved.ok && solved.why === 'weights') {
     // No shape holds the weights, so there is nothing to run (finding 9).
     return { verifyCommand: '', verifyNote: `模型權重放不進${opts?.where ?? '單一 node'}，沒有可執行的驗證指令（跨 node 切分尚未支援）` };
@@ -1293,8 +1297,8 @@ export type PlatformResult = {
   verifyCommand: string;
   /**
    * Why verifyCommand is empty: the scenario needs a checkpoint the catalog does not list
-   * (requiresRequantizedCheckpoint), no legal TP, the weights fit on no single-node shape, or the context exceeds the
-   * model's maxContext. Or, with a command, why it is expected to fail: the scenario is infeasible for memory /
+   * (requiresRequantizedCheckpoint), no legal TP, the weights fit on no single-node shape, the context exceeds the
+   * model's maxContext, or the deployment needs more GPUs than MAX_GPUS ('scale'). Or, with a command, why it is expected to fail: the scenario is infeasible for memory /
    * speed / TTFT (review M-8).
    */
   verifyNote?: string;
@@ -1428,7 +1432,7 @@ export type CapacityResult = QuantFields &
     queueing: Queueing | null;
     /** Usage of one replica of the expected shape at expected.n users (shapeUsage; spec §8.3.3); null when n = 0. */
     usage: ShapeUsage | null;
-    /** Why the expected capacity is 0 ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft'); null when n > 0. */
+    /** Why the expected capacity is 0 ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft' | 'scale'); null when n > 0. */
     why: Why | null;
     /** Text of `why`. */
     detail?: string;
@@ -1527,7 +1531,7 @@ export type FeasibleModel = QuantFields &
     gpus?: number;
     /**
      * Why not feasible within the GPUs given (final-review I3; the text moved to `detail`): the solver's reason
-     * ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft') when no deployment exists; when one exists but
+     * ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft' | 'scale') when no deployment exists; when one exists but
      * needs more GPUs, the reason the best split of the GPUs given fails for `users`.
      */
     why?: Why;

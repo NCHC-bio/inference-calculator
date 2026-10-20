@@ -10,4 +10,5 @@ export const WHY: Record<Why, MsgKey> = {
   bw: 'why.bw',
   compute: 'why.compute',
   ttft: 'why.ttft',
+  scale: 'why.scale',
 };

@@ -154,7 +154,7 @@ test('the best row expands to four usage bars and a typing demo that starts in t
   for (const key of ['usage.mem', 'usage.bw', 'usage.compute', 'usage.ttft'] as const) {
     await expect(detail.getByText(tZh(key), { exact: true })).toBeVisible();
   }
-  await expect(detail.getByTestId('typed')).toHaveText(/\S/, { timeout: Math.max(0, (ttftSec + 2) * 1000 - (Date.now() - started)) });
+  await expect(detail.getByTestId('typed')).toHaveText(/\S/, { timeout: Math.max(1000, (ttftSec + 2) * 1000 - (Date.now() - started)) });
   await noHorizontalScroll(page);
 });
 

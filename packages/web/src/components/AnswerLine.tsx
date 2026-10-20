@@ -6,7 +6,7 @@ import { getBundle } from '../bundle';
 import { useView } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
 import { useCalc } from '../state/store';
-import { STATUS_COLOR, uniqueByPath } from './BasisDrawer';
+import { STATUS_COLOR, StatusTag, uniqueByPath } from './BasisDrawer';
 import { fmt, needAnswerParts } from './answerText';
 import { Explain } from './Explain';
 
@@ -46,13 +46,15 @@ function haveShown(r: CapacityResult, lang: Lang, tr: TFn, primary: string, erro
   };
 }
 
+/** Every estimate and unverified input of the result, each with its status tag (spec §2.1 rule 2: the weakest inputs are listed). */
 function EstimateList({ basis, tr, onAll }: { basis: BasisItem[]; tr: TFn; onAll: () => void }) {
-  const est = uniqueByPath(basis.filter((x) => x.status === 'estimate'));
+  const weak = uniqueByPath(basis.filter((x) => x.status === 'estimate' || x.status === 'unverified'));
   return (
     <div style={{ maxWidth: 340 }}>
-      {est.map((x) => (
-        <div key={x.path} style={{ fontSize: 12, margin: '4px 0' }}>
-          • {x.text}
+      {weak.map((x) => (
+        <div key={x.path} data-testid="estimate-item" style={{ fontSize: 12, margin: '4px 0' }}>
+          <StatusTag status={x.status} />
+          {x.text}
         </div>
       ))}
       <Button type="link" size="small" style={{ padding: 0 }} onClick={onAll}>
@@ -96,11 +98,11 @@ export function AnswerLine(): JSX.Element {
           </Explain>
         )}
         {r.hasUser && (
-          <Tooltip title={tr('tag.user.tip')}>
-            <Tag color={STATUS_COLOR.user} tabIndex={0}>
+          <Explain content={tr('tag.user.tip')}>
+            <Tag color={STATUS_COLOR.user} tabIndex={0} style={{ cursor: 'pointer' }}>
               {tr('tag.user')}
             </Tag>
-          </Tooltip>
+          </Explain>
         )}
         <div style={{ flex: 1 }} />
         <Button icon={<InfoCircleOutlined />} onClick={openBasis}>

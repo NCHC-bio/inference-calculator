@@ -85,9 +85,12 @@ export function PlatformRow({ r, users, best, open, onToggle }: { r: PlatformRes
     body = (
       <>
         <Col xs={0} md={7}>
-          <span role="img" aria-label={iconLabel}>
-            <Isotype expectedGpus={expected.gpus} conservativeGpus={consGpus} gpusPerNode={perNode} unit={plat.unit} />
-          </span>
+          {/* The icons explain themselves on hover, tap and focus (spec §8.3.3); a tap does not toggle the row. */}
+          <Explain content={<div style={{ maxWidth: 320 }}>{iconLabel}</div>}>
+            <span role="img" aria-label={iconLabel} tabIndex={0} onClick={stop} style={{ display: 'inline-block', cursor: 'help' }}>
+              <Isotype expectedGpus={expected.gpus} conservativeGpus={consGpus} gpusPerNode={perNode} unit={plat.unit} />
+            </span>
+          </Explain>
         </Col>
         <Col xs={12} md={3} style={{ textAlign: 'right' }}>
           <div data-testid="count" style={{ fontSize: 24, fontWeight: 800, lineHeight: 1 }}>

@@ -1652,6 +1652,10 @@ describe('usage (spec §8.3.3 細節面板)', () => {
     expect(r.expected.ok).toBe(true);
     const u = r.usage!;
     expect(u.shape).toEqual(r.expected.ok && r.expected.shape);
+    // Task 1 deferred minor: the capacity usage is that of the capacity's expected shape too.
+    const { users: _n, ...cq } = q;
+    const c = estimateCapacity(b, { ...cq, platform: 'nano4-h200', gpus: 8 });
+    expect(c.usage!.shape).toEqual(c.expected.shape);
     expect(u.tokPerSecPerUser).toBeCloseTo(r.expected.ok ? r.expected.check.tokPerSecPerUser : NaN, 9);
     expect(u.ttftSec).toBeCloseTo(r.expected.ok ? r.expected.check.ttftSec : NaN, 9);
     expect(u.memory.weightsBytes + u.memory.reserveBytes + u.memory.kvBytes).toBeLessThanOrEqual(u.memory.usableBytes);
@@ -1672,6 +1676,32 @@ describe('usage (spec §8.3.3 細節面板)', () => {
     expect(none.usage).toBeNull();
   });
 });
+describe("scale bound (final review I2: 'scale')", () => {
+  const b = realBundle();
+  // dgx-spark serves one replica per machine, so 200000 chat users on gemma-4-26b-a4b-it bf16 need more machines than
+  // the replica bound (1e5); that one platform used to throw CoreInputError for the whole request.
+  const q = { model: 'gemma-4-26b-a4b-it', quant: 'bf16', workload: 'chat', speed: 'smooth', users: 200000 } as const;
+  it('estimateRequirements: the platform beyond the bound is infeasible with why scale; NCHC platforms still ok', () => {
+    const r = estimateRequirements(b, q);
+    const spark = r.perPlatform.find((p) => p.platform === 'dgx-spark')!;
+    expect(spark.expected.ok).toBe(false);
+    expect(!spark.expected.ok && spark.expected.why).toBe('scale');
+    expect(!spark.expected.ok && spark.expected.detail).toContain('100000');
+    expect(spark.conservative.ok).toBe(false);
+    expect(spark.usage).toBeNull();
+    expect(spark.verifyCommand).toBe('');
+    expect(spark.verifyNote).toContain('100000');
+    for (const p of r.perPlatform.filter((x) => b.platforms[x.platform]!.group === 'nchc')) expect(p.expected.ok).toBe(true);
+    expect(r.best).not.toBeNull();
+  });
+  it('findFeasibleModels: the same scenario is not feasible on dgx-spark, why scale, without throwing', () => {
+    const items = findFeasibleModels(b, { workload: 'chat', speed: 'smooth', platform: 'dgx-spark', gpus: 8, users: 200000, quant: 'bf16' });
+    const g = items.find((x) => x.model === 'gemma-4-26b-a4b-it')!;
+    expect(g.feasible).toBe(false);
+    expect(g.why).toBe('scale');
+  });
+});
+
 describe('quantOptions', () => {
   const b = realBundle();
   it('matches the quantizations findFeasibleModels evaluates, per model', () => {

@@ -23,7 +23,7 @@ export function PlatformList(): JSX.Element | null {
     const tdp = bundle.hardware[hw]?.tdpW;
     return tdp?.value === null && tdp.conflict ? tr('detail.powerNote', { note, why: tdp.conflict }) : note;
   };
-  const firstSelf =Object.keys(platforms).find((id) => platforms[id]!.group === 'self');
+  const firstSelf = Object.keys(platforms).find((id) => platforms[id]!.group === 'self');
   return (
     <div data-testid="platform-list" style={{ marginTop: 12 }}>
       {Object.keys(platforms).map((id) => {

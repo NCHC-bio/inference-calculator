@@ -1,7 +1,7 @@
-import { App as AntApp, ConfigProvider, Segmented, theme } from 'antd';
+import { Alert, App as AntApp, ConfigProvider, Segmented, theme } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
-import { useEffect } from 'react';
+import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { getBundle } from './bundle';
 import { useLang, useT } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
@@ -27,6 +27,40 @@ function PageTheme({ dark }: { dark: boolean }) {
     document.documentElement.lang = lang;
   }, [lang]);
   return null;
+}
+
+function ErrorAlert({ error }: { error: unknown }) {
+  const tr = useT();
+  return (
+    <Alert
+      type="error"
+      showIcon
+      role="alert"
+      title={tr('app.error')}
+      description={error instanceof Error ? error.message : String(error)}
+      style={{ margin: 16 }}
+    />
+  );
+}
+
+/**
+ * Last line of defence (final review C1): an error thrown while rendering shows an alert instead of React unmounting
+ * the whole page. Input problems are handled before this (CoreInputError → error view); this catches the rest.
+ */
+export class ErrorBoundary extends Component<{ children: ReactNode }, { error: unknown }> {
+  state: { error: unknown } = { error: null };
+
+  static getDerivedStateFromError(error: unknown): { error: unknown } {
+    return { error };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo): void {
+    console.error(error, info.componentStack);
+  }
+
+  render(): ReactNode {
+    return this.state.error === null ? this.props.children : <ErrorAlert error={this.state.error} />;
+  }
 }
 
 function Shell() {
@@ -64,7 +98,9 @@ function ThemedApp() {
     >
       <AntApp>
         <PageTheme dark={dark} />
-        <Shell />
+        <ErrorBoundary>
+          <Shell />
+        </ErrorBoundary>
       </AntApp>
     </ConfigProvider>
   );

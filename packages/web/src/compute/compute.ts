@@ -48,20 +48,30 @@ export function computeView(bundle: Bundle, s: CalcState): View {
   }
 }
 
-/** Per model: how many platforms run it (expected.ok) at the current users / workload / speed. */
+/**
+ * Per model: how many platforms run it (expected.ok) at the current users / workload / speed. A model core rejects
+ * with CoreInputError for these inputs counts as runnable on none (final review C1: one model's rejection used to
+ * throw out of the menu render and blank the page); anything else is rethrown.
+ */
 export function modelFeasibility(bundle: Bundle, s: CalcState): Record<string, { ok: number; total: number }> {
   const out: Record<string, { ok: number; total: number }> = {};
+  const total = Object.keys(bundle.platforms).length;
   for (const id of Object.keys(bundle.models)) {
     const opts = quantOptions(bundle, id);
     const quant = opts.includes(s.quant) ? s.quant : opts[0]!;
-    const r = estimateRequirements(bundle, {
-      model: id,
-      quant,
-      workload: s.workload,
-      speed: s.speed,
-      users: s.users,
-    });
-    out[id] = { ok: r.perPlatform.filter((p) => p.expected.ok).length, total: r.perPlatform.length };
+    try {
+      const r = estimateRequirements(bundle, {
+        model: id,
+        quant,
+        workload: s.workload,
+        speed: s.speed,
+        users: s.users,
+      });
+      out[id] = { ok: r.perPlatform.filter((p) => p.expected.ok).length, total: r.perPlatform.length };
+    } catch (e) {
+      if (!(e instanceof CoreInputError)) throw e;
+      out[id] = { ok: 0, total };
+    }
   }
   return out;
 }

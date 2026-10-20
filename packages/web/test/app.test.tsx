@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { App } from '../src/App';
+import { describe, expect, it, vi } from 'vitest';
+import { App, ErrorBoundary } from '../src/App';
+import { renderStore } from './helpers';
 import { getBundle } from '../src/bundle';
 import { t } from '../src/i18n';
 import { setMedia } from './setup';
@@ -17,6 +18,31 @@ describe('App', () => {
     render(<App />);
     expect(screen.getByText(t('en', 'mode.need'))).toBeInTheDocument();
     expect(t('en', 'mode.need')).toBe('How much do I need');
+  });
+});
+
+function Boom(): never {
+  throw new Error('boom');
+}
+
+describe('ErrorBoundary', () => {
+  it('renders an alert instead of unmounting the page when a component throws (final review C1)', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      renderStore(
+        <div>
+          <span>still here</span>
+          <ErrorBoundary>
+            <Boom />
+          </ErrorBoundary>
+        </div>,
+      );
+      expect(screen.getByText('still here')).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent(t('zh-TW', 'app.error'));
+      expect(screen.getByRole('alert')).toHaveTextContent('boom');
+    } finally {
+      quiet.mockRestore();
+    }
   });
 });
 

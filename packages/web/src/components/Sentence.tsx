@@ -1,9 +1,9 @@
 import { quantOptions } from '@nchc/core';
 import { InputNumber, Tag, Typography } from 'antd';
-import { useMemo, useState, type JSX } from 'react';
+import { useId, useMemo, useState, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useModelFeasibility } from '../compute/useResults';
-import { useT } from '../i18n';
+import { useLang, useT } from '../i18n';
 import { HAVE_MAX, USERS_MAX } from '../state/state';
 import { useCalc } from '../state/store';
 import { OptionSelect, type Opt } from './OptionSelect';
@@ -14,31 +14,47 @@ type CountProps = { value: number; max: number; ariaLabel: string; width: number
  * Integer input. Every edit is dispatched and the reducer keeps the last valid value; the draft only mirrors
  * what is typed, and blur shows the store's value again. No min/max on InputNumber itself: it would clamp an
  * out-of-range entry on blur (0 → 1) and dispatch that, overwriting the last valid value. The range is still
- * announced through aria-valuemin / aria-valuemax.
+ * announced through aria-valuemin / aria-valuemax. While the draft differs from the value in use (out of range or
+ * empty), the input is marked invalid and a hint states the range, so the answer never silently disagrees with what
+ * is typed (final review I3).
  */
 function CountInput({ value, max, ariaLabel, width, onChange }: CountProps) {
+  const tr = useT();
+  const lang = useLang();
+  const hintId = useId();
   const [draft, setDraft] = useState<number | null>(value);
   const [editing, setEditing] = useState(false);
+  const invalid = editing && draft !== value;
   return (
-    <InputNumber<number>
-      aria-label={ariaLabel}
-      aria-valuemin={1}
-      aria-valuemax={max}
-      variant="underlined"
-      size="large"
-      precision={0}
-      style={{ width }}
-      value={editing ? draft : value}
-      onFocus={() => {
-        setDraft(value);
-        setEditing(true);
-      }}
-      onChange={(v) => {
-        setDraft(v);
-        onChange(v);
-      }}
-      onBlur={() => setEditing(false)}
-    />
+    <>
+      <InputNumber<number>
+        aria-label={ariaLabel}
+        aria-valuemin={1}
+        aria-valuemax={max}
+        aria-invalid={invalid}
+        aria-describedby={invalid ? hintId : undefined}
+        status={invalid ? 'error' : undefined}
+        variant="underlined"
+        size="large"
+        precision={0}
+        style={{ width }}
+        value={editing ? draft : value}
+        onFocus={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+        onChange={(v) => {
+          setDraft(v);
+          onChange(v);
+        }}
+        onBlur={() => setEditing(false)}
+      />
+      {invalid && (
+        <Typography.Text type="danger" id={hintId} style={{ fontSize: 12, marginInlineStart: 4 }}>
+          {tr('count.range', { max: new Intl.NumberFormat(lang).format(max) })}
+        </Typography.Text>
+      )}
+    </>
   );
 }
 
@@ -68,14 +84,10 @@ export function Sentence(): JSX.Element {
 
   const workloads = useMemo(() => ofRecord(b.workloads, (w) => w.description), [b]);
   const speeds = useMemo(() => ofRecord(b.speedPresets, (p) => p.description), [b]);
+  // No description: the label already is name + sub, and a line repeating it adds nothing (final review).
   const platforms = useMemo<Opt[]>(
-    () =>
-      Object.entries(b.platforms).map(([value, p]) => ({
-        value,
-        label: p.sub ? `${p.name} ${p.sub}` : p.name,
-        desc: tr('platform.desc', { name: p.name, sub: p.sub }),
-      })),
-    [b, tr],
+    () => Object.entries(b.platforms).map(([value, p]) => ({ value, label: p.sub ? `${p.name} ${p.sub}` : p.name })),
+    [b],
   );
   const models = useMemo<Opt[]>(
     () =>
