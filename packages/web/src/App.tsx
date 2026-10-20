@@ -6,6 +6,7 @@ import { getBundle } from './bundle';
 import { useLang, useT } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import type { Mode } from './state/state';
+import { Sentence } from './components/Sentence';
 import { antdTheme, useDarkMode } from './theme';
 
 /** antd does not paint body: sync page background, text colour and color-scheme from the theme tokens. */
@@ -37,6 +38,7 @@ function Shell() {
           { value: 'have', label: tr('mode.have') },
         ]}
       />
+      <Sentence />
       <footer style={{ marginTop: 24, opacity: 0.65 }}>
         {tr('footer.dataVersion', { version: getBundle().meta.dataVersion })}
       </footer>

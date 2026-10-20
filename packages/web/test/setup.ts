@@ -51,3 +51,22 @@ beforeEach(() => {
   history.replaceState(null, '', '/');
 });
 afterEach(cleanup);
+
+// jsdom has no ResizeObserver; antd popups (rc-trigger, virtual list) observe their size.
+globalThis.ResizeObserver ??= class {
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+} as unknown as typeof ResizeObserver;
+
+
+// jsdom never runs CSS animations, so animationend/transitionend never fire and rc-motion would leave popups at
+// opacity 0 mid-"appear". rc-motion feature-detects support from the event constructors and the (vendor-prefixed)
+// animation/transition style properties; removing them makes it skip motion. Runs before any test imports antd.
+delete (window as { AnimationEvent?: unknown }).AnimationEvent;
+delete (window as { TransitionEvent?: unknown }).TransitionEvent;
+for (const prefix of ['Webkit', 'Moz', 'ms', 'O']) {
+  for (const prop of ['Animation', 'Transition']) {
+    for (let o: object | null = document.createElement('div').style; o; o = Object.getPrototypeOf(o)) delete (o as Record<string, unknown>)[prefix + prop];
+  }
+}
