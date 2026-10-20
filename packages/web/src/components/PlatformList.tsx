@@ -9,7 +9,7 @@ import { PlatformRow } from './PlatformRow';
 /** 每個平台一列（spec §8.3.3-4），照 bundle 的順序；只在 need 模式顯示。 */
 export function PlatformList(): JSX.Element | null {
   const tr = useT();
-  const [{ openRow, users }, dispatch] = useCalc();
+  const [{ openRow }, dispatch] = useCalc();
   const view = useView();
   if (view.kind !== 'need') return null;
   const { result } = view;
@@ -31,12 +31,12 @@ export function PlatformList(): JSX.Element | null {
             )}
             <PlatformRow
               r={r}
-              users={users}
+              users={view.users}
               best={result.best === id}
               open={open}
               onToggle={() => dispatch({ type: 'openRow', id: open ? null : id })}
             />
-            {/* Task 8: <RowDetail> renders here when `open`. */}
+            {/* Task 8: <RowDetail id={rowDetailId(id)}> renders here when `open` (the toggle's aria-controls). */}
           </Fragment>
         );
       })}

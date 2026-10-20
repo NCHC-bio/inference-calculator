@@ -47,12 +47,25 @@ describe('PlatformList', () => {
     expect(tag).toHaveTextContent('✗ 模型放不下');
     const detail = mac.expected.ok ? '' : mac.expected.detail;
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(detail));
-    expect(row).not.toHaveAttribute('aria-expanded');
+    expect(within(row).queryByTestId('row-toggle')).toBeNull();
+    expect(within(row).queryByRole('button')).toBeNull();
   });
   it('feasible row toggles open by click and Enter', async () => {
-    render(<App />); const row = bestRow();
-    await userEvent.click(row); expect(row).toHaveAttribute('aria-expanded', 'true');
-    row.focus(); await userEvent.keyboard('{Enter}'); expect(row).toHaveAttribute('aria-expanded', 'false');
+    render(<App />); const btn = within(bestRow()).getByTestId('row-toggle');
+    expect(btn.tagName).toBe('BUTTON');
+    await userEvent.click(btn); expect(btn).toHaveAttribute('aria-expanded', 'true');
+    btn.focus(); await userEvent.keyboard('{Enter}'); expect(btn).toHaveAttribute('aria-expanded', 'false');
+  });
+  it('the expand control is a real button; the row itself is not interactive (no nested interactive content)', () => {
+    render(<App />); const row = bestRow(); const btn = within(row).getByTestId('row-toggle');
+    expect(row).not.toHaveAttribute('role'); expect(row).not.toHaveAttribute('tabindex'); expect(row).not.toHaveAttribute('aria-expanded');
+    expect(btn).toHaveAttribute('aria-controls');
+    expect(within(btn).queryByTestId('capacity')).toBeNull();
+  });
+  it('a mouse click elsewhere on the row toggles it once', async () => {
+    render(<App />); const row = bestRow(); const btn = within(row).getByTestId('row-toggle');
+    await userEvent.click(within(row).getByTestId('count')); expect(btn).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(within(row).getByTestId('count')); expect(btn).toHaveAttribute('aria-expanded', 'false');
   });
   it('touch: tapping the capacity bar opens its explanation without toggling the row (Review Focus 5)', async () => {
     setMedia({ hoverNone: true });
@@ -60,7 +73,7 @@ describe('PlatformList', () => {
     await userEvent.click(within(row).getByTestId('capacity'));
     await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
     expect(screen.getByRole('tooltip')).toHaveTextContent('目前人數 / 這些機器在你要求的速度下最多能同時服務的人數');
-    expect(row).toHaveAttribute('aria-expanded', 'false');
+    expect(within(row).getByTestId('row-toggle')).toHaveAttribute('aria-expanded', 'false');
   });
   it('have mode shows no platform rows', async () => {
     render(<App />);

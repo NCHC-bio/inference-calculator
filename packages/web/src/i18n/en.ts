@@ -61,7 +61,7 @@ const en = {
   'platforms.count.gpu': 'GPUs',
   'platforms.count.machine': 'machines',
   'platforms.conservative': 'Conservative {n} {unit}',
-  'platforms.conservativeNone': 'Conservative —',
+  'platforms.conservativeNone': '{unit} · Conservative —',
   'platforms.isotype.gpu': 'Each icon is 1 node ({perNode} GPUs): {expected} solid are expected, {extra} dashed are the extra the conservative estimate needs',
   'platforms.isotype.machine': 'Each icon is 1 machine: {expected} solid are expected, {extra} dashed are the extra the conservative estimate needs',
   'capacity.text': '{users} / {max} people at the same time',

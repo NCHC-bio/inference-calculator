@@ -11,6 +11,7 @@ describe('compute layer', () => {
   it('need mode returns estimateRequirements for the state', () => {
     const v = computeView(b, s0);
     expect(v.kind).toBe('need');
+    expect(v.kind === 'need' && v.users).toBe(s0.users);
     expect(v.kind === 'need' && v.result).toEqual(
       estimateRequirements(b, { model: s0.model, quant: s0.quant, workload: s0.workload, speed: s0.speed, users: s0.users }),
     );

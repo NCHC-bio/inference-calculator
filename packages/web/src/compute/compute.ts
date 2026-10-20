@@ -9,7 +9,8 @@ import {
 } from '@nchc/core';
 import type { CalcState } from '../state/state';
 
-export type NeedView = { kind: 'need'; result: RequirementResult };
+/** `users` is the (deferred) user count the result was computed for. */
+export type NeedView = { kind: 'need'; result: RequirementResult; users: number };
 export type HaveView = { kind: 'have'; result: CapacityResult };
 export type ErrorView = { kind: 'error'; message: string };
 export type View = NeedView | HaveView | ErrorView;
@@ -32,6 +33,7 @@ export function computeView(bundle: Bundle, s: CalcState): View {
     }
     return {
       kind: 'need',
+      users: s.users,
       result: estimateRequirements(bundle, {
         model: s.model,
         quant: s.quant,

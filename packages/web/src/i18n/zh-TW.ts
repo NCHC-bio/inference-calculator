@@ -62,7 +62,7 @@ const zhTW = {
   'platforms.count.gpu': '張 GPU',
   'platforms.count.machine': '台',
   'platforms.conservative': '保守 {n} {unit}',
-  'platforms.conservativeNone': '保守 —',
+  'platforms.conservativeNone': '{unit} · 保守 —',
   'platforms.isotype.gpu': '每個圖示是 1 個 node（{perNode} 張 GPU）：實心 {expected} 個為預期，虛線 {extra} 個為保守估計多出的',
   'platforms.isotype.machine': '每個圖示是 1 台：實心 {expected} 台為預期，虛線 {extra} 台為保守估計多出的',
   'capacity.text': '同時 {users} / {max} 人',
