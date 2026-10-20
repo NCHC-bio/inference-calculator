@@ -2,11 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 import { describe, expect, it } from 'vitest';
+import { shown } from './helpers';
 import { Explain } from '../src/components/Explain';
 import { setMedia } from './setup';
 
-// antd popups render first at opacity 0 while they align, so visibility is awaited rather than read on first match.
-const shown = (text: string) => waitFor(() => expect(screen.getByText(text)).toBeVisible());
 const hidden = (text: string) =>
   waitFor(() => {
     const el = screen.queryByText(text);

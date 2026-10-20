@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { shown } from './helpers';
 import type { RequirementResult } from '@nchc/core';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
@@ -46,7 +47,7 @@ describe('AnswerLine', () => {
   });
   it('estimate tag popover lists the estimates', async () => {
     render(<App />); await userEvent.click(screen.getByText('推估'));
-    expect(await screen.findByText('查看全部依據 →')).toBeVisible();
+    await shown('查看全部依據 →');
     const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
     const est = r.basis.find((x) => x.status === 'estimate')!;
     expect(screen.getAllByText(est.text, { exact: false }).length).toBeGreaterThan(0);

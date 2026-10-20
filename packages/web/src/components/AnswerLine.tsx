@@ -69,7 +69,7 @@ function haveShown(r: CapacityResult, lang: Lang, tr: TFn, primary: string, erro
     sub: (
       <>
         {tr('answer.have.sub', { n: fmt(lang, r.conservative.n) })}
-        {r.saturated && r.saturatedNote && <div>{r.saturatedNote}</div>}
+        {r.saturated && r.saturatedNote && <span style={{ display: 'block' }}>{r.saturatedNote}</span>}
       </>
     ),
   };
@@ -141,8 +141,8 @@ export function AnswerLine(): JSX.Element {
           </Button>
         </Tooltip>
       </Flex>
-      {r.warnings.map((w) => (
-        <Alert key={w.code} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} />
+      {r.warnings.map((w, i) => (
+        <Alert key={`${w.code}-${i}`} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} />
       ))}
     </div>
   );

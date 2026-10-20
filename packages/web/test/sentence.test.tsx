@@ -2,6 +2,7 @@ import { quantOptions } from '@nchc/core';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { shown } from './helpers';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { HAVE_MAX, USERS_MAX } from '../src/state/state';
@@ -9,8 +10,6 @@ import { setMedia } from './setup';
 
 // antd 6 puts aria-label on the combobox <input>; the displayed selection is the surrounding .ant-select-content.
 const selection = (label: string) => screen.getByLabelText(label).closest('.ant-select-content');
-// antd popups render first at opacity 0 while they align, so visibility is awaited rather than read on first match.
-const shown = (text: string) => waitFor(() => expect(screen.getByText(text)).toBeVisible());
 
 describe('Sentence', () => {
   it('keeps the full sentence (spec §8.3.3: no "·" fields)', () => {
