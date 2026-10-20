@@ -8,7 +8,9 @@
     "typecheck": "pnpm -r exec tsc -b",
     "data:build": "tsx packages/data/src/build.ts",
     "data:import": "tsx packages/data/src/hf-import.ts",
-    "calibrate": "tsx packages/data/src/calibrate.ts"
+    "calibrate": "tsx packages/data/src/calibrate.ts",
+    "web:dev": "pnpm --filter @nchc/web dev",
+    "web:build": "pnpm --filter @nchc/web build"
   },
   "devDependencies": {
     "@types/node": "25.9.9",
