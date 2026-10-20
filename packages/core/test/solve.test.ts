@@ -7,6 +7,7 @@ import {
   legalTpOptions,
   maxConcurrent,
   maxConcurrentForGpus,
+  shapeUsage,
   solveMinGpus,
   type Ctx,
   type ResolvedPlatform,
@@ -549,5 +550,29 @@ describe('queueing model: prefill queues behind vLLM max_num_batched_tokens, wai
     }
     // Without the budget the same shape serves far more (memory / speed bound).
     expect(maxConcurrent(loose, h200, shape, 'expected')).toBeGreaterThan(1008);
+  });
+});
+
+describe('shapeUsage (spec §8.3.3 細節面板)', () => {
+  const shape = { tp: 8, replicas: 2 };
+  it('memory composition per replica [R-LEC B3]: usable, weights, resident × perSeq KV', () => {
+    const u = shapeUsage(chatCtx, h200, shape, 100, 'expected');
+    expect(u.shape).toEqual(shape);
+    expect(u.memory.usableBytes).toBeCloseTo(8 * 141e9 * 0.9, 0);
+    expect(u.memory.weightsBytes).toBeCloseTo(70.55e9, 0);
+    expect(u.memory.residentPerReplica).toBe(50);
+    expect(u.memory.perUserKvBytes).toBe(1149 * 163840);
+    expect(u.memory.kvBytes).toBe(50 * 1149 * 163840);
+    expect(u.memory.reserveBytes).toBe(0);
+    expect(u.share.mem).toBeCloseTo((70.55e9 + 50 * 1149 * 163840) / (8 * 141e9 * 0.9), 12);
+  });
+  it('time shares and speed come from checkShape at the same n', () => {
+    const c = checkShape(chatCtx, h200, shape, 100, 'expected');
+    const u = shapeUsage(chatCtx, h200, shape, 100, 'expected');
+    expect(u.share.bw).toBeCloseTo(c.step.bwSec / c.step.stepSec, 12);
+    expect(u.share.compute).toBeCloseTo(c.step.computeSec / c.step.stepSec, 12);
+    expect(u.share.ttft).toBeCloseTo(c.ttftSec / smooth.maxTtftSec, 12);
+    expect(u.tokPerSecPerUser).toBe(c.tokPerSecPerUser);
+    expect(u.ttftSec).toBe(c.ttftSec);
   });
 });

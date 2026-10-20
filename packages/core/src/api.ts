@@ -18,6 +18,8 @@ import {
   MAX_N,
   mlaBackendBlocks,
   shapeProfile,
+  shapeUsage,
+  type ShapeUsage,
   type SpeedPoint,
   maxConcurrent,
   maxConcurrentForGpus,
@@ -36,7 +38,7 @@ import { embeddingParams, expertParamsTotalB, hasSlidingLayers, inputEmbeddingBy
 import type { Replica, WorkloadIn } from './timing';
 
 export type { BasisItem } from './basis';
-export type { Queueing, SpeedPoint } from './solve';
+export type { Queueing, ShapeUsage, SpeedPoint } from './solve';
 export { CoreInputError, type CoreInputErrorCode } from './errors';
 
 // ---------------------------------------------------------------------------------------------
@@ -1285,6 +1287,8 @@ export type PlatformResult = {
    * budget (MLX).
    */
   queueing: Queueing | null;
+  /** Usage of one replica of the expected shape at `users` (shapeUsage; spec §8.3.3 detail panel); null when infeasible. */
+  usage: ShapeUsage | null;
   /** Benchmark instructions for the expected shape; '' when there is none to run (see verifyNote). */
   verifyCommand: string;
   /**
@@ -1342,6 +1346,7 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
       maxConcurrent: expected.ok ? maxConcurrent(ctx, platform, expected.shape, 'expected') : 0,
       powerKw: null,
       queueing: expected.ok ? expected.check.queueing : null,
+      usage: expected.ok ? shapeUsage(ctx, platform, expected.shape, n, 'expected') : null,
       verifyCommand: '',
     };
     // The queueing model uses max_num_batched_tokens and Little's law on the expected shape (Ruling R36): list them.
@@ -1421,6 +1426,8 @@ export type CapacityResult = QuantFields &
     conservative: { n: number; shape: Shape | null };
     /** Queue of the expected shape at its n users (Ruling R36); null when all decode, no shape, or MLX. */
     queueing: Queueing | null;
+    /** Usage of one replica of the expected shape at expected.n users (shapeUsage; spec §8.3.3); null when n = 0. */
+    usage: ShapeUsage | null;
     /** Why the expected capacity is 0 ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft'); null when n > 0. */
     why: Why | null;
     /** Text of `why`. */
@@ -1493,6 +1500,7 @@ export function estimateCapacity(bundle: Bundle, raw: CapacityInput): CapacityRe
     expected,
     conservative,
     queueing,
+    usage: expected.shape && expected.n > 0 ? shapeUsage(ctx, platform, expected.shape, expected.n, 'expected') : null,
     why: why?.why ?? null,
     ...(why ? { detail: why.detail } : {}),
     ...profile,
@@ -1541,6 +1549,17 @@ export type FeasibleModel = QuantFields &
   };
 
 /**
+ * Quantization ids the UI offers for a catalog model: [nativeQuant.quant] for a natively quantized checkpoint, else
+ * every quantization without vllmServe.nativeOnly (bundle order), i.e. the formats vLLM can apply to an unquantized
+ * checkpoint. The rule findFeasibleModels evaluates when `quant` is omitted. Unknown model → CoreInputError 'unknown-id'.
+ */
+export function quantOptions(bundle: Bundle, modelId: string): string[] {
+  const m = lookup(bundle.models, modelId, '模型');
+  if (m.nativeQuant) return [m.nativeQuant.quant];
+  return Object.values(bundle.quantization).filter((q) => !q.vllmServe.nativeOnly).map((q) => q.id);
+}
+
+/**
  * Catalog search: which model × quantization pairs serve `users` (default 1) at the speed
  * target within `gpus` GPUs of `platform` (expected eta), over every catalog model (the catalog is checked against
  * `policy` at data:build, spec §2.2).
@@ -1555,13 +1574,12 @@ export function findFeasibleModels(bundle: Bundle, raw: FeasibleInput): Feasible
   const input = parseInput(FeasibleInputSchema, raw);
   const n = input.users ?? 1;
   if (input.quant !== undefined && input.quant !== 'native') lookup(bundle.quantization, input.quant, '量化');
-  const applicable = Object.values(bundle.quantization).filter((q) => !q.vllmServe.nativeOnly).map((q) => q.id);
   lookup(bundle.platforms, input.platform, '平台');
   const unitWord = bundle.platforms[input.platform]!.unit === 'machine' ? '台' : '張 GPU';
 
   const out: FeasibleModel[] = [];
   for (const m of Object.values(bundle.models)) {
-    const ids = input.quant !== undefined ? [input.quant] : m.nativeQuant ? [m.nativeQuant.quant] : applicable;
+    const ids = input.quant !== undefined ? [input.quant] : quantOptions(bundle, m.id);
     for (const id of ids) {
       const basis = new BasisCollector();
       basis.add(...resolveModel(bundle, m.id).basis);

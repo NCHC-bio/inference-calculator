@@ -10,6 +10,7 @@ import {
   explain,
   findFeasibleModels,
   predictMeasurement,
+  quantOptions,
   resolveModel,
   resolvePlatform,
   verifyCommand,
@@ -1640,5 +1641,46 @@ describe('GB200 MLA block size depends on the model (final-review M26)', () => {
         model: m, quant: 'bf16', workload: { base: 'chat', inputTokens: 1000, outputTokens: 100 }, speed: 'smooth', platform: 'nano4-gb200', gpus: 1,
       }).memoryOnlyMax;
     expect(memOnly(mla(96))).toBeLessThan(memOnly(mla(128)));
+  });
+});
+
+describe('usage (spec §8.3.3 細節面板)', () => {
+  const b = realBundle();
+  const q = { model: 'llama-3.3-70b-instruct-fp8', quant: 'fp8', workload: 'assist', speed: 'smooth', users: 15 } as const;
+  it('feasible platform: usage matches its expected shape and stays within the limits', () => {
+    const r = estimateRequirements(b, q).perPlatform.find((p) => p.platform === 'nano4-h200')!;
+    expect(r.expected.ok).toBe(true);
+    const u = r.usage!;
+    expect(u.shape).toEqual(r.expected.ok && r.expected.shape);
+    expect(u.tokPerSecPerUser).toBeCloseTo(r.expected.ok ? r.expected.check.tokPerSecPerUser : NaN, 9);
+    expect(u.ttftSec).toBeCloseTo(r.expected.ok ? r.expected.check.ttftSec : NaN, 9);
+    expect(u.memory.weightsBytes + u.memory.reserveBytes + u.memory.kvBytes).toBeLessThanOrEqual(u.memory.usableBytes);
+    for (const s of Object.values(u.share)) { expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(1); }
+  });
+  it('infeasible platform: usage is null', () => {
+    const r = estimateRequirements(b, { ...q, model: 'mistral-medium-3.5-128b', quant: 'bf16' })
+      .perPlatform.find((p) => p.platform === 'mac-mini-m6-32')!;
+    expect(r.expected.ok).toBe(false);
+    expect(r.usage).toBeNull();
+  });
+  it('capacity: usage at expected.n, null when nobody fits', () => {
+    const { users: _u, ...cq } = q;
+    const c = estimateCapacity(b, { ...cq, platform: 'nano4-h200', gpus: 8 });
+    expect(c.usage!.memory.residentPerReplica).toBeGreaterThan(0);
+    const none = estimateCapacity(b, { ...cq, model: 'mistral-medium-3.5-128b', quant: 'bf16', platform: 'mac-mini-m6-32', gpus: 1 });
+    expect(none.expected.n).toBe(0);
+    expect(none.usage).toBeNull();
+  });
+});
+describe('quantOptions', () => {
+  const b = realBundle();
+  it('matches the quantizations findFeasibleModels evaluates, per model', () => {
+    const items = findFeasibleModels(b, { workload: 'chat', speed: 'ok', platform: 'nano4-h200', gpus: 8 });
+    for (const id of Object.keys(b.models)) {
+      expect(quantOptions(b, id)).toEqual(items.filter((x) => x.model === id).map((x) => x.quant));
+    }
+  });
+  it('unknown model → CoreInputError unknown-id', () => {
+    expect(() => quantOptions(b, 'no-such')).toThrow(CoreInputError);
   });
 });

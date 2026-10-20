@@ -381,7 +381,61 @@ export function checkShape(
   };
 }
 
-const GB = (bytes: number) => (bytes / 1e9).toFixed(0);
+/** One replica of `shape` at n users (spec §8.3.3 細節面板; v7 草稿 DetailT 的四根使用率條). */
+export type ShapeUsage = {
+  shape: Shape;
+  /** Bytes per replica: usable = memBytes × memUtil; kv = residentPerReplica × kvSizing.perSeq. */
+  memory: {
+    usableBytes: number;
+    weightsBytes: number;
+    kvBytes: number;
+    reserveBytes: number;
+    perUserKvBytes: number;
+    residentPerReplica: number;
+  };
+  /** 1 = at the limit. mem = (weights + reserve + kv) / usable; bw = step.bwSec / step.stepSec;
+   *  compute = step.computeSec / step.stepSec; ttft = ttftSec / speed.maxTtftSec. */
+  share: { mem: number; bw: number; compute: number; ttft: number };
+  tokPerSecPerUser: number;
+  ttftSec: number;
+};
+
+/**
+ * Usage of one replica of `shape` serving `n` users, for the detail panel's four bars (spec §8.3.3; v7 draft DetailT):
+ * memory composition [R-LEC B3] (usable = memBytes × memUtil, weights ctxWeightBytes, the in-flight reserve and the
+ * resident sequences' steady-state KV, kvSizing) and the shares of each limit. bw / compute are the shares of the step
+ * time (v7 draft); the largest of the four shares is the bottleneck. Step, TTFT and residentPerReplica come from
+ * checkShape, so no formula is repeated here. Shares above 1 mean the shape is infeasible on that limit.
+ */
+export function shapeUsage(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, n: number, eta: EtaMode): ShapeUsage {
+  const c = checkShape(ctx, platform, shape, n, eta);
+  const r = platform.replicaFor(shape.tp, eta);
+  const usableBytes = r.memBytes * r.memUtil;
+  const weightsBytes = ctxWeightBytes(ctx);
+  const kv = kvSizing(ctx, platform, shape.tp);
+  const kvBytes = c.residentPerReplica * kv.perSeq;
+  return {
+    shape,
+    memory: {
+      usableBytes,
+      weightsBytes,
+      kvBytes,
+      reserveBytes: kv.reserve,
+      perUserKvBytes: kv.perSeq,
+      residentPerReplica: c.residentPerReplica,
+    },
+    share: {
+      mem: (weightsBytes + kv.reserve + kvBytes) / usableBytes,
+      bw: c.step.bwSec / c.step.stepSec,
+      compute: c.step.computeSec / c.step.stepSec,
+      ttft: c.ttftSec / ctx.speed.maxTtftSec,
+    },
+    tokPerSecPerUser: c.tokPerSecPerUser,
+    ttftSec: c.ttftSec,
+  };
+}
+
+const GB =(bytes: number) => (bytes / 1e9).toFixed(0);
 
 /** input + output beyond the model's maxContext (review C3); a model without maxContext never exceeds. */
 export function exceedsMaxContext(m: Pick<Model, 'maxContext'>, w: Pick<WorkloadIn, 'inputTokens' | 'outputTokens'>): boolean {

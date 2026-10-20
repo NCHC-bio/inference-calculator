@@ -9,6 +9,7 @@ export {
   resolveModel,
   resolveQuant,
   predictMeasurement,
+  quantOptions,
   QueryInputSchema,
   ModelOverrideSchema,
   type QueryInput,
@@ -28,6 +29,9 @@ export {
   type QuantResolution,
   type BasisItem,
   type Queueing,
+  type ShapeUsage,
+  type CapacityResult,
+  type SpeedCurve,
   CoreInputError,
   type CoreInputErrorCode,
   CUSTOM_MODEL_WARNING,
@@ -40,4 +44,6 @@ export { expertParamsTotalB, activeParamsB, moeParamsIssue, mlaLayoutIssues, lay
 export type { ResolvedPlatform, Shape, Why, EtaMode, Ctx } from './solve';
 /** vLLM's TP legality rule, shared with the config validator for calibration points (Ruling R41). */
 export { legalTpOptions } from './solve';
+/** Per-shape usage for the web detail panel (spec §8.3.3). */
+export { shapeUsage } from './solve';
 export type { Replica, WorkloadIn } from './timing';
