@@ -3,6 +3,7 @@ import type { Bundle } from '@nchc/schema';
 import { CONFIG_DIR, loadConfig, validateConfig } from '../../data/src/index';
 import { CoreInputError } from '../src/api';
 import { peakConcurrentFromTotal } from '../src/funnel';
+import { estimateRequirements } from '../src/api';
 
 function realBundle(): Bundle {
   const { bundle, issues } = validateConfig(loadConfig(CONFIG_DIR));
@@ -92,5 +93,18 @@ describe('peakConcurrentFromTotal (spec 2026-10-21 §5.5)', () => {
       expect(e, JSON.stringify(x)).toBeInstanceOf(CoreInputError);
       expect((e as CoreInputError).code).toBe('invalid-input');
     }
+  });
+
+  it('a huge total is capped at the requirement API bound and flagged', () => {
+    const r = peakConcurrentFromTotal(bundle, {
+      total: 1e9, workload: { base: 'chat', outputTokens: 100000 }, speed: 'smooth',
+    });
+    expect(r.users).toBe(1e7);
+    expect(r.capped).toBe(true);
+    expect(r.capNote).toContain('1000 萬');
+    expect(() => estimateRequirements(bundle, {
+      model: 'gpt-oss-120b', quant: 'fp8', users: r.users, workload: 'chat', speed: 'smooth',
+    })).not.toThrow();
+    expect(peakConcurrentFromTotal(bundle, { total: 1000, workload: 'chat', speed: 'smooth' }).capped).toBe(false);
   });
 });

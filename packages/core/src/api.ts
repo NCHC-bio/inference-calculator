@@ -49,7 +49,8 @@ export { CoreInputError, type CoreInputErrorCode } from './errors';
 // Input schemas
 // ---------------------------------------------------------------------------------------------
 
-const MAX_USERS = 1e7;
+/** Upper bound of `users` on every entry point (also caps the funnel result). */
+export const MAX_USERS = 1e7;
 const MAX_TOKENS = 1e7;
 
 /** Bounded positive integer: bounds keep every product in the formulas finite. */

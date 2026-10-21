@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import type { Bundle } from '@nchc/schema';
-import { SpeedInputSchema, WorkloadInputSchema, resolveWorkloadSpeed } from './api';
+import { MAX_USERS, SpeedInputSchema, WorkloadInputSchema, resolveWorkloadSpeed } from './api';
 import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } from './basis';
 import { CoreInputError, parseInput } from './errors';
 
@@ -26,6 +26,10 @@ export type FunnelResult = {
   arrivalPerSec: number;
   /** Service time per request used in Little's law: maxTtftSec + outputTokens ÷ minTokPerSec. */
   serviceSec: number;
+  /** True when the raw result exceeded the requirement API bound (MAX_USERS) and `users` was clamped to it. */
+  capped: boolean;
+  /** Chinese note to show when `capped`; undefined otherwise. */
+  capNote?: string;
   basis: BasisItem[];
   hasEstimate: boolean;
   hasUser: boolean;
@@ -63,7 +67,12 @@ export function peakConcurrentFromTotal(bundle: Bundle, raw: FunnelInput): Funne
 
   const arrivalPerSec = (input.total * d * r * p) / 3600;
   const serviceSec = speed.maxTtftSec + workload.outputTokens / speed.minTokPerSec;
-  const users = Math.max(1, Math.ceil(arrivalPerSec * serviceSec - 1e-9));
+  const rawUsers = Math.max(1, Math.ceil(arrivalPerSec * serviceSec - 1e-9));
+  const capped = rawUsers > MAX_USERS;
+  const users = capped ? MAX_USERS : rawUsers;
+  const capNote = capped
+    ? `換算結果超過上限，已以 ${MAX_USERS / 1e4} 萬位同時在線計算（原值約 ${rawUsers.toExponential(2)}）；請縮小總人數或改用較短的輸出。`
+    : undefined;
 
   // Designer judgement (spec §5.5): the real service time depends on the result, so the speed target's upper bound is
   // used to avoid a circular dependency; the result errs on the high side.
@@ -78,5 +87,5 @@ export function peakConcurrentFromTotal(bundle: Bundle, raw: FunnelInput): Funne
   });
 
   const list = basis.list();
-  return { users, arrivalPerSec, serviceSec, basis: list, ...trustFlags(list) };
+  return { users, arrivalPerSec, serviceSec, capped, ...(capNote ? { capNote } : {}), basis: list, ...trustFlags(list) };
 }
