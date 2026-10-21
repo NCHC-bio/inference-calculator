@@ -46,7 +46,7 @@ export function useTween(target: number, key?: unknown): number {
     };
     raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(raf);
-  }, [target, instant]);
+  }, [target, instant, key]);
 
   return instant || rekeyed ? target : value;
 }

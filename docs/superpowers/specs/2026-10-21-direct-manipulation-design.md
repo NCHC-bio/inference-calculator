@@ -244,7 +244,7 @@
 
 core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
 
-- R1：`estimatePerformance` 的規模測試：gpus 100001 丟 `invalid-input`；gpus 1e5 配 1e7 人回傳 `ok: false` 與 why，不丟錯。
+- R1：`estimatePerformance` 的規模測試：gpus 100001 丟 `invalid-input`；gpus 1e5 配 1e7 人不丟錯，回傳 `ok: false` 與 why ∈ {mem, bw, compute, ttft}，除非該切法真的能服務 1e7 人（此時 `ok: true`）。
 - R2：自訂平台沒有 NVLink，或借用的 all-reduce 延遲為 0（MLX 範本）時只有 TP 1，避免 TP>1 的通訊被當成免費。
 - R3：MLX 範本 `etaCompute = 1.0`，因為目錄裡 Mac 的 TFLOPS 是實測可達值。
 - R4：自訂平台的 basis 路徑以列為鍵：`estimateRequirements`／`explain` 用 `custom:<i>.<field>`，單一平台的 `estimatePerformance`／Sweep 用 `custom.<field>`。
