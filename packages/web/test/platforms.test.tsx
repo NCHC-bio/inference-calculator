@@ -1,7 +1,7 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { theme } from 'antd';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { PlatformList } from '../src/components/PlatformList';
@@ -102,7 +102,7 @@ describe('PlatformList', () => {
     const input = within(row).getByRole('spinbutton');
     expect(input).toHaveValue(String(r.suggested));
     expect(within(row).queryByTestId('speed-line')).toBeNull();
-    await userEvent.clear(input); await userEvent.type(input, '2');
+    await userEvent.clear(input); await userEvent.type(input, '2{Enter}');
     await waitFor(() => expect(suggest).toHaveAttribute('aria-pressed', 'false'));
     expect(suggest).not.toHaveClass('ant-btn-primary');
     const line = await within(row).findByTestId('speed-line');
@@ -111,19 +111,83 @@ describe('PlatformList', () => {
     await userEvent.click(suggest);
     await waitFor(() => expect(within(row).queryByTestId('speed-line')).toBeNull());
     expect(suggest).toHaveAttribute('aria-pressed', 'true');
-    expect(input).toHaveValue(String(r.suggested));
+    await waitFor(() => expect(input).toHaveValue(String(r.suggested)));
   });
 
-  it('count input rejects out-of-range values', async () => {
+  it('「建議」 rolls the count from the override back to the suggestion', async () => {
     const s = defaultState(getBundle()); const best = main(s).result.best!;
-    renderList();
-    const input = within(rowOf(best)).getByRole('spinbutton');
-    input.focus();
-    for (const v of ['0', '100001']) {
-      fireEvent.change(input, { target: { value: v } });
-      await waitFor(() => expect(within(rowOf(best)).getByText('請輸入 1–100,000 的整數')).toBeInTheDocument());
-      expect(latest!.overrides).toEqual({});
+    const r = okRow(s, best);
+    expect(r.suggested).toBeGreaterThan(2);
+    visit({ ...s, overrides: { [best]: { gpus: 1 } } });
+    // Manual clock and animation frames: the tween advances only when a frame is flushed.
+    let now = 0;
+    const frames = new Map<number, FrameRequestCallback>();
+    let id = 0;
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => now);
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => (frames.set(++id, cb), id));
+    const cafSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((h) => void frames.delete(h));
+    const flush = () => act(() => { const cbs = [...frames.values()]; frames.clear(); for (const cb of cbs) cb(now); });
+    try {
+      renderList();
+      const input = within(rowOf(best)).getByRole('spinbutton');
+      expect(input).toHaveValue('1');
+      // Rendered without App's ConfigProvider, so antd spaces the two-character label (建 議).
+      fireEvent.click(within(rowOf(best)).getByRole('button', { name: /^建\s?議$/ }));
+      await waitFor(() => expect(latest!.overrides).toEqual({}));
+      await waitFor(() => expect(within(rowOf(best)).getByRole('button', { name: /^建\s?議$/ })).toHaveAttribute('aria-pressed', 'true'));
+      now = 100; flush();
+      const mid = Number((input as HTMLInputElement).value);
+      expect(mid).toBeGreaterThan(1);
+      expect(mid).toBeLessThan(r.suggested);
+      now = 400; flush();
+      expect(input).toHaveValue(String(r.suggested));
+    } finally {
+      nowSpy.mockRestore(); rafSpy.mockRestore(); cafSpy.mockRestore();
     }
+  });
+
+  describe('count input commits on Enter, blur and step only (Ruling W6)', () => {
+    const setup = () => {
+      const s = defaultState(getBundle()); const best = main(s).result.best!;
+      const r = okRow(s, best);
+      renderList();
+      const row = rowOf(best);
+      return { best, r, row, input: within(row).getByRole('spinbutton') };
+    };
+    it('typing 100001 then Enter leaves state unchanged and shows the hint', async () => {
+      const { row, input } = setup();
+      await userEvent.clear(input); await userEvent.type(input, '100001{Enter}');
+      expect(latest!.overrides).toEqual({});
+      expect(within(row).getByText('請輸入 1–100,000 的整數')).toBeInTheDocument();
+      expect(input).toHaveAttribute('aria-invalid', 'true');
+    });
+    it('typing 2.5 then blur leaves state unchanged and shows the last count', async () => {
+      const { r, row, input } = setup();
+      await userEvent.clear(input); await userEvent.type(input, '2.5');
+      expect(within(row).getByText('請輸入 1–100,000 的整數')).toBeInTheDocument();
+      await userEvent.tab();
+      expect(latest!.overrides).toEqual({});
+      expect(input).toHaveValue(String(r.suggested));
+      expect(within(row).queryByText('請輸入 1–100,000 的整數')).toBeNull();
+    });
+    it('typing does not dispatch until Enter', async () => {
+      const { best, r, input } = setup();
+      expect(r.suggested).not.toBe(8);
+      await userEvent.clear(input); await userEvent.type(input, '8');
+      expect(latest!.overrides).toEqual({});
+      await userEvent.keyboard('{Enter}');
+      expect(latest!.overrides).toEqual({ [best]: { gpus: 8 } });
+    });
+    it('the + step button commits count + 1 at once', async () => {
+      const { best, r, row } = setup();
+      await userEvent.click(within(row).getByRole('button', { name: 'Increase Value' }));
+      expect(latest!.overrides).toEqual({ [best]: { gpus: r.suggested + 1 } });
+    });
+    it('focus and blur without typing commits nothing', async () => {
+      const { input } = setup();
+      await userEvent.click(input); await userEvent.tab();
+      expect(latest!.overrides).toEqual({});
+    });
   });
 
   it('capacity bar shows users over max and turns red when exceeded', async () => {
