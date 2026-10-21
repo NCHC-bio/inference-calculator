@@ -301,3 +301,32 @@ describe('KV across a TP replica (review C1, C2)', () => {
     expect(kvBytesPerSequence(hybrid, 5, 1, 4)).toBe(kvBytesPerSequence(hybrid, 5, 1, 1));
   });
 });
+
+describe('architectures beyond the standard layout (issue #17)', () => {
+  it('expert parameters use the MoE layer count, matrices and width when given', () => {
+    const base = { hidden: 1000, layers: 10 };
+    const moe = { experts: 8, topK: 2, expertFfnDim: 100 };
+    expect(expertParamsTotalB({ ...base, moe })).toBeCloseTo((8 * 3 * 1000 * 100 * 10) / 1e9, 12);
+    // Dense MLP layers before the MoE layers are not experts.
+    expect(expertParamsTotalB({ ...base, moe: { ...moe, layers: 7 } })).toBeCloseTo((8 * 3 * 1000 * 100 * 7) / 1e9, 12);
+    // Non-gated (2 matrices) experts in a latent dimension.
+    expect(expertParamsTotalB({ ...base, moe: { ...moe, matrices: 2, width: 250 } })).toBeCloseTo((8 * 2 * 250 * 100 * 10) / 1e9, 12);
+  });
+
+  it('state groups add a fixed per-sequence state; the indexer adds a per-token key cache on every rank', () => {
+    const hybrid: Model = {
+      ...llama70b,
+      layers: 4,
+      layerGroups: [
+        { kind: 'full', count: 1 },
+        { kind: 'state', count: 3, stateBytes: 1_000_000 },
+      ],
+    };
+    const fullPerToken = 2 * 8 * 128 * 2; // kv × kvHeads × headDim × 2 bytes, one layer
+    expect(kvBytesPerSequence(hybrid, 1000, 2)).toBe(fullPerToken * 1000 + 3 * 1_000_000);
+    // The state does not grow with context.
+    expect(kvBytesPerSequence(hybrid, 2000, 2) - kvBytesPerSequence(hybrid, 1000, 2)).toBe(fullPerToken * 1000);
+    const withIndexer: Model = { ...llama70b, indexer: { layers: 80, bytesPerToken: 132 } };
+    expect(kvBytesPerSequence(withIndexer, 1000, 2, 2) - kvBytesPerSequence(llama70b, 1000, 2, 2)).toBe(80 * 132 * 1000 * 2);
+  });
+});

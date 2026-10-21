@@ -60,7 +60,7 @@ export function allReduceSec(p: number, bytes: number, latencySec: number, bwPer
  *   up-projection of the cached latent context to K / V, `_compute_prefill_context`, is not counted); 'decode' runs
  *   the absorbed MQA path, QK head dim kvLoraRank + qkRopeHeadDim and V head dim kvLoraRank per query head, so
  *   2 × heads × (2 × kvLoraRank + qkRopeHeadDim) per attended token. GQA / MHA layers cost the same in both phases.
- * - layerGroups: full groups attend ctx, sliding groups min(ctx, window), mamba groups have no
+ * - layerGroups: full groups attend ctx, sliding groups min(ctx, window), mamba and state groups have no
  *   attention. Query heads are model-wide (`model.heads`; groups only give KV heads), head dim is
  *   the group's `headDim` when set, else the model's.
  * - slidingWindow without groups: every layer attends min(ctx, window).
@@ -77,7 +77,7 @@ export function attentionFlop(m: Model, ctx: number, phase: 'decode' | 'prefill'
   if (m.layerGroups) {
     let total = 0;
     for (const g of m.layerGroups) {
-      if (g.kind === 'mamba') continue;
+      if (g.kind === 'mamba' || g.kind === 'state') continue;
       const tokens = g.kind === 'sliding' && g.window !== undefined ? Math.min(ctx, g.window) : ctx;
       total += g.count * perLayer(g.headDim ?? m.headDim, tokens);
     }

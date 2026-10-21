@@ -14,12 +14,15 @@ export type MoeParamsIn = {
 
 /**
  * Total parameters held in MoE experts, in billions. Dense models return 0.
- * experts x 3 (gate/up/down) x hidden x expertFfnDim x layers / 1e9.
+ * experts x matrices x width x expertFfnDim x moeLayers / 1e9, with matrices = moe.matrices ?? 3 (gate/up/down),
+ * width = moe.width ?? hidden (a latent MoE works in a smaller dimension) and moeLayers = moe.layers ?? layers (dense
+ * MLP layers are not experts).
  * Basis: spec §5.1 (not covered by the lecture).
  */
 export function expertParamsTotalB(m: Omit<MoeParamsIn, 'totalParamsB'>): number {
   if (!m.moe) return 0;
-  return (m.moe.experts * 3 * m.hidden * m.moe.expertFfnDim * m.layers) / 1e9;
+  const { experts, expertFfnDim, matrices = 3, width = m.hidden, layers = m.layers } = m.moe;
+  return (experts * matrices * width * expertFfnDim * layers) / 1e9;
 }
 
 /**
@@ -42,7 +45,7 @@ export function moeParamsIssue(m: MoeParamsIn): string | null {
   const total = m.totalParamsB.value;
   const expertB = expertParamsTotalB(m);
   if (expertB > total) {
-    return `expert parameters ${expertB.toFixed(1)}B (experts × 3 × hidden × expertFfnDim × layers) exceed totalParamsB ${total}B`;
+    return `expert parameters ${expertB.toFixed(1)}B (experts × matrices × width × expertFfnDim × MoE layers) exceed totalParamsB ${total}B`;
   }
   const active = activeParamsB(m);
   if (!(active > 0)) return `active parameters ${active.toFixed(2)}B are not positive`;
@@ -108,7 +111,7 @@ export function layerShapeIssues(m: LayerShapeIn): Array<{ path: (string | numbe
     };
     gqa(m.kvHeads, ['kvHeads']);
     m.layerGroups?.forEach((g, i) => {
-      if (g.kind !== 'mamba' && g.kvHeads !== undefined) gqa(g.kvHeads, ['layerGroups', i, 'kvHeads']);
+      if (g.kind !== 'mamba' && g.kind !== 'state' && g.kvHeads !== undefined) gqa(g.kvHeads, ['layerGroups', i, 'kvHeads']);
     });
   }
   return out;
@@ -373,6 +376,9 @@ export function slidingTransientKvBytes(
  * - mamba group: count x ssm.heads x ssm.headDim x ssm.stateSize x (stateBytesPerElem ?? 2).
  *   Derived estimate: SSM recurrent state only (conv state not counted); independent of
  *   context length and of kvBytesPerElem.
+ * - state group: count x stateBytes (a fixed per-sequence state already summed over the replica).
+ * - indexer (sparse-attention key cache): layers x bytesPerToken x ceil(ctx / block) x block x tp, every rank keeping
+ *   a copy, added on top of whichever branch above applies.
  * `tp`: the replica's tensor-parallel size; the result is the total over its GPUs, with KV heads
  * replicated when tp > kvHeads and the MLA latent cache copied on every rank (kvBytesPerToken).
  * Mamba state is sharded by head across ranks, so its total does not depend on tp.
@@ -380,6 +386,13 @@ export function slidingTransientKvBytes(
  */
 export function kvBytesPerSequence(m: Model, contextTokens: number, kvBytesPerElem = 1, tp = 1, opts?: KvSeqOpts): number {
   const fullTokens = roundUpToBlock(contextTokens, opts?.blockTokens);
+  const indexer = m.indexer ? m.indexer.layers * m.indexer.bytesPerToken * fullTokens * tp : 0;
+  return attentionKvBytesPerSequence(m, contextTokens, fullTokens, kvBytesPerElem, tp, opts) + indexer;
+}
+
+function attentionKvBytesPerSequence(
+  m: Model, contextTokens: number, fullTokens: number, kvBytesPerElem: number, tp: number, opts?: KvSeqOpts,
+): number {
   if (m.attention === 'mla' && m.mla) {
     return kvBytesPerToken(m, kvBytesPerElem, tp) * fullTokens;
   }
@@ -389,6 +402,10 @@ export function kvBytesPerSequence(m: Model, contextTokens: number, kvBytesPerEl
       if (g.kind === 'mamba') {
         const s = g.ssm;
         if (s) total += g.count * s.heads * s.headDim * s.stateSize * (s.stateBytesPerElem ?? 2);
+        continue;
+      }
+      if (g.kind === 'state') {
+        total += g.count * (g.stateBytes ?? 0);
         continue;
       }
       const kv =

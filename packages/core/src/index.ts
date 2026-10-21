@@ -41,6 +41,7 @@ export {
   CoreInputError,
   type CoreInputErrorCode,
   CUSTOM_MODEL_WARNING,
+  nonstandardConfigWarning,
   type ResultWarning,
 } from './api';
 /** Model math the data package reuses for config validation (Ruling R31c: one formula, no copies). */
