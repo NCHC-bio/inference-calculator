@@ -126,6 +126,7 @@ const en = {
   'wb.split.help': 'One model copy can run on several cards together (tensor parallel), or be copied several times, each copy serving different users. More cards per copy: faster per person; more copies: more people at once.',
   'wb.split.option': '{split}: {tps} words/s, first word {ttft} s, up to {max} people',
   'wb.split.recommended': ' (suggested)',
+  'wb.split.noFit': '{split}: does not fit',
   'split.gpu': '{tp} cards run one copy of the model together, {replicas} copies',
   'split.gpu1': 'Each card runs its own copy of the model, {replicas} copies',
   'split.machine': 'Each machine runs its own copy of the model, {replicas} copies',

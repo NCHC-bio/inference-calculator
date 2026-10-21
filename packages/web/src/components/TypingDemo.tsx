@@ -18,7 +18,7 @@ const START: Clock = { waitedMs: 0, pos: 0, holdMs: 0 };
 
 /** One tick: wait for the first word, then add TICK_MS × tokPerSec chars, then hold and replay. */
 function step(c: Clock, len: number, tokPerSec: number, ttftSec: number): Clock {
-  if (c.waitedMs < Math.min(ttftSec * 1000, WAIT_CAP_MS)) return { ...c, waitedMs: c.waitedMs + TICK_MS };
+  if (c.pos === 0 && c.waitedMs < Math.min(ttftSec * 1000, WAIT_CAP_MS)) return { ...c, waitedMs: c.waitedMs + TICK_MS };
   if (c.pos < len) return { ...c, pos: Math.min(len, c.pos + (TICK_MS * tokPerSec) / 1000) };
   const holdMs = c.holdMs + TICK_MS;
   return holdMs > HOLD_MS ? START : { ...c, holdMs };

@@ -33,16 +33,15 @@ export function SplitSelect({ perf, unit, onPick }: { perf: PerformanceResult; u
   const tr = useT();
   const lang = useLang();
   const f = (n: number, d: number) => new Intl.NumberFormat(lang, { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
-  const options = perf.splits.map((e) => ({
-    value: e.shape.tp,
-    label:
-      tr('wb.split.option', {
-        split: splitText(e.shape.tp, e.shape.replicas, unit, tr),
-        tps: f(e.tokPerSecPerUser, 0),
-        ttft: f(e.ttftSec, 1),
-        max: f(e.maxConcurrent, 0),
-      }) + (e.shape.tp === perf.recommendedTp ? tr('wb.split.recommended') : ''),
-  }));
+  // Ruling W8: a split that cannot hold the model or one user is disabled and says 「放不下」 instead of a speed.
+  const options = perf.splits.map((e) => {
+    const split = splitText(e.shape.tp, e.shape.replicas, unit, tr);
+    const noFit = !e.ok && e.maxConcurrent === 0;
+    const label = noFit
+      ? tr('wb.split.noFit', { split })
+      : tr('wb.split.option', { split, tps: f(e.tokPerSecPerUser, 0), ttft: f(e.ttftSec, 1), max: f(e.maxConcurrent, 0) });
+    return { value: e.shape.tp, disabled: noFit, label: label + (e.shape.tp === perf.recommendedTp ? tr('wb.split.recommended') : '') };
+  });
   return (
     <div data-testid="split-select" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>

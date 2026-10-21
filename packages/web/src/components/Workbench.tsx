@@ -1,5 +1,5 @@
 import { CodeOutlined, PushpinOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { resolveModel, type PerformanceResult } from '@nchc/core';
+import { resolveModel, type PerformanceResult, type Queueing } from '@nchc/core';
 import type { Bundle } from '@nchc/schema';
 import { Button, Collapse, Flex, Typography } from 'antd';
 import { useRef, useState, type JSX, type ReactNode } from 'react';
@@ -84,7 +84,23 @@ function PowerLine({ perf, tdpConflict }: { perf: PerformanceResult; tdpConflict
   );
 }
 
-/** Footer: 「更多圖表（Roofline，專家用）」 Collapse (left) and 「驗證指令」 (right, in the item's `extra`, never toggles it). */
+/** At peak some requests queue: one sentence with core's wait, its reason on hover / tap / focus; nothing without queueing. */
+export function QueueLine({ queueing }: { queueing: Queueing | null }): JSX.Element | null {
+  const tr = useT();
+  const lang = useLang();
+  if (!queueing) return null;
+  return (
+    <Typography.Text type="secondary" data-testid="queue-line" style={{ ...small, display: 'block', marginTop: 4 }}>
+      <Explain content={<div style={{ maxWidth: 320 }}>{queueing.reason}</div>}>
+        <span tabIndex={0} className="help-text">
+          {tr('detail.queue', { sec: fmtIn(lang, queueing.waitSec, 1) })}
+        </span>
+      </Explain>
+    </Typography.Text>
+  );
+}
+
+/** Footer:「更多圖表（Roofline，專家用）」 Collapse (left) and 「驗證指令」 (right, in the item's `extra`, never toggles it). */
 function Foot({ onVerify }: { onVerify: () => void }): JSX.Element {
   const tr = useT();
   const [open, setOpen] = useState<string[]>([]);
@@ -212,15 +228,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
           </div>
           <SplitSelect perf={perf} unit={info.unit} onPick={pickSplit} />
           <PowerLine perf={perf} tdpConflict={tdpConflict} />
-          {perf.queueing && (
-            <Typography.Text type="secondary" style={{ ...small, display: 'block', marginTop: 4 }}>
-              <Explain content={<div style={{ maxWidth: 320 }}>{perf.queueing.reason}</div>}>
-                <span tabIndex={0} className="help-text">
-                  {tr('detail.queue', { sec: fmtIn(lang, perf.queueing.waitSec, 1) })}
-                </span>
-              </Explain>
-            </Typography.Text>
-          )}
+          <QueueLine queueing={perf.queueing} />
         </section>
       </div>
 

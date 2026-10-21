@@ -129,6 +129,7 @@ const zhTW = {
   'wb.split.help': '一份模型可以用幾張卡合起來跑（張量平行），也可以複製成好幾份，各自服務不同的使用者。合跑的卡越多，每人越快；份數越多，能同時服務的人越多。',
   'wb.split.option': '{split}：{tps} 字/秒、首字 {ttft} 秒、上限 {max} 人',
   'wb.split.recommended': '（建議）',
+  'wb.split.noFit': '{split}：放不下',
   'split.gpu': '每 {tp} 張卡合跑一份模型，共 {replicas} 份',
   'split.gpu1': '每張卡各跑一份模型，共 {replicas} 份',
   'split.machine': '每台各跑一份模型，共 {replicas} 份',

@@ -5,12 +5,13 @@ import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { PlatformList } from '../src/components/PlatformList';
 import { splitText } from '../src/components/SplitSelect';
+import { QueueLine } from '../src/components/Workbench';
 import { computeBench, computeMain, type MainView, type OkRow } from '../src/compute/compute';
 import { t, type MsgKey } from '../src/i18n';
 import { decodeUrl } from '../src/state/url';
 import { useCalc } from '../src/state/store';
 import type { CalcState } from '../src/state/state';
-import { renderStore } from './helpers';
+import { renderStore, shown } from './helpers';
 
 const zh = (k: MsgKey, v?: Record<string, string | number>) => t('zh-TW', k, v);
 const fmt = (n: number, d = 0) => new Intl.NumberFormat('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
@@ -123,6 +124,41 @@ describe('Workbench', () => {
     expect(latest!.overrides[H200]).toEqual({ gpus: r.count, tp: other.shape.tp });
   });
 
+  it('split select disables a split that cannot hold the model (Ruling W8)', async () => {
+    const search = '?m=mistral-medium-3.5-128b';
+    const r = okRow(search, H200);
+    const bad = r.perf.splits.find((x) => !x.ok && x.maxConcurrent === 0)!;
+    expect(bad).toBeDefined();
+    const wb = await openBench(search);
+    await userEvent.click(within(within(wb).getByTestId('split-select')).getByRole('combobox'));
+    const opts = await waitFor(() => {
+      const o = [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')];
+      expect(o).toHaveLength(r.perf.splits.length);
+      return o;
+    });
+    const o = opts[r.perf.splits.indexOf(bad)]!;
+    expect(o).toHaveClass('ant-select-item-option-disabled');
+    expect(o.textContent).toBe(`${splitText(bad.shape.tp, bad.shape.replicas, 'gpu', zh)}：放不下`);
+    expect(o.textContent).not.toMatch(/字\/秒/);
+    await userEvent.click(o);
+    expect(latest!.overrides[H200]).toBeUndefined();
+  });
+
+  it('Mac row: 台 in the summary and the split', async () => {
+    const search = '?m=gpt-oss-20b&s=ok&n=15';
+    const key = 'mac-mini-m6-32';
+    const r = okRow(search, key);
+    expect(r.kind).toBe('ok');
+    const { tp, replicas } = r.perf.shape!;
+    const wb = await openBench(search, key);
+    const top = wb.querySelector<HTMLElement>('.wb-top')!;
+    expect(top.textContent).toContain(`${fmt(r.count)} 台 ${getBundle().platforms[key]!.name}`);
+    expect(top.textContent).toContain(`每台各跑一份模型，共 ${fmt(replicas)} 份`);
+    expect(splitText(tp, replicas, 'machine', zh)).toBe(`每台各跑一份模型，共 ${fmt(replicas)} 份`);
+    expect(wb.textContent).toContain('台數 → 每人速度');
+    expect(wb.textContent).not.toMatch(/張/);
+  });
+
   it('actions apply: back to the suggested count', async () => {
     const search = '?n=200&o=nano4-h200:2';
     const r = okRow(search, H200);
@@ -216,5 +252,22 @@ describe('Workbench', () => {
     expect(within(wb).getAllByTestId('usage-bar')).toHaveLength(4);
     expect(within(wb).getAllByTestId('memory-bar')).toHaveLength(1);
     expect(wb.textContent).toContain(splitText(r.perf.shape!.tp, r.perf.shape!.replicas, 'gpu', zh));
+  });
+});
+
+// Test fixture (not model data): one queueing result.
+const QUEUE = { tokensPerStep: 1, budget: 1, decodingMax: 1, waiting: 1, waitSec: 2.25, reason: '排隊原因' };
+
+describe('QueueLine', () => {
+  it('queueing: one sentence, reason in the popover', async () => {
+    renderStore(<QueueLine queueing={QUEUE} />);
+    const s = screen.getByText('尖峰時部分請求需排隊約 2.3 秒，已計入首字時間');
+    await userEvent.hover(s);
+    await shown('排隊原因');
+  });
+  it('no queueing → no queue sentence', () => {
+    const { container } = renderStore(<QueueLine queueing={null} />);
+    expect(container.textContent).not.toMatch(/排隊/);
+    expect(screen.queryByTestId('queue-line')).toBeNull();
   });
 });

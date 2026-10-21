@@ -47,6 +47,19 @@ describe('TypingDemo', () => {
     rerender(el(40));
     advance(500); expect(typed().length).toBeGreaterThanOrEqual(28); expect(typed().length).toBeLessThanOrEqual(31);
   });
+  it('keeps typing when the first-word wait rises mid-text', () => {
+    const text = '一'.repeat(60);
+    const el = (ttft: number) => (
+      <StoreProvider>
+        <TypingDemo text={text} tokPerSec={10} ttftSec={ttft} />
+      </StoreProvider>
+    );
+    const { rerender } = render(el(0.5));
+    advance(1000); const before = typed().length; expect(before).toBeGreaterThan(0);
+    rerender(el(3));
+    advance(500); expect(typed().length).toBeGreaterThanOrEqual(before + 4);
+    expect(screen.queryByTestId('waiting')).toBeNull();
+  });
   it('restarts when the row changes, not when the speed does', () => {
     const el = (reset: string, tps: number) => (
       <StoreProvider>
