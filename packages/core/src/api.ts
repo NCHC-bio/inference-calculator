@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import {
-  HfRepoSchema, LayerGroupSchema, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
+  HfRepoSchema, LayerGroupSchema, ModelSchema, SourceSchema, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
 } from '@nchc/schema';
 import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } from './basis';
 import {
@@ -128,7 +128,11 @@ const SpeedInputSchema = z.union([
   z.strictObject({ minTokPerSec: z.number().positive().max(1e6), maxTtftSec: z.number().positive().max(1e6) }).strict(),
 ]);
 
-const ModelInputSchema = z.union([z.string().min(1), ModelOverrideSchema]);
+/** A model imported from Hugging Face (`data:import` output) with the source its fields cite; not in the catalog. */
+const ImportedModelSchema = z.strictObject({ imported: z.strictObject({ model: ModelSchema, source: SourceSchema }) });
+export type ImportedModelInput = { imported: { model: z.input<typeof ModelSchema>; source: z.input<typeof SourceSchema> } };
+
+const ModelInputSchema = z.union([z.string().min(1), ModelOverrideSchema, ImportedModelSchema]);
 const usersSchema = z.number().int().positive().max(MAX_USERS);
 
 /** Query shared by every entry point. */
@@ -660,7 +664,7 @@ export const CUSTOM_MODEL_WARNING: ResultWarning = Object.freeze({
  */
 export function resolveModel(
   bundle: Bundle,
-  idOrOverride: string | ModelOverride,
+  idOrOverride: string | ModelOverride | ImportedModelInput,
 ): { model: Model; basis: BasisItem[]; warnings: ResultWarning[] } {
   if (typeof idOrOverride === 'string') {
     const m = lookup(bundle.models, idOrOverride, '模型');
@@ -688,6 +692,8 @@ export function resolveModel(
     ];
     return { model: m, basis, warnings: [] };
   }
+
+  if ('imported' in idOrOverride) return resolveImported(bundle, idOrOverride);
 
   const o = parseInput(ModelOverrideSchema, idOrOverride);
   const basis = Object.entries(o)
@@ -717,6 +723,58 @@ export function resolveModel(
     verified: bundle.meta.dataVersion,
   } as unknown as Model;
   return { model, basis, warnings: [CUSTOM_MODEL_WARNING] };
+}
+
+/**
+ * An imported model: validated like a catalog model (schema, layer shape, MoE split, MLA layout; core's own checks,
+ * the same ones config validation runs) and every id its sourced fields cite must be the supplied source (a derived
+ * field's inputs may also be a bundle source). Not origin-checked; always carries CUSTOM_MODEL_WARNING (spec §2.2).
+ */
+function resolveImported(
+  bundle: Bundle,
+  input: ImportedModelInput,
+): { model: Model; basis: BasisItem[]; warnings: ResultWarning[] } {
+  const { model: m, source } = parseInput(ImportedModelSchema, input).imported;
+  const issues: string[] = [];
+  for (const i of layerShapeIssues(m)) issues.push(`${i.path.join('.')}: ${i.message}`);
+  const moe = moeParamsIssue(m);
+  if (moe) issues.push(`moe: ${moe}`);
+  for (const i of mlaLayoutIssues(m)) issues.push(`${i.field}: ${i.message}`);
+  if (m.attention === 'mla' && !m.mla) issues.push("mla: attention 'mla' requires mla");
+  if (m.moe && m.moe.topK > m.moe.experts) issues.push('moe.topK: topK must not exceed experts');
+
+  const fields: [string, Model['totalParamsB']][] = [['totalParamsB', m.totalParamsB]];
+  if (m.nativeQuant) fields.push(['nativeQuant.checkpointWeightBytes', m.nativeQuant.checkpointWeightBytes]);
+  const mustBe = (where: string, id: string, allowBundle = false) => {
+    if (id !== source.id && !(allowBundle && id in bundle.sources)) issues.push(`${where}: cites '${id}', not the supplied source '${source.id}'`);
+  };
+  mustBe('source', m.source);
+  for (const [path, f] of fields) {
+    if (f.source !== undefined) mustBe(`${path}.source`, f.source);
+    for (const id of f.evidence ?? []) mustBe(`${path}.evidence`, id);
+    for (const id of f.sources ?? []) mustBe(`${path}.sources`, id);
+    for (const id of f.inputs ?? []) mustBe(`${path}.inputs`, id, true);
+  }
+  if (issues.length > 0) throw new CoreInputError('invalid-input', `匯入的模型不合法：${issues.join('；')}`);
+
+  const arch = {
+    layers: m.layers, heads: m.heads, kvHeads: m.kvHeads, headDim: m.headDim, hidden: m.hidden, attention: m.attention,
+    ...(m.mla ? { mla: m.mla } : {}),
+    ...(m.moe ? { moe: m.moe } : {}),
+    ...(m.layerGroups ? { layerGroups: m.layerGroups } : {}),
+    ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
+  };
+  const basis: BasisItem[] = [
+    fromSourced(`models.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
+    {
+      path: `models.${m.id}.architecture`,
+      status: 'official',
+      value: arch,
+      sourceIds: [m.source],
+      text: `${m.name} 架構（層數、注意力頭、MoE 等，取自匯入的 config.json；${source.title}）`,
+    },
+  ];
+  return { model: m as Model, basis, warnings: [CUSTOM_MODEL_WARNING] };
 }
 
 /**
@@ -1706,8 +1764,12 @@ export type FeasibleModel = QuantFields &
  * checkpoint. The rule findFeasibleModels evaluates when `quant` is omitted. Unknown model → CoreInputError 'unknown-id'.
  */
 export function quantOptions(bundle: Bundle, modelId: string): string[] {
-  const m = lookup(bundle.models, modelId, '模型');
-  if (m.nativeQuant) return [m.nativeQuant.quant];
+  return quantOptionsFor(bundle, lookup(bundle.models, modelId, '模型'));
+}
+
+/** quantOptions for a model object (catalog or imported), by the same rule. */
+export function quantOptionsFor(bundle: Bundle, model: Model): string[] {
+  if (model.nativeQuant) return [model.nativeQuant.quant];
   return Object.values(bundle.quantization).filter((q) => !q.vllmServe.nativeOnly).map((q) => q.id);
 }
 

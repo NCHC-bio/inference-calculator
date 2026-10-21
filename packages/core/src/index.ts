@@ -14,6 +14,8 @@ export {
   resolveQuant,
   predictMeasurement,
   quantOptions,
+  quantOptionsFor,
+  type ImportedModelInput,
   QueryInputSchema,
   ModelOverrideSchema,
   type QueryInput,
