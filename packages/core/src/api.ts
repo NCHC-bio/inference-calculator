@@ -456,12 +456,14 @@ const userValue = <T>(value: T) => ({ value, status: 'unverified' as const, veri
  * `user` in the basis; the efficiency factors, all-reduce latency, t_fixed, TTFT overhead, vLLM defaults and KV block
  * size come from `bundle.customHardware.templates[engine].platform` and are `estimate` ("borrowed"), citing the template
  * value's sources plus the template's evidence. tpOptions: {1, 2, 4, 8} ≤ gpusPerNode when an interconnect bandwidth is
- * given and the borrowed all-reduce latency is > 0 (Ruling R14), else [1]. Basis paths are `custom.<field>`.
+ * given and the borrowed all-reduce latency is > 0 (Ruling R14), else [1]. Basis paths are `<pathPrefix>.<field>`.
  */
 export function resolveCustomPlatform(
   bundle: Bundle,
   raw: CustomPlatformInput,
   computeDtype: Quantization['computeDtype'],
+  /** Basis path prefix: 'custom' for a single platform, `custom:<i>` for row i of estimateRequirements (Ruling R4). */
+  pathPrefix = 'custom',
 ): ResolvedApiPlatform {
   const input = parseInput(CustomPlatformInputSchema, raw);
   const tpl = bundle.customHardware.templates[input.engine];
@@ -495,7 +497,7 @@ export function resolveCustomPlatform(
   const borrowed = `這台硬體沒有實測，借用 ${tpl.platform} 的校正值（${tpl.rationale}）`;
   return resolveFrom(p, hw, cal, computeDtype, {
     item: (kind, field, label, s, lecRef) => {
-      const path = `custom.${field}`;
+      const path = `${pathPrefix}.${field}`;
       if (kind === 'hardware' || field === 'gpusPerNode') {
         const u = fromUser(path, label, s.value, lecRef);
         return s.value === null ? { ...u, text: `${label}；使用者未填` } : u;
@@ -1526,7 +1528,7 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
   // Catalog platforms first, then the user's own (spec 2026-10-21 §5.3), through the same build.
   const perPlatform: PlatformResult[] = [
     ...Object.keys(bundle.platforms).map((id) => result(id, resolvePlatform(bundle, id, quant.computeDtype))),
-    ...(input.customPlatforms ?? []).map((cp, i) => result(`custom:${i}`, resolveCustomPlatform(bundle, cp, quant.computeDtype))),
+    ...(input.customPlatforms ?? []).map((cp, i) => result(`custom:${i}`, resolveCustomPlatform(bundle, cp, quant.computeDtype, `custom:${i}`))),
   ];
 
   let best: { id: string; gpus: number } | null = null;

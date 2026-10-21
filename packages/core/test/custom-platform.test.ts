@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Bundle } from '@nchc/schema';
 import { CONFIG_DIR, loadConfig, validateConfig } from '../../data/src/index';
-import { CoreInputError, estimateRequirements, quantOptions, type CustomPlatformInput, type RequirementInput } from '../src/api';
+import { CoreInputError, estimateRequirements, explain, quantOptions, type CustomPlatformInput, type RequirementInput } from '../src/api';
 import { estimatePerformance } from '../src/performance';
 
 function realBundle(): Bundle {
@@ -102,6 +102,24 @@ describe('custom platforms', () => {
     expect(last.hasUser).toBe(true);
     expect(r.best).toBe(req.best);
     expect(r.perPlatform.slice(0, -1)).toEqual(req.perPlatform);
+  });
+
+  it('several custom platforms keep their own basis items in the combined basis (Ruling R4)', () => {
+    const a: CustomPlatformInput = { ...h200Copy(), name: 'A', memGB: 80 };
+    const b: CustomPlatformInput = { name: 'B', unit: 'machine', gpusPerNode: 1, memGB: 192, memBwTBs: 0.8, tflops: 40, engine: 'mlx' };
+    const r = estimateRequirements(bundle, { ...query, customPlatforms: [a, b] });
+    const ex = explain(bundle, { ...query, customPlatforms: [a, b] });
+    for (const basis of [r.basis, ex.basis]) {
+      const at = (path: string) => basis.find((i) => i.path === path);
+      expect(at('custom:0.memGB')).toMatchObject({ status: 'user', value: 80 });
+      expect(at('custom:1.memGB')).toMatchObject({ status: 'user', value: 192 });
+      expect(at('custom:0.etaBw')?.text).toContain('nano4-h200');
+      expect(at('custom:1.etaBw')?.text).toContain('mac-studio-m5u-512');
+      expect(at('custom:0.etaBw')?.status).toBe('estimate');
+      expect(at('custom:1.memUtil')?.status).toBe('estimate');
+      expect(basis.some((i) => i.path.startsWith('custom.'))).toBe(false);
+    }
+    expect(r.perPlatform.at(-1)!.basis.some((i) => i.path.startsWith('custom:0.'))).toBe(false);
   });
 
   it('bounds', () => {
