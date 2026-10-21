@@ -208,7 +208,7 @@ export function Sentence(): JSX.Element {
         />{' '}
         {tr('sentence.workload.post')}
       </span>{' '}
-      <span className="clause">
+      <span className="clause clause-model">
         {tr('sentence.model.pre')}{' '}
         <OptionSelect
           value={s.model}

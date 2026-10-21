@@ -10,6 +10,7 @@ import { useCalc } from '../state/store';
 import { STATUS_COLOR, StatusTag } from './BasisModal';
 import { isWeak, topEstimates, uniqueByPath } from './weak';
 import { bestCounts, needAnswerParts } from './answerText';
+import { EstimateNotice } from './EstimateNotice';
 import { Explain } from './Explain';
 
 export { needAnswerText } from './answerText';
@@ -128,9 +129,13 @@ function Answer({ r }: { r: RequirementResult }): JSX.Element {
           </Button>
         </Flex>
       </Flex>
-      {r.warnings.map((w, i) => (
-        <Alert key={`${w.code}-${i}`} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} className="fade-in" />
-      ))}
+      {r.warnings.map((w, i) =>
+        w.code === 'nonstandard-config' ? (
+          <EstimateNotice key={`${w.code}-${i}`} warning={w} />
+        ) : (
+          <Alert key={`${w.code}-${i}`} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} className="fade-in" />
+        ),
+      )}
     </div>
   );
 }

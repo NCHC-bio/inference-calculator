@@ -23,7 +23,7 @@ Hand-written fixtures do not name or copy any real model.
 ## Import-coverage snapshots (issue #17)
 
 `snapshots/<owner>__<name>.json.gz` holds every Hugging Face response `fetchHfModel` can request for one repo at one
-commit, replayed by `test/hf-snapshots.test.ts` (a URL not in the snapshot throws). Gzip because ModelOpt mixed-precision
+commit, replayed by `test/hf-snapshots.test.ts` (a URL not in the snapshot throws; the unpinned model API, read for a GGUF repo's or a quantized repo's base model, answers with the snapshot's commit). Every case must import and get an answer from core; `features` lists what is estimated. Gzip because ModelOpt mixed-precision
 configs list every quantized layer (the Nemotron 3.5 Bolt and Super NVFP4 `config.json` / `hf_quant_config.json` run
 to 4–6.5 MB). Responses are verbatim except: the model API keeps `id`, `sha`, `safetensors`, `pipeline_tag`, the
 card's `license` / `license_name` / `base_model` / `base_model_relation` and sibling names; the revision API keeps
@@ -42,4 +42,5 @@ folder exists and skips them otherwise.
 | nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16 | 1f8953f7f0935358e3605150d22bc15df062061c |
 | nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4 | 59b8721646c38111a242da18218859fb2b454322 |
 | nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16 | b366b87f762ea334ba3eb55912031baba1515810 |
+| nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16 | 567021037ff88364143e24ea05e6abd0f72086ff |
 | unsloth/LFM2.5-24B-A2B-GGUF | aacc77834f6aa568c93b4dbd6d295059736be98c |

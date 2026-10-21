@@ -112,7 +112,7 @@ export function OptionSelect({
       onActive={setActive}
       onOpenChange={openChange}
       showSearch={showSearch ? { optionFilterProp: 'label', searchValue: search, onSearch: setSearch } : false}
-      style={{ minWidth: width }}
+      style={{ minWidth: width, maxWidth: '100%' }}
       popupMatchSelectWidth={popupWidth ?? false}
       styles={{ popup: { root: { maxWidth: 'calc(100vw - 32px)' } } }}
       optionRender={(o) => <OptionLabel opt={o.data} on={hoverNone || o.data.value === active || o.data.value === shown} />}

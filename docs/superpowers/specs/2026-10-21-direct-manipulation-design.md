@@ -243,7 +243,8 @@
 - W10：core 顯示給使用者的文字不用「副本」，改「每份模型 N 張卡」。
 - W11：CI 在 `pnpm test` 之後加跑 `pnpm web:build`（抓 Vite 建置失敗）；`web:e2e` 需要瀏覽器、較重，只在本機跑。
 - W12（2026-10-22，取代 W2 的發表者確認與 core R6）：自訂模型（HF 匯入、手動輸入）不詢問發表者與國別，也不做來源國檢查（主設計 §2.2）。兩個自訂模型 Drawer 在任何輸入之前，以醒目的警告（antd `Alert` warning，粗體標題「國網中心模型使用規定」）顯示 `CUSTOM_MODEL_WARNING` 的規定全文；結果照常帶同一段警告。匯入的模型記錄 `UNCHECKED_ORIGIN`（`{ developer: '使用者自訂', country: 'ZZ' }`，與手動輸入的模型相同；ZZ 為 ISO 3166 使用者自訂代碼）。網址不再存發表者（舊連結的 `x.hfo` 忽略）；從網址載入的 HF 模型一律直接重新抓取，gated repo 則開啟 Drawer 並直接顯示 token 欄位。目錄模型（建議清單、預設）照常由 `data:build` 依 `policy.yaml` 檢查，CLI 的 `data:import` 仍必須帶 `--developer`／`--country`。
-- W13（2026-10-22，issue #17）：HF 匯入失敗時，Drawer 只顯示一次原因：無法解析的模型以使用者的語言列出尚未建模的結構，技術細節收在 `Collapse` 內，並提供「回報這個模型」（開啟預填 repo、commit、原因的 GitHub issue form `.github/ISSUE_TEMPLATE/unsupported-model.yml`；連結不含 token，原因上限 1,500 字）；GGUF repo 提供「改匯入 <原始模型>」按鈕（model card 的 `base_model`）。
+- W13（2026-10-22，issue #17，取代同日先前「失敗時列出未建模結構」的版本）：匯入的模型一律得到數值（CLAUDE.md「Goal for imported models」：實測 > 精確計算 > 推估 >>> 錯誤）。計算機還沒精確建模的結構以保守方式推估，結果帶 core 的 `nonstandard-config` 警告；答案下方的推估通知（`EstimateNotice`）用使用者的語言一句話列出推估的結構，每項推估的假設收在 `Collapse` 內，並提供「請求精確支援這個架構」（開啟預填 repo、commit 與推估部分的 GitHub issue form `.github/ISSUE_TEMPLATE/unsupported-model.yml`，標題 `Support model: …`；連結不含 token，原因上限 1,500 字）。匯入成功時若有推估，提示改為 warning。匯入失敗只會是計算機的錯誤：錯誤畫面列出缺少的欄位一次，並提供「回報這個錯誤」（同一個 issue form，標題 `Import error: …`）。GGUF repo 自動以 model card 的 `base_model` 讀取架構（推估），不再需要使用者改匯入。
+- W14（2026-10-22）：句子裡的模型選單寬度以整句為上限（長的 HF repo 名稱以省略號截斷），手機上模型這一段可以在選單前換行；先前長名稱會讓 390 px 出現水平捲動。
 
 core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
 
@@ -254,3 +255,4 @@ core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
 - R5：漏斗的 `requestsPerActivePerDay`（7）標 `estimate`（工作日數是假設，來源沒寫），不是 `derived`。
 - R6：~~`fetchHfModel` 必須帶 `origin`（發表者與國別），由使用者確認，不自動猜測。~~ 2026-10-22 起 `origin` 選填（W12）：CLI 一律帶入；網站不帶，模型記錄 `UNCHECKED_ORIGIN`。
 - R7：選定切法的功耗只算該切法用到的 GPU（tp × 份數），閒置的卡在 `powerNote` 註明。
+- R8（2026-10-22，issue #17）：Model 新增推估與新架構所需的欄位，全部由 core 計算：`moe.layers`（MoE 層數，dense 層不算專家；由 config 的層型欄位精確數出）、`moe.matrices`（2 = 非 gated 專家）、`moe.width`（latent MoE 的寬度）；layer group `state`（固定大小的 per-sequence 狀態，linear attention／short conv）與 `none`（沒有 per-sequence cache 的 MLP／MoE block）；MLA 可與 `state`／mamba 群組並存（MLA 與 linear attention 混合）；`extraCache`（每 token 的額外 cache，每個 TP rank 各一份，加上固定狀態：indexer key cache、記憶層、重複執行的層）；`estimates`（推估的部分，觸發 `nonstandard-config` 警告與 `estimate` basis）。量化新增 `native-other`：計算機還沒建模的原生格式，權重記憶體用 checkpoint 檔案大小，其餘數值保守（每參數 0.5 bytes 拆專家權重、BF16 算力、16-bit KV）；若以此拆分會讓專家權重超過 checkpoint，改依參數比例拆分（basis 列出）。

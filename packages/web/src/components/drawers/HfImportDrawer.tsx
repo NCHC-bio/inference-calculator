@@ -1,7 +1,7 @@
 import { GithubOutlined } from '@ant-design/icons';
-import { fetchHfModel, type HfFetchResult, type UnsupportedFeature } from '@nchc/data/hf';
+import { fetchHfModel, type HfFetchResult } from '@nchc/data/hf';
 import { HF_REPO_RE } from '@nchc/schema';
-import { Alert, App as AntApp, Button, Collapse, Form, Input, Space, Spin, Typography } from 'antd';
+import { Alert, App as AntApp, Button, Form, Input, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useT, type MsgKey, type TFn } from '../../i18n';
 import type { Action, CalcState } from '../../state/state';
@@ -18,23 +18,6 @@ const ERR: Record<Failure['status'], MsgKey> = {
   unparsable: 'hf.err.unparsable',
   network: 'hf.err.network',
   gguf: 'hf.err.gguf',
-};
-/** Every recognised but unmodelled feature has a name in each language (issue #17). */
-const FEATURE: Record<UnsupportedFeature, MsgKey> = {
-  'linear-attention': 'hf.feature.linear-attention',
-  'short-conv': 'hf.feature.short-conv',
-  'dense-and-moe': 'hf.feature.dense-and-moe',
-  'moe-layout': 'hf.feature.moe-layout',
-  'heterogeneous-blocks': 'hf.feature.heterogeneous-blocks',
-  'compressed-attention': 'hf.feature.compressed-attention',
-  'cross-layer-kv': 'hf.feature.cross-layer-kv',
-  'sparse-indexer': 'hf.feature.sparse-indexer',
-  'lookup-tables': 'hf.feature.lookup-tables',
-  'memory-layers': 'hf.feature.memory-layers',
-  'recurrent-depth': 'hf.feature.recurrent-depth',
-  'nested-config': 'hf.feature.nested-config',
-  'native-quant': 'hf.feature.native-quant',
-  'unknown-layer-type': 'hf.feature.unknown-layer-type',
 };
 const REFETCH_KEY = 'hf-refetch';
 
@@ -140,48 +123,24 @@ export function HfRefetch(): null {
 }
 
 /**
- * One readable answer per failure (issue #17): an unparsable model names its unmodelled features in the user's language
- * (technical details one step away) and offers a pre-filled report; a GGUF repo offers the model it came from; anything
- * else shows its own title and the importer's detail once.
+ * A failed import, once (CLAUDE.md "Goal for imported models"): an import that could not be read at all (unparsable,
+ * or a GGUF repo with no base model to read) is a calculator bug, so it lists what was missing and offers a
+ * pre-filled bug report; anything else (gated, not found, offline) shows its own title and the detail.
  */
-function ErrorView({ err, repo, tr, onUseBase }: { err: Failure; repo: string; tr: TFn; onUseBase: (base: string) => void }) {
+function ErrorView({ err, repo, tr }: { err: Failure; repo: string; tr: TFn }) {
   const sep = tr('hf.listSep');
-  let description: JSX.Element;
-  if (err.status === 'unparsable') {
-    const unsupported = err.unsupported ?? [];
-    const explained = new Set(unsupported.flatMap((u) => u.fields));
-    const rest = (err.missing ?? []).filter((m) => !explained.has(m));
-    const details = unsupported.length > 0 ? unsupported.map((u) => u.detail) : [err.message];
-    description = (
-      <>
-        {unsupported.length > 0 && (
-          <div>
-            {tr('hf.unsupported', { list: unsupported.map((u) => tr(FEATURE[u.feature])).join(sep) })}
-            {tr('hf.unsupported.why')}
-          </div>
-        )}
-        {rest.length > 0 && <div style={{ overflowWrap: 'anywhere' }}>{tr('hf.missing', { list: rest.join(sep) })}</div>}
-        {unsupported.length > 0 && (
-          <Collapse
-            ghost
-            size="small"
-            style={{ margin: '4px -16px 0' }}
-            items={[{
-              key: 'details',
-              label: tr('hf.details'),
-              children: (
-                <ul data-testid="hf-error-details" style={{ margin: 0, paddingInlineStart: 18, overflowWrap: 'anywhere', fontSize: 12 }}>
-                  {details.map((d) => <li key={d}>{d}</li>)}
-                </ul>
-              ),
-            }]}
-          />
-        )}
+  const bug = err.status === 'unparsable' || err.status === 'gguf';
+  const description = (
+    <>
+      {err.missing && err.missing.length > 0
+        ? <div style={{ overflowWrap: 'anywhere' }}>{tr('hf.missing', { list: err.missing.join(sep) })}</div>
+        : <div style={{ overflowWrap: 'anywhere' }}>{err.message}</div>}
+      {bug && (
         <Space orientation="vertical" size={2} style={{ marginTop: 8 }}>
           <Button
             size="small"
             icon={<GithubOutlined />}
-            href={reportModelUrl(err.repo ?? repo, err.sha, err.message)}
+            href={reportModelUrl(err.repo ?? repo, err.sha, err.message, 'error')}
             target="_blank"
             rel="noopener noreferrer"
             data-testid="hf-report"
@@ -190,28 +149,9 @@ function ErrorView({ err, repo, tr, onUseBase }: { err: Failure; repo: string; t
           </Button>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>{tr('hf.report.help')}</Typography.Text>
         </Space>
-      </>
-    );
-  } else if (err.status === 'gguf') {
-    const bases = err.baseModels ?? [];
-    description = bases.length === 0 ? <div>{tr('hf.gguf.none')}</div> : (
-      <>
-        <div>{tr('hf.gguf.hint')}</div>
-        <Space wrap size={4} style={{ marginTop: 6 }}>
-          {bases.map((b) => (
-            <Button key={b} size="small" onClick={() => onUseBase(b)}>{tr('hf.gguf.use', { repo: b })}</Button>
-          ))}
-        </Space>
-      </>
-    );
-  } else {
-    description = (
-      <>
-        <div style={{ overflowWrap: 'anywhere' }}>{err.message}</div>
-        {err.missing && err.missing.length > 0 && <div>{tr('hf.missing', { list: err.missing.join(sep) })}</div>}
-      </>
-    );
-  }
+      )}
+    </>
+  );
   return (
     <Alert data-testid="hf-error" type="error" showIcon className="fade-in" style={{ marginBottom: 12 }} title={tr(ERR[err.status])} description={description} />
   );
@@ -235,14 +175,8 @@ function Body({ run }: { run: Run }): JSX.Element {
   // A gated repo from the link (W12) arrives here pending: the token field is shown at once.
   const [needToken, setNeedToken] = useState(pending !== null);
   const [err, setErr] = useState<Failure | null>(null);
-  const [form] = Form.useForm<Values>();
   const [lastRepo, setLastRepo] = useState('');
   const { busy } = run;
-  // GGUF → the original model in the repo field, ready to import.
-  const useBase = (base: string) => {
-    setErr(null);
-    form.setFieldsValue({ repo: base });
-  };
 
   const submit = async (v: Values) => {
     if (busy) return;
@@ -263,16 +197,19 @@ function Body({ run }: { run: Run }): JSX.Element {
     }
     dispatch(r.action);
     dispatch({ type: 'dialog', id: null });
-    void message.success(tr('hf.imported', { repo }));
+    // Estimated parts: said at once; the answer's notice lists them and offers the support request.
+    const added = r.action.type === 'customModel' ? r.action.value : null;
+    const estimated = added?.kind === 'hf' && (added.imported?.model.estimates?.length ?? 0) > 0;
+    if (estimated) void message.warning(tr('hf.imported.estimated', { repo }));
+    else void message.success(tr('hf.imported', { repo }));
   };
 
   return (
     <Spin spinning={busy}>
       <CustomModelWarning />
       {pending && <Alert type="info" showIcon style={{ marginBottom: 12 }} title={tr('hf.reload', { repo: pending.repo })} />}
-      {err && <ErrorView err={err} repo={lastRepo} tr={tr} onUseBase={useBase} />}
+      {err && <ErrorView err={err} repo={lastRepo} tr={tr} />}
       <Form<Values>
-        form={form}
         name="hfImport"
         layout="vertical"
         initialValues={{ repo: s.hfQuery || pending?.repo || '' }}

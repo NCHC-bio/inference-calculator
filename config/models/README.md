@@ -20,20 +20,20 @@
   - `sliding_window: 0` 視為沒有 sliding window（vLLM v0.32.0 `vllm/config/model.py` L802-L808 把 0 轉成 None）。
   - `use_sliding_window: false`：transformers 會把 window 設為 None（例如 v5.20.2 `configuration_qwen2.py` L84），vLLM 讀的是 config 的 `sliding_window`（`vllm/config/model.py` L1612-L1614），所以忽略 window、全部視為 full 層；同時有 `sliding_attention` 的 per-layer 型別時無法判斷，列為 missing（fail closed）。
 - 匯入安全（2026-10-21 起，最終審查 M23、M24）：`config/models/<id>.yaml` 已存在且 `hfRepo` 不是這次的 repo 時（不同 repo 的 slug 相同），拒絕覆寫並以 exit 2 結束；讀 `model.safetensors.index.json` 遇到 401／403 時與 config.json 一樣以 exit 3（gated／權限）結束。
-- 認得但尚未建模的結構一律拒絕（2026-10-22 起，issue #17）：config 裡出現下列任一種時不匯入，而不是當作不存在來估算（DeepSeek V4.1 曾因只讀到 `sliding_window: 128` 而「匯入成功」但 KV 算錯）。每一種只回報一次，附上層數或鍵名（例如 `layer_types "linear_attention" on 48 of 64 layers`），網站以使用者的語言列出結構名稱，並提供「回報這個模型」。分類與鍵名見 `hf-parse.ts` 的 `UNSUPPORTED_FEATURES`、`UNMODELLED_LAYER_TYPES`、`UNMODELLED_KEYS`：
-  - 混合線性注意力：`layer_types` 的 `linear_attention`（Gated DeltaNet、KDA），或沒有 `layer_types` 但有 KDA 的鍵（`linear_attn_config`、`kda_lower_bound` 等，例如 Ling 的 `bailing_hybrid`）。
-  - 短卷積層：`layer_types` 的 `conv`（LFM2）。
-  - Dense 與 MoE 混合：`first_k_dense_replace` > 0、`num_dense_layers` > 0（LFM2，之前沒有檢查）、`mlp_layer_types` 含 `sparse`／`moe` 以外的型別、`moe_layer_freq` ≠ 1、`mlp_only_layers`、`decoder_sparse_step` > 1、per-layer block 清單中只有部分是 MoE。
-  - 特殊 MoE 結構：`moe_latent_size`、非 gated 的專家激活函數（如 `relu2`）、`shared_expert_sink`，以及同時有 `expert_hidden_dim` 與 `moe_intermediate_size` 且數值不同（無法判斷專家寬度）。
-  - 每個 block 各自設定：`block_configs`（Nemotron puzzle）。
-  - 壓縮 KV 注意力：`compress_ratios`／`compress_rates`，`layer_types` 的 `compressed_sparse_attention`／`heavily_compressed_attention`（DeepSeek V4 式）。
-  - 跨層共用 KV：`kv_source_layer_ids`、`num_kv_shared_layers` > 0。
-  - 稀疏注意力索引器：`index_n_heads`、`index_topk`、`index_source_layer_ids`、`indexer_n_heads`、`indexer_budget`，`layer_types` 的 `deepseek_sparse_attention`（DSA 的 indexer 有自己的 per-token key cache；GLM-5.3 修好 Dense／MoE 混合後會以 MLA 匯入，但 KV 會低估，所以一併拒絕）。
-  - 詞表以外的嵌入查找表：`engram_layer_ids`、`engram_num_embeddings`、`ngram_vocab_size_base`、非空的 `ple_layer_ids`（每步只讀查到的列，不能當成每步全讀的權重）。
-  - 記憶層 `memt`、重複執行的層 `n_recurrent_loops`／`n_recurrent_layers` 與 `layer_types` 的 `mlp`（Dory）、巢狀設定 `backbone_configs`（MemT Nano）：屬於少見的自訂架構，維持拒絕，走「回報這個模型」。
-  - 值為 null、false、0 或空清單的鍵視為不存在。
-  - Hyper-connections（`hc_mult`／`hc_count` > 1）不拒絕：權重已含在 safetensors 的 total，也沒有 per-sequence cache，計算機估算的量都不受影響；匯入時印出 `note:`。
-- GGUF repo（2026-10-22 起，issue #17）：model API 的檔案清單沒有 `config.json` 但有 `.gguf` 時，不再回報「找不到」，而是回報 GGUF 並列出 model card 的 `base_model`，請改匯入原始模型（退出碼 2）。網站提供「改匯入 <原始模型>」按鈕，並清空發表者與國家（GGUF 上傳者通常不是原始發表者，不沿用）。
+- 匯入的模型一律得到數值（2026-10-22 起，issue #17；CLAUDE.md「Goal for imported models」）：config 的標準欄位精確讀取；計算機還沒精確建模的結構以標準欄位**保守推估**（記憶體偏多、速度偏慢），寫進模型的 `estimates`（`feature` 與 `detail`），匯入時印出 `estimate: …`，網站顯示推估通知並提供「請求精確支援這個架構」。推估規則見 `hf-parse.ts`（`ESTIMATED_FEATURES`）：
+  - 精確（不是推估）：`first_k_dense_replace`／`num_dense_layers`／`mlp_layer_types`／`mlp_only_layers`／`decoder_sparse_step`／`moe_layer_freq`／`dense_mlp_idx`／per-layer block 清單數出的 MoE 層數（`moe.layers`）；`layers_block_type` 裡的 MoE／MLP block 記為 `none` 群組；ModelOpt FP8 寫在 config.json 的 `quantization_config`（`quant_algo: FP8` 且排除 `lm_head`）視同 `hf_quant_config.json` 的 FP8；巢狀的 `backbone_configs.text_config` 直接讀取。
+  - `linear-attention`：`layer_types` 的 `linear_attention` 記為固定狀態層（`state`）：Gated DeltaNet 鍵（`linear_num_value_heads` 等）→ 狀態 nv × dk × dv（`mamba_ssm_dtype`，缺少時 4 bytes）＋ conv 狀態 (2 × nk × dk + nv × dv) × kernel × 2 bytes；KDA（`linear_attn_config`）→ heads × head_dim² × 4 ＋ 3 × heads × head_dim × kernel × 2。沒有 `layer_types` 但有 KDA 鍵（Ling `bailing_hybrid`）時，每層同時計注意力 cache 與 KDA 狀態（上限）。沒有尺寸時以 full attention 計。
+  - `short-conv`：LFM2 `conv` 層記為固定狀態 hidden_size × conv_L_cache × 2 bytes。
+  - `moe-layout`：`moe_latent_size` → 專家寬度用 latent；非 gated 或未知的激活函數 → 2 個矩陣；`expert_hidden_dim` 與 `moe_intermediate_size` 不同 → 取較小者；`shared_expert_sink` 列為推估；config 算出的專家參數超過總參數 → 當成 dense（每步讀全部權重）。以上都讓每 token 的 active 參數偏多（速度偏慢）。
+  - `heterogeneous-blocks`：`block_configs`（Nemotron puzzle）合成一個 MoE：專家參數為各 block 總和，experts／top-k 取 active 比例最大的 block。
+  - `compressed-attention`、`cross-layer-kv`、`sparse-indexer`：壓縮或稀疏注意力層以 full attention 計，跨層共用的 KV 每層各算一份；DSA 式 indexer 的 key cache 以每 token（indexer KV heads × index head dim × 2 bytes）× 注意力層數加進 `extraCache`，decode 時以讀取全部 token 計。沒有 `layer_types` 的 sliding window 若與壓縮 KV、MLA 或 DeepSeek 式 MoE 並存，每層以 full attention 計（`sliding-window`）；`use_sliding_window: false` 卻有 `sliding_attention` 層時，這些層以 full attention 計。
+  - `lookup-tables`：engram、n-gram、per-layer embedding 表以每步全讀計（實際只讀查到的列）。
+  - `memory-layers`：MemT 的 `memt` 每層記為固定狀態 memory heads × head_dim² × 4 bytes ＋ 一個 `chunk_tokens` 的 KV。`recurrent-depth`：重複執行的層（Dory `n_recurrent_loops`）每多一次，其中的注意力層多存一份 KV（重複執行的算力未計）。
+  - `native-quant`：計算機還沒建模的原生格式（ModelOpt mixed precision、NVFP4、Q8_0、experts 為 FP4 的 FP8、compressed-tensors 等）記為量化 `native-other`（`config/quantization.yaml`）：權重記憶體用 checkpoint 檔案大小（精確），其餘保守。打包的 checkpoint（4-bit 兩個一 byte）的 safetensors 計數是元素數，所以有 model card `base_model` 時參數量改用 base model 的計數（`totalParamsB` 為 estimate）。
+  - `unknown-layer-type`：未知的層型以 full attention 計；未知的 `mamba_ssm_cache_dtype` 以 4 bytes 計。
+  - `gguf`：只有 `.gguf` 檔的 repo 以 model card 的 `base_model` 讀取架構與參數量（GGUF 檔本身的精度在計算機裡選）。`base_model` 也沒有時才是錯誤（退出碼 2）。
+  - Hyper-connections（`hc_mult`／`hc_count` > 1）不影響計算機估算的量（權重已在總參數內、沒有 per-sequence cache），只印出 `note:`。
+  - 只有推估也需要的欄位（hidden_size、注意力頭數、層數、vocab_size、參數量、來源）缺少時才會匯入失敗；這是匯入工具的錯誤，應修正而不是視為正常結果。
 - 目錄中既有模型的 YAML 開頭沒有重新產生：phi-4 的 head_dim、gpt-oss 的 full 層維度、Mistral Small 3.1 的 tie_word_embeddings 這三項新增的 note 在重新匯入時才會寫入；數值與現在的 YAML 相同。
 - 發表者來源國在 `excludedCountries` 內的模型無法加入目錄。
   - `origin`（發表者）只能由維護者以 `--developer` / `--country` 提供，工具不會猜測；缺少時退出碼 2。
@@ -52,7 +52,7 @@ pnpm data:import <owner/repo> --developer <名稱> --country <ISO2> \
 |---|---|
 | 0 | 已寫入 `config/models/<id>.yaml` 與 `sources.yaml` |
 | 1 | 網路或其他錯誤 |
-| 2 | 缺少參數或 config 欄位、config 用到尚未建模的結構（印出 `unsupported architecture: …`／`missing: …`，每項一次），或是 GGUF repo（改匯入 `base_model`）；不寫入任何檔案 |
+| 2 | 缺少參數，或缺少推估也需要的 config 欄位（印出 `missing: …`），或是 model card 沒有 `base_model` 的 GGUF repo；不寫入任何檔案 |
 | 3 | gated repo（HTTP 401/403），需要以 `--token-env` 指定含 HF token 的環境變數 |
 
 匯入後執行 `pnpm data:build`；若發表者來源國在 `config/policy.yaml` 的 `excludedCountries` 內，或 `hfRepo` 擁有者在 `excludedOrgs` 內，建置會失敗。

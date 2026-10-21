@@ -506,7 +506,7 @@ describe('HfImportDrawer', () => {
   it.each([
     ['not-found', /找不到這個模型/],
     ['network', /無法連線到 Hugging Face/],
-    ['unparsable', /無法解析這個模型的架構/],
+    ['unparsable', /計算機讀取這個模型時出錯了/],
     ['invalid', /owner\/name/],
   ] as const)('%s → its own message and the missing list', async (status, re) => {
     fetchMock.mockResolvedValue({ ok: false, status, message: 'detail text', missing: ['num_hidden_layers', 'head_dim'] });
@@ -532,29 +532,21 @@ describe('HfImportDrawer', () => {
     return { d, alert: await within(d).findByTestId('hf-error') };
   };
 
-  it('unsupported architecture → localized feature names once, details one step away, a pre-filled report link (issue #17)', async () => {
-    const reason = 'unsupported architecture: layer_types "linear_attention" on 48 of 64 layers; first_k_dense_replace 3';
+  it('an import that fails is a bug: the missing fields once and a pre-filled bug report (issue #17)', async () => {
     const { alert } = await submitFailure({
-      ok: false, status: 'unparsable', message: reason, repo: 'test-org/x', sha: 'abc1234def',
-      missing: ['layer_types: unknown type "linear_attention"', 'first_k_dense_replace 3 (dense MLP layers mixed with MoE not supported)'],
-      unsupported: [
-        { feature: 'linear-attention', detail: 'layer_types "linear_attention" on 48 of 64 layers', fields: ['layer_types: unknown type "linear_attention"'] },
-        { feature: 'dense-and-moe', detail: 'first_k_dense_replace 3', fields: ['first_k_dense_replace 3 (dense MLP layers mixed with MoE not supported)'] },
-      ],
+      ok: false, status: 'unparsable', message: 'missing: hidden_size', missing: ['hidden_size'], repo: 'test-org/x', sha: 'abc1234def',
     });
-    expect(alert).toHaveTextContent('這個模型用到計算機還沒建模的結構：混合線性注意力（Gated DeltaNet、KDA）、Dense 與 MoE 混合的層。');
-    // Each problem once: the explained missing lines are not listed again, and the details stay folded.
-    expect(alert).not.toHaveTextContent('缺少');
-    expect(within(alert).queryByTestId('hf-error-details')).toBeNull();
-    await userEvent.click(within(alert).getByText('技術細節'));
-    expect(await within(alert).findByTestId('hf-error-details')).toHaveTextContent('layer_types "linear_attention" on 48 of 64 layers');
+    expect(alert).toHaveTextContent('計算機讀取這個模型時出錯了，這是計算機的問題，請回報');
+    expect(alert.textContent?.match(/hidden_size/g)).toHaveLength(1);
     const link = within(alert).getByTestId('hf-report');
+    expect(link).toHaveTextContent('回報這個錯誤');
     const url = new URL(link.getAttribute('href')!);
     expect(url.origin + url.pathname).toBe('https://github.com/NCHC-bio/inference-calculator/issues/new');
     expect(url.searchParams.get('template')).toBe('unsupported-model.yml');
+    expect(url.searchParams.get('title')).toBe('Import error: test-org/x');
     expect(url.searchParams.get('repo')).toBe('test-org/x');
     expect(url.searchParams.get('sha')).toBe('abc1234def');
-    expect(url.searchParams.get('reason')).toBe(reason);
+    expect(url.searchParams.get('reason')).toBe('missing: hidden_size');
     expect(link).toHaveAttribute('target', '_blank');
   });
 
@@ -565,27 +557,70 @@ describe('HfImportDrawer', () => {
     const d = await drawer();
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
     await userEvent.type(await within(d).findByLabelText(/Hugging Face token/), 'hf_secret123');
-    fetchMock.mockResolvedValueOnce({ ok: false, status: 'unparsable', message: 'missing: hidden_size', missing: ['hidden_size'], unsupported: [], repo: 'test-org/gated', sha: 'abc1234def' });
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 'unparsable', message: 'missing: hidden_size', missing: ['hidden_size'], repo: 'test-org/gated', sha: 'abc1234def' });
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
     const link = await within(d).findByTestId('hf-report');
     expect(link.getAttribute('href')).not.toContain('hf_secret123');
     expect(within(d).getByTestId('hf-error')).toHaveTextContent('缺少：hidden_size');
   });
 
-  it('GGUF → the base model in one click (issue #17)', async () => {
-    const { d, alert } = await submitFailure({
-      ok: false, status: 'gguf', message: 'GGUF repo without config.json', repo: 'quant-org/m-GGUF', sha: 'abc1234def', baseModels: ['test-org/m'],
+  it('a GGUF repo with no base model to read from is a bug report too (issue #17)', async () => {
+    const { alert } = await submitFailure({
+      ok: false, status: 'gguf', message: 'GGUF repo without config.json, and its model card names no base model', repo: 'quant-org/m-GGUF', sha: 'abc1234def', baseModels: [],
     }, 'quant-org/m-GGUF');
-    expect(alert).toHaveTextContent('這個 repo 只有 GGUF 檔，沒有 config.json');
-    await userEvent.click(within(alert).getByRole('button', { name: '改匯入 test-org/m' }));
-    expect(within(d).getByLabelText('Hugging Face 模型（owner/name）')).toHaveValue('test-org/m');
-    expect(within(d).queryByTestId('hf-error')).toBeNull();
+    expect(alert).toHaveTextContent('這個 repo 只有 GGUF 檔');
+    expect(within(alert).getByTestId('hf-report')).toBeInTheDocument();
+  });
+
+  it('a model with estimated parts imports with a warning toast (issue #17)', async () => {
+    const { model, source } = importedFixture();
+    const estimated = { ...model, estimates: [{ feature: 'linear-attention', detail: 'Gated DeltaNet layers: state 48 × 128 × 128' }] };
+    fetchMock.mockResolvedValue({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model: estimated, source, notes: [], cardBases: [] });
+    renderWith(<HfImportDrawer />);
+    openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
+    const d = await drawer();
+    await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(document.querySelector('.ant-message-warning')).not.toBeNull());
+    expect(document.querySelector('.ant-message-warning')).toHaveTextContent('已匯入 test-org/test-model，部分數值為推估');
+  });
+});
+
+describe('EstimateNotice (issue #17)', () => {
+  it('an estimated result: one sentence of localized names, details one step away, a support request without the token', async () => {
+    const { model, source } = importedFixture();
+    const estimates = [
+      { feature: 'linear-attention', detail: 'Gated DeltaNet layers: state 48 × 128 × 128 at 4 bytes' },
+      { feature: 'sparse-indexer', detail: 'index_n_heads: an indexer key cache' },
+    ];
+    renderWith(<AnswerLine />, '?w=chat');
+    act(() => send({ type: 'customModel', value: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', imported: { model: { ...model, estimates }, source } } }));
+    const notice = await screen.findByTestId('estimate-notice');
+    expect(notice).toHaveTextContent('這個模型的 config 不是標準格式，部分數值為推估');
+    expect(notice).toHaveTextContent('：混合線性注意力（Gated DeltaNet、KDA）、稀疏注意力索引器（DSA 式）。');
+    expect(within(notice).queryByTestId('estimate-details')).toBeNull();
+    await userEvent.click(within(notice).getByText('推估了哪些部分'));
+    expect(await within(notice).findByTestId('estimate-details')).toHaveTextContent('state 48 × 128 × 128 at 4 bytes');
+    const url = new URL(within(notice).getByTestId('estimate-request').getAttribute('href')!);
+    expect(url.searchParams.get('title')).toBe('Support model: test-org/test-model');
+    expect(url.searchParams.get('sha')).toBe('abc1234def');
+    expect(url.searchParams.get('reason')).toContain('linear-attention (Gated DeltaNet layers');
+    // The NCHC rule keeps its own warning beside it.
+    expect(screen.getByText(CUSTOM_MODEL_WARNING.text)).toBeInTheDocument();
+  });
+
+  it('a model without estimates shows no notice', async () => {
+    const { model, source } = importedFixture();
+    renderWith(<AnswerLine />, '?w=chat');
+    act(() => send({ type: 'customModel', value: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', imported: { model, source } } }));
+    await waitFor(() => expect(screen.getByText(CUSTOM_MODEL_WARNING.text)).toBeInTheDocument());
+    expect(screen.queryByTestId('estimate-notice')).toBeNull();
   });
 });
 
 describe('reportModelUrl', () => {
   it('caps the reason so the link stays short; no sha → main', () => {
-    const url = new URL(reportModelUrl('a/b', undefined, 'x'.repeat(5000)));
+    const url = new URL(reportModelUrl('a/b', undefined, 'x'.repeat(5000), 'support'));
+    expect(url.searchParams.get('title')).toBe('Support model: a/b');
     expect(url.searchParams.get('reason')).toHaveLength(REPORT_REASON_MAX);
     expect(url.searchParams.get('config')).toBe('https://huggingface.co/a/b/blob/main/config.json');
     expect(url.searchParams.has('sha')).toBe(false);
