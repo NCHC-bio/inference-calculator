@@ -189,6 +189,64 @@ describe('parseHfConfig', () => {
     expect(r.model).toBeUndefined();
   });
 
+  it('recognised but unmodelled structures fail closed, one entry per feature (issue #17)', () => {
+    const base = {
+      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
+    };
+    const run = (extra: Record<string, unknown>) => parseHfConfig('example/x', SHA, { ...base, ...extra }, 1e9, opts('Example Lab', 'US'));
+    const features = (extra: Record<string, unknown>) => run(extra).unsupported.map((u) => u.feature);
+    expect(features({})).toEqual([]);
+    // DeepSeek V4 style: these keys were ignored and only sliding_window was read (silently wrong KV).
+    expect(features({ sliding_window: 128, compress_ratios: [0, 2, 1, 0] })).toEqual(['compressed-attention']);
+    expect(run({ sliding_window: 128, compress_ratios: [0, 2, 1, 0] }).model).toBeUndefined();
+    expect(features({ kv_source_layer_ids: [1] })).toEqual(['cross-layer-kv']);
+    expect(features({ num_kv_shared_layers: 2 })).toEqual(['cross-layer-kv']);
+    // GLM-5.3 DSA indexer: a per-token key cache the KV math does not count.
+    expect(features({ index_n_heads: 32, index_head_dim: 128, index_topk: 2048 })).toEqual(['sparse-indexer']);
+    expect(features({ engram_layer_ids: [1] })).toEqual(['lookup-tables']);
+    expect(features({ ngram_vocab_size_base: 20000000 })).toEqual(['lookup-tables']);
+    expect(features({ ple_layer_ids: [] })).toEqual([]);
+    expect(features({ memt: { layers: [1] } })).toEqual(['memory-layers']);
+    expect(features({ n_recurrent_loops: 2 })).toEqual(['recurrent-depth']);
+    expect(features({ backbone_configs: {} })).toEqual(['nested-config']);
+    expect(features({ block_configs: [{ block_type: 'moe' }] })).toEqual(['heterogeneous-blocks']);
+    // KDA without layer_types (Ling bailing_hybrid): its own keys mark it.
+    expect(features({ kda_lower_bound: -5 })).toEqual(['linear-attention']);
+    // Hyper-connections change nothing the calculator sizes: accepted with a note.
+    const hc = run({ hc_mult: 4 });
+    expect(hc.model).toBeDefined();
+    expect(hc.notes.some((n) => n.startsWith('hyper-connections (4 residual streams)'))).toBe(true);
+  });
+
+  it('dense layers beside MoE in every spelling, and two expert widths, fail closed', () => {
+    const moe = {
+      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
+      num_experts: 16, num_experts_per_tok: 2, moe_intermediate_size: 256, hidden_act: 'silu',
+    };
+    const run = (extra: Record<string, unknown>) => parseHfConfig('example/moe', SHA, { ...moe, ...extra }, 1e9, opts('Example Lab', 'US'));
+    expect(run({ num_dense_layers: 2 }).unsupported).toEqual([
+      { feature: 'dense-and-moe', detail: 'num_dense_layers 2', fields: ['num_dense_layers 2 (dense MLP layers mixed with MoE not supported)'] },
+    ]);
+    expect(run({ mlp_layer_types: ['dense', 'sparse', 'sparse', 'sparse'] }).unsupported[0]?.detail).toBe('mlp_layer_types "dense" × 1');
+    expect(run({ mlp_layer_types: ['sparse', 'sparse', 'sparse', 'sparse'] }).unsupported).toEqual([]);
+    expect(run({ expert_hidden_dim: 768 }).unsupported.map((u) => u.feature)).toEqual(['moe-layout']);
+    expect(run({ expert_hidden_dim: 256 }).unsupported).toEqual([]);
+  });
+
+  it('an unknown layer type is reported once with its layer count, not once per layer (issue #17)', () => {
+    const cfg = {
+      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8,
+      layer_types: ['linear_attention', 'linear_attention', 'linear_attention', 'full_attention'],
+    };
+    const r = parseHfConfig('example/hybrid-linear', SHA, cfg, 1e9, opts('Example Lab', 'US'));
+    expect(r.missing).toEqual(['layer_types: unknown type "linear_attention"']);
+    expect(r.unsupported).toEqual([{
+      feature: 'linear-attention', detail: 'layer_types "linear_attention" on 3 of 4 layers', fields: ['layer_types: unknown type "linear_attention"'],
+    }]);
+    const other = parseHfConfig('example/chunked', SHA, { ...cfg, layer_types: ['chunked_attention', 'full_attention', 'full_attention', 'full_attention'] }, 1e9, opts('Example Lab', 'US'));
+    expect(other.unsupported.map((u) => u.feature)).toEqual(['unknown-layer-type']);
+  });
+
   it('unknown layer type is missing, not guessed', () => {
     const cfg = {
       hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 2, num_attention_heads: 8,

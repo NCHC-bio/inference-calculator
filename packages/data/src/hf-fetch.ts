@@ -3,8 +3,10 @@
  * model flow. No `node:` import, no fs, no yaml. The token (if any) is sent only to https://huggingface.co/ and is
  * never stored or logged here (direct-manipulation design §6.3).
  */
-import { HF_REPO_RE, type Model, type Origin, type Source } from '@nchc/schema';
-import { checkpointWeightBytes, hfSourceId, parseHfConfig, quantizationConfig } from './hf-parse';
+import { HF_REPO_RE, UNCHECKED_ORIGIN, type Model, type Origin, type Source } from '@nchc/schema';
+import { checkpointWeightBytes, hfSourceId, parseHfConfig, quantizationConfig, type Unsupported } from './hf-parse';
+
+export { UNSUPPORTED_FEATURES, type Unsupported, type UnsupportedFeature } from './hf-parse';
 
 const HF = 'https://huggingface.co';
 
@@ -23,8 +25,12 @@ export type HfFetchDeps = {
   fetch: (url: string, init?: { headers?: Record<string, string> }) => Promise<HfFetchResponse>;
   token?: string;
   revision?: string;
-  /** Publisher origin recorded on the model: required (CLI: --developer/--country; website: asked from the user). */
-  origin: Origin;
+  /**
+   * Publisher origin recorded on the model. The CLI always passes it (--developer / --country; catalog models are
+   * policy-checked, spec §2.2). The website does not: a user-imported model gets UNCHECKED_ORIGIN and the
+   * custom-model warning instead (Ruling W12).
+   */
+  origin?: Origin;
   /** ISO date written to `verified` / `accessed`; defaults to today. */
   today?: string;
   /**
@@ -40,7 +46,21 @@ export type HfFetchResult =
     /** Model card `base_model` repos (empty when none). */
     cardBases: string[];
   }
-  | { ok: false; status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network'; message: string; missing?: string[] };
+  | {
+    ok: false;
+    /** `gguf`: a GGUF-only repo (no config.json); `baseModels` names the original models to import instead. */
+    status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network' | 'gguf';
+    /** One readable reason, each problem named once (issue #17). */
+    message: string;
+    /** Every field or structure that could not be read, each once. */
+    missing?: string[];
+    /** Recognised but unmodelled architecture features, one per feature (unparsable only). */
+    unsupported?: Unsupported[];
+    /** The repo and the commit it was read at, once the model API answered (for the "report this model" link). */
+    repo?: string;
+    sha?: string;
+    baseModels?: string[];
+  };
 
 /** Model-card `base_model` as a list of repos: a string, a list of strings, or absent. */
 export function cardBaseModels(v: unknown): string[] {
@@ -61,6 +81,20 @@ async function deniedMessage(res: HfFetchResponse, what: string): Promise<string
   const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200);
   const hint = [code && `X-Error-Code: ${code}`, msg, body && body !== msg ? `body: ${body}` : ''].filter(Boolean).join('; ');
   return `${DENIED_PREFIX} (HTTP ${res.status} on ${what}${hint ? `; ${hint}` : ''})`;
+}
+
+/**
+ * One sentence for an unparsable model: the unsupported features first (what was found), then the plain fields that
+ * are missing and not explained by one of them.
+ */
+export function unparsableMessage(missing: string[], unsupported: Unsupported[]): string {
+  const explained = new Set(unsupported.flatMap((u) => u.fields));
+  const rest = missing.filter((m) => !explained.has(m));
+  const parts = [
+    unsupported.length > 0 ? `unsupported architecture: ${unsupported.map((u) => u.detail).join('; ')}` : '',
+    rest.length > 0 ? `missing: ${rest.join(', ')}` : '',
+  ].filter(Boolean);
+  return parts.join('. ');
 }
 
 class Stop extends Error {
@@ -115,6 +149,15 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     const resolved = deps.resolveBase?.(cardBases);
     if (resolved?.error) throw new Stop({ ok: false, status: 'unparsable', message: resolved.error });
 
+    // A GGUF-only repo has no config.json to read: point at the model it was converted from (issue #17 E).
+    const names = (api.siblings ?? []).map((s) => s.rfilename).filter((n): n is string => typeof n === 'string');
+    if (!names.includes('config.json') && names.some((n) => /.gguf$/i.test(n))) {
+      throw new Stop({
+        ok: false, status: 'gguf', repo, sha, baseModels: cardBases,
+        message: `GGUF repo without config.json: import the original model instead${cardBases.length > 0 ? ` (model card base_model: ${cardBases.join(', ')})` : ''}`,
+      });
+    }
+
     // config.json at the same commit the API reported, so source and values match.
     const cfgRes = await get(`${HF}/${repo}/resolve/${sha}/config.json`, 'config.json');
     if (!cfgRes.ok) throw httpFail(cfgRes, 'config.json');
@@ -165,8 +208,8 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
 
     const today = deps.today ?? new Date().toISOString().slice(0, 10);
     const license = api.cardData?.license_name ?? api.cardData?.license;
-    const { model, missing, notes } = parseHfConfig(repo, sha, config, api.safetensors?.total ?? null, {
-      origin: deps.origin,
+    const { model, missing, unsupported, notes } = parseHfConfig(repo, sha, config, api.safetensors?.total ?? null, {
+      origin: deps.origin ?? UNCHECKED_ORIGIN,
       ...(resolved?.base ? { base: resolved.base } : {}),
       license, verified: today,
       ...(ckptBytes !== undefined ? { checkpointWeightBytes: ckptBytes } : {}),
@@ -174,8 +217,8 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
       ...(weightNames ? { weightNames } : {}),
     });
     if (!model || ckptMissing.length > 0) {
-      const all = [...ckptMissing, ...missing];
-      return { ok: false, status: 'unparsable', message: `missing: ${all.join(', ')}`, missing: all };
+      const all = [...new Set([...ckptMissing, ...missing])];
+      return { ok: false, status: 'unparsable', message: unparsableMessage(all, unsupported), missing: all, unsupported, repo, sha };
     }
     const source: Source = {
       id: hfSourceId(repo, sha),

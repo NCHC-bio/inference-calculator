@@ -1,0 +1,40 @@
+name: 回報無法匯入的模型
+description: 網站「從 Hugging Face 匯入」或 pnpm data:import 無法解析的模型。從網站錯誤畫面的「回報這個模型」開啟時，欄位已預先填好。
+title: "Unsupported model: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        謝謝回報。我們會依這些資料補上這個架構的支援（見 issue #17）。
+        **請勿貼上 Hugging Face token。** 需要授權的模型只要填 repo 與 commit 即可。
+  - type: input
+    id: repo
+    attributes:
+      label: Hugging Face repo
+      description: owner/name
+      placeholder: owner/name
+    validations:
+      required: true
+  - type: input
+    id: sha
+    attributes:
+      label: Commit sha
+      description: 匯入時讀取的 commit（網站自動填入）
+  - type: textarea
+    id: reason
+    attributes:
+      label: 不支援的原因
+      description: 匯入工具回報的原因（網站自動填入）
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: config
+    attributes:
+      label: config.json 連結
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補充說明
+      description: 例如你想用這個模型做什麼、預計的使用者人數或硬體

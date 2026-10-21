@@ -1,4 +1,4 @@
-import { OriginSchema, type Bundle, type Model, type Origin, type Source } from '@nchc/schema';
+import { type Bundle, type Model, type Source } from '@nchc/schema';
 import {
   CustomPlatformInputSchema,
   ModelOverrideSchema,
@@ -21,11 +21,8 @@ export type SpeedSel = string | { minTokPerSec: number; maxTtftSec: number };
 export type CustomModel =
   | null
   | { kind: 'manual'; value: ModelOverride }
-  /**
-   * `origin`: the publisher the user confirmed on import (spec §8.3.2), kept so a URL reload can refetch (Ruling W1).
-   * `imported` is absent after a URL reload until the refetch answers.
-   */
-  | { kind: 'hf'; repo: string; sha: string; origin?: Origin; imported?: { model: Model; source: Source } };
+  /** `imported` is absent after a URL reload until the refetch answers (Ruling W1). */
+  | { kind: 'hf'; repo: string; sha: string; imported?: { model: Model; source: Source } };
 /** A platform sub-label as data: catalog text, or a message key with its values (formatted in the current language). */
 export type SubLabel = string | { key: MsgKey; vars: Record<string, string | number> };
 /**
@@ -197,8 +194,7 @@ export function validCustomModel(v: unknown): v is Exclude<CustomModel, null> {
       typeof c.repo === 'string' &&
       HF_REPO.test(c.repo) &&
       typeof c.sha === 'string' &&
-      HF_REVISION.test(c.sha) &&
-      (c.origin === undefined || OriginSchema.safeParse(c.origin).success)
+      HF_REVISION.test(c.sha)
     );
   }
   return false;

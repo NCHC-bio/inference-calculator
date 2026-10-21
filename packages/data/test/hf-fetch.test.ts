@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { fetchHfModel, type HfFetchDeps } from '../src/hf-fetch';
+import { fetchHfModel, unparsableMessage, type HfFetchDeps } from '../src/hf-fetch';
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 const fixture = (name: string) => read(`./fixtures/hf/${name}.json`);
@@ -99,5 +99,40 @@ describe('fetchHfModel', () => {
     };
     walk('hf-fetch');
     expect(seen.has('hf-parse')).toBe(true);
+  });
+});
+
+describe('fetchHfModel failures (issue #17)', () => {
+  const api = (body: object) => JSON.stringify({ sha: SHA, safetensors: { total: 1 }, ...body });
+
+  it('a GGUF-only repo → gguf with the card base_model, before config.json is requested', async () => {
+    const urls: string[] = [];
+    const fn: HfFetchDeps['fetch'] = async (url) => {
+      urls.push(url);
+      if (url.includes('/api/models/')) {
+        return res(200, api({ cardData: { base_model: ['org/original'] }, siblings: [{ rfilename: 'README.md' }, { rfilename: 'm-Q4_K_M.gguf' }] }));
+      }
+      return res(404, 'no');
+    };
+    const r = await fetchHfModel('someone/model-GGUF', { fetch: fn, origin: ORIGIN });
+    expect(r).toMatchObject({ ok: false, status: 'gguf', baseModels: ['org/original'], repo: 'someone/model-GGUF', sha: SHA });
+    expect(urls.some((u) => u.endsWith('/config.json'))).toBe(false);
+  });
+
+  it('a repo with both config.json and .gguf files is read normally', async () => {
+    const fn = fake().fn;
+    const r = await fetchHfModel('openai/gpt-oss-120b', {
+      fetch: async (url, init) => (url.includes('/api/models/') && !url.includes('blobs=true')
+        ? res(200, api({ siblings: [{ rfilename: 'config.json' }, { rfilename: 'x.gguf' }] }))
+        : fn(url, init)),
+      origin: ORIGIN,
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it('unparsableMessage: features first, then only the fields no feature explains', () => {
+    expect(unparsableMessage(['a (x)', 'hidden_size'], [{ feature: 'short-conv', detail: 'conv on 3 of 4 layers', fields: ['a (x)'] }]))
+      .toBe('unsupported architecture: conv on 3 of 4 layers. missing: hidden_size');
+    expect(unparsableMessage(['hidden_size'], [])).toBe('missing: hidden_size');
   });
 });

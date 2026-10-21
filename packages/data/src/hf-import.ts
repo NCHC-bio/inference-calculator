@@ -157,11 +157,12 @@ export async function runImport(argv: string[], deps: ImportDeps): Promise<numbe
     },
   });
   if (!r.ok) {
-    // denied → 3; unparsable (missing fields, base-flag contradiction) or invalid (repo id / revision) → 2; everything else → 1.
+    // denied → 3; unparsable (missing fields, unsupported architecture, base-flag contradiction), gguf (import the base
+    // model instead) or invalid (repo id / revision) → 2; everything else → 1.
     // The shared denied message is CLI-neutral (the browser shows it too); the CLI names its own flag.
     const msg = r.status === 'denied' ? r.message.replace(DENIED_PREFIX, 'gated: set HF token via --token-env') : r.message;
     deps.log(r.status === 'denied' || r.status === 'unparsable' ? msg : `error: ${msg}`);
-    return r.status === 'denied' ? 3 : r.status === 'unparsable' || r.status === 'invalid' ? 2 : 1;
+    return r.status === 'denied' ? 3 : r.status === 'unparsable' || r.status === 'invalid' || r.status === 'gguf' ? 2 : 1;
   }
   const { model, notes, sha, source: entry } = r;
 

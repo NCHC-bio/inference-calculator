@@ -244,7 +244,7 @@ describe('custom models are not origin-checked and carry CUSTOM_MODEL_WARNING (s
   const W = [CUSTOM_MODEL_WARNING];
   it('CUSTOM_MODEL_WARNING has the pinned code and text', () => {
     expect(CUSTOM_MODEL_WARNING.code).toBe('custom-model-supply-chain');
-    expect(CUSTOM_MODEL_WARNING.text).toBe('國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。使用後果請用戶自行承擔。');
+    expect(CUSTOM_MODEL_WARNING.text).toBe('國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。違反規定可能影響您的 iService 帳號，使用後果請用戶自行承擔。');
     expect(CUSTOM_MODEL_WARNING.text).toContain('國網中心規定禁止使用紅色供應鏈模型');
     expect(CUSTOM_MODEL_WARNING.text).toContain('使用後果請用戶自行承擔');
     expect(CUSTOM_MODEL_WARNING.text).not.toMatch(/推薦|建議/);

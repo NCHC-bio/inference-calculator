@@ -160,6 +160,13 @@ export const OriginSchema = z.strictObject({
 });
 export type Origin = z.infer<typeof OriginSchema>;
 
+/**
+ * The origin recorded on a user-entered model (manual override or website import): the user is not asked for the
+ * publisher and the model is not origin-checked; every result carries CUSTOM_MODEL_WARNING instead (spec §2.2, Ruling
+ * W12). 'ZZ' is the ISO 3166 user-assigned code: origin not given.
+ */
+export const UNCHECKED_ORIGIN: Origin = Object.freeze({ developer: '使用者自訂', country: 'ZZ' });
+
 export const LayerGroupSchema = z.strictObject({
   kind: z.enum(['full', 'sliding', 'mamba']),
   count: posInt,

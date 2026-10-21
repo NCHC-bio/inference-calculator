@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import {
-  HfRepoSchema, LayerGroupSchema, ModelSchema, SourceSchema, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
+  HfRepoSchema, LayerGroupSchema, ModelSchema, SourceSchema, UNCHECKED_ORIGIN, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
 } from '@nchc/schema';
 import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } from './basis';
 import {
@@ -677,7 +677,7 @@ export type ResultWarning = { code: 'custom-model-supply-chain'; text: string };
  */
 export const CUSTOM_MODEL_WARNING: ResultWarning = Object.freeze({
   code: 'custom-model-supply-chain',
-  text: '國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。使用後果請用戶自行承擔。',
+  text: '國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。違反規定可能影響您的 iService 帳號，使用後果請用戶自行承擔。',
 });
 
 /**
@@ -733,8 +733,7 @@ export function resolveModel(
     name: o.name ?? '自訂模型',
     ...(o.hfRepo ? { hfRepo: o.hfRepo } : {}),
     ...(o.baseModel ? { baseModel: o.baseModel } : {}),
-    // 'ZZ' = ISO user-assigned code: origin not given by the user.
-    origin: o.origin ?? { developer: '使用者自訂', country: 'ZZ' },
+    origin: o.origin ?? UNCHECKED_ORIGIN,
     ...(o.baseOrigin ? { baseOrigin: o.baseOrigin } : {}),
     // Core math reads only `.value`; provenance for overrides lives in the basis ('user').
     totalParamsB: { value: o.totalParamsB, status: 'user', verified: bundle.meta.dataVersion },

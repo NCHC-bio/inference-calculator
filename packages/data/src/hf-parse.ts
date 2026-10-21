@@ -43,10 +43,26 @@ export const TIE_DEFAULTS: Readonly<Record<string, { tied: boolean; ref: string 
 /** A separate lm_head tensor in the checkpoint (`lm_head.weight`, possibly prefixed, e.g. `language_model.lm_head.weight`). */
 const hasLmHead = (names: string[]): boolean => names.some((n) => /(^|\.)lm_head\.weight$/.test(n));
 
+/**
+ * Architecture features the calculator recognises in a config but does not model yet (issue #17). The parser fails
+ * closed on each of them rather than sizing the model as if the feature were absent; the website names them in the
+ * user's language and offers to report the model.
+ */
+export const UNSUPPORTED_FEATURES = [
+  'linear-attention', 'short-conv', 'dense-and-moe', 'moe-layout', 'heterogeneous-blocks', 'compressed-attention',
+  'cross-layer-kv', 'sparse-indexer', 'lookup-tables', 'memory-layers', 'recurrent-depth', 'nested-config',
+  'native-quant', 'unknown-layer-type',
+] as const;
+export type UnsupportedFeature = (typeof UNSUPPORTED_FEATURES)[number];
+/** One unmodelled feature: what was found (`detail`) and the `missing` lines it accounts for. */
+export type Unsupported = { feature: UnsupportedFeature; detail: string; fields: string[] };
+
 export interface ParseResult {
   model?: Model;
-  /** Human-readable names of every field that could not be read. Empty when `model` is set. */
+  /** Human-readable names of every field that could not be read, each listed once. Empty when `model` is set. */
   missing: string[];
+  /** The recognised but unmodelled features among `missing`, one entry per feature (details joined). */
+  unsupported: Unsupported[];
   /**
    * Implicit defaults the parser applied (a convention, not a value read from config.json), e.g. kvHeads =
    * heads when num_key_value_heads is absent. The importer prints them and writes them into the YAML header
@@ -169,12 +185,29 @@ const PATTERN_CHARS: Record<string, LayerKind> = { '*': 'full', M: 'mamba', '-':
 /** `mamba_ssm_cache_dtype` (NemotronH) → bytes per SSM-state element. */
 const SSM_DTYPE_BYTES: Record<string, number> = { float32: 4, bfloat16: 2, float16: 2 };
 
+/**
+ * Layer types that are recognised but not modelled (issue #17), by the feature they belong to; any other unknown type
+ * is `unknown-layer-type`. Each needs its own per-sequence state or cache math before it can be accepted.
+ */
+const UNMODELLED_LAYER_TYPES: Record<string, UnsupportedFeature> = {
+  linear_attention: 'linear-attention', // Gated DeltaNet (Qwen3.5 / 3.8), KDA (GLM-5.3-Flash)
+  conv: 'short-conv', // LFM2 short convolution
+  compressed_sparse_attention: 'compressed-attention', // DeepSeek V4 CSA
+  heavily_compressed_attention: 'compressed-attention', // DeepSeek V4 HCA
+  deepseek_sparse_attention: 'sparse-indexer', // DSA with its indexer key cache
+  mlp: 'recurrent-depth', // a bare MLP layer in layer_types (Nemotron Labs Dory)
+};
+
 /** Returns per-layer kinds, or undefined when the config has no per-layer type field. */
-function layerKinds(t: Obj, layers: number | undefined, missing: string[]): LayerKind[] | undefined {
+function layerKinds(t: Obj, layers: number | undefined, fail: Fail): LayerKind[] | undefined {
   const mapList = (field: string, list: unknown[], table: Record<string, LayerKind>): LayerKind[] =>
     list.map((x) => {
       const k = typeof x === 'string' ? table[x] : undefined;
-      if (k === undefined) missing.push(`${field}: unknown type ${JSON.stringify(x)}`);
+      if (k === undefined) {
+        const n = list.filter((y) => y === x).length;
+        const feature = (typeof x === 'string' && Object.hasOwn(UNMODELLED_LAYER_TYPES, x) && UNMODELLED_LAYER_TYPES[x]) || 'unknown-layer-type';
+        fail(`${field}: unknown type ${JSON.stringify(x)}`, feature, `${field} "${String(x)}" on ${n} of ${list.length} layers`);
+      }
       return k ?? 'none';
     });
   if (Array.isArray(t.layer_types)) return mapList('layer_types', t.layer_types, LAYER_TYPES);
@@ -187,7 +220,7 @@ function layerKinds(t: Obj, layers: number | undefined, missing: string[]): Laye
     const local = new Set(t.local_layer_ids);
     for (const i of local) {
       if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= layers) {
-        missing.push(`local_layer_ids: invalid layer index ${JSON.stringify(i)}`);
+        fail(`local_layer_ids: invalid layer index ${JSON.stringify(i)}`);
       }
     }
     return Array.from({ length: layers }, (_, i): LayerKind => (local.has(i) ? 'sliding' : 'full'));
@@ -218,36 +251,53 @@ const GATED_ACTS = new Set(['silu', 'swish', 'gelu', 'gelu_pytorch_tanh', 'gelu_
  * accepted: they are always active, so they belong to the non-routed remainder (total − routed experts)
  * that core already treats as always read and always computed.
  */
-function unsupportedMoe(t: Obj, kinds: LayerKind[] | undefined, layers: number | undefined, missing: string[]): void {
+function unsupportedMoe(t: Obj, kinds: LayerKind[] | undefined, layers: number | undefined, fail: Fail): void {
   const latent = num(t, 'moe_latent_size');
-  if (latent !== undefined) missing.push(`moe_latent_size ${latent} (latent MoE projection not supported)`);
+  if (latent !== undefined) fail(`moe_latent_size ${latent} (latent MoE projection not supported)`, 'moe-layout', `latent MoE (moe_latent_size ${latent})`);
 
   const actKey = ['mlp_hidden_act', 'hidden_act', 'hidden_activation'].find((k) => t[k] !== undefined && t[k] !== null);
   if (actKey !== undefined) {
     const act = t[actKey];
     if (typeof act !== 'string' || !GATED_ACTS.has(act)) {
-      missing.push(`${actKey} ${JSON.stringify(act)} (non-gated or unknown expert activation not supported)`);
+      fail(`${actKey} ${JSON.stringify(act)} (non-gated or unknown expert activation not supported)`, 'moe-layout', `expert activation ${JSON.stringify(act)}`);
     }
   }
+  // Two expert widths (Hunyuan hy_v3: expert_hidden_dim and moe_intermediate_size): which one the routed experts use is
+  // not stated, so neither is taken.
+  const expertHidden = num(t, 'expert_hidden_dim');
+  const moeInter = num(t, 'moe_intermediate_size');
+  if (expertHidden !== undefined && moeInter !== undefined && expertHidden !== moeInter) {
+    fail(`expert_hidden_dim ${expertHidden} and moe_intermediate_size ${moeInter} disagree (ambiguous expert width)`, 'moe-layout',
+      `two expert widths (expert_hidden_dim ${expertHidden}, moe_intermediate_size ${moeInter})`);
+  }
 
-  if (t.dense_mlp_idx !== undefined && t.dense_mlp_idx !== null) {
-    missing.push(`dense_mlp_idx ${JSON.stringify(t.dense_mlp_idx)} (dense MLP layers mixed with MoE not supported)`);
-  }
+  const dense = (key: string, what: string) =>
+    fail(`${key} ${what} (dense MLP layers mixed with MoE not supported)`, 'dense-and-moe', `${key} ${what}`);
+  if (t.dense_mlp_idx !== undefined && t.dense_mlp_idx !== null) dense('dense_mlp_idx', JSON.stringify(t.dense_mlp_idx));
   const firstDense = num(t, 'first_k_dense_replace');
-  if (firstDense !== undefined && firstDense > 0) {
-    missing.push(`first_k_dense_replace ${firstDense} (dense MLP layers mixed with MoE not supported)`);
+  if (firstDense !== undefined && firstDense > 0) dense('first_k_dense_replace', String(firstDense));
+  // LFM2-MoE: the first num_dense_layers layers have a dense MLP (issue #17 C).
+  const denseLayers = num(t, 'num_dense_layers');
+  if (denseLayers !== undefined && denseLayers > 0) dense('num_dense_layers', String(denseLayers));
+  // Per-layer MLP kinds (GLM-5.3, Hunyuan hy_v3, MemT): anything but a routed-expert layer mixes dense with MoE.
+  if (Array.isArray(t.mlp_layer_types)) {
+    const other = [...new Set(t.mlp_layer_types.filter((x) => x !== 'sparse' && x !== 'moe'))];
+    if (other.length > 0) {
+      const counts = other.map((x) => `${JSON.stringify(x)} × ${(t.mlp_layer_types as unknown[]).filter((y) => y === x).length}`);
+      dense('mlp_layer_types', counts.join(', '));
+    }
   }
+  const subset = (key: string, what: string) =>
+    fail(`${key} ${what} (MoE on a subset of layers not supported)`, 'dense-and-moe', `${key} ${what}`);
   const freq = num(t, 'moe_layer_freq');
-  if (freq !== undefined && freq !== 1) missing.push(`moe_layer_freq ${freq} (MoE on a subset of layers not supported)`);
+  if (freq !== undefined && freq !== 1) subset('moe_layer_freq', String(freq));
   if (Array.isArray(t.mlp_only_layers) && t.mlp_only_layers.length > 0) {
-    missing.push('mlp_only_layers (dense MLP layers mixed with MoE not supported)');
+    fail('mlp_only_layers (dense MLP layers mixed with MoE not supported)', 'dense-and-moe', `mlp_only_layers × ${t.mlp_only_layers.length}`);
   }
   const sparseStep = num(t, 'decoder_sparse_step');
-  if (sparseStep !== undefined && sparseStep > 1) {
-    missing.push(`decoder_sparse_step ${sparseStep} (MoE on a subset of layers not supported)`);
-  }
+  if (sparseStep !== undefined && sparseStep > 1) subset('decoder_sparse_step', String(sparseStep));
   if (t.shared_expert_sink !== undefined && t.shared_expert_sink !== null && t.shared_expert_sink !== false) {
-    missing.push('shared_expert_sink (not supported)');
+    fail('shared_expert_sink (not supported)', 'moe-layout', 'shared_expert_sink');
   }
 
   const blocks: unknown[] | undefined = Array.isArray(t.layers_block_type)
@@ -256,10 +306,51 @@ function unsupportedMoe(t: Obj, kinds: LayerKind[] | undefined, layers: number |
   if (blocks && kinds && layers !== undefined) {
     const moeBlocks = blocks.filter((b) => b === 'moe' || b === 'E').length;
     if (moeBlocks !== layers) {
-      missing.push(`MoE on ${moeBlocks} of ${layers} per-layer blocks (MoE on a subset of blocks not supported)`);
+      fail(`MoE on ${moeBlocks} of ${layers} per-layer blocks (MoE on a subset of blocks not supported)`, 'dense-and-moe',
+        `MoE on ${moeBlocks} of ${layers} blocks`);
     }
   }
 }
+
+/**
+ * Config keys of structures the calculator recognises but does not model (issue #17): each changes the KV / state
+ * memory, the weights a decode step reads, or the layer layout, so a model carrying one is refused instead of being
+ * sized as if it were absent (the DeepSeek V4.1 import that read only sliding_window 128 was silently wrong).
+ * A key whose value is null, false, 0 or an empty list counts as absent.
+ */
+const UNMODELLED_KEYS: Array<{ keys: string[]; feature: UnsupportedFeature; what: string }> = [
+  { keys: ['compress_ratios', 'compress_rates'], feature: 'compressed-attention', what: 'compressed KV attention (DeepSeek V4 style)' },
+  { keys: ['kv_source_layer_ids'], feature: 'cross-layer-kv', what: 'KV shared across layers' },
+  {
+    keys: ['index_n_heads', 'index_topk', 'index_source_layer_ids', 'indexer_n_heads', 'indexer_budget'],
+    feature: 'sparse-indexer', what: 'sparse-attention indexer with its own key cache (DSA style)',
+  },
+  {
+    keys: ['engram_layer_ids', 'engram_num_embeddings', 'ngram_vocab_size_base', 'ple_layer_ids'],
+    feature: 'lookup-tables', what: 'embedding lookup tables beside the vocabulary (engram / n-gram / per-layer embeddings), read by row',
+  },
+  { keys: ['memt'], feature: 'memory-layers', what: 'memory layers (MemT)' },
+  { keys: ['n_recurrent_loops', 'n_recurrent_layers'], feature: 'recurrent-depth', what: 'layers run more than once per token' },
+  { keys: ['backbone_configs'], feature: 'nested-config', what: 'nested backbone configs' },
+  { keys: ['block_configs'], feature: 'heterogeneous-blocks', what: 'blocks with their own expert counts and widths' },
+  {
+    keys: ['linear_attn_config', 'kda_lower_bound', 'use_kda_lora', 'num_kv_heads_for_linear_attn'],
+    feature: 'linear-attention', what: 'linear-attention layers (KDA)',
+  },
+];
+
+const present = (v: unknown): boolean =>
+  v !== undefined && v !== null && v !== false && v !== 0 && !(Array.isArray(v) && v.length === 0);
+
+function unmodelledStructure(t: Obj, fail: Fail): void {
+  for (const { keys, feature, what } of UNMODELLED_KEYS) {
+    const found = keys.filter((k) => present(t[k]));
+    if (found.length > 0) fail(`${found.join(', ')} (${what}: not supported)`, feature, `${what}: ${found.join(', ')}`);
+  }
+}
+
+/** Records one problem: the `missing` line and, for a recognised but unmodelled feature, the feature and its detail. */
+type Fail = (missing: string, feature?: UnsupportedFeature, detail?: string) => void;
 
 /**
  * Parse a Hugging Face `config.json` into a Model (spec §5; plan Task 5 rules).
@@ -275,8 +366,29 @@ export function parseHfConfig(
   opts: ParseOptions = {},
 ): ParseResult {
   const missing: string[] = [];
-  if (!isObj(config)) return { missing: ['config.json is not a JSON object'], notes: [] };
+  if (!isObj(config)) return { missing: ['config.json is not a JSON object'], unsupported: [], notes: [] };
   const notes: string[] = [];
+  const unsupported: Unsupported[] = [];
+  const fail: Fail = (m, feature, detail) => {
+    missing.push(m);
+    if (feature) unsupported.push({ feature, detail: detail ?? m, fields: [m] });
+  };
+  /** Each problem once, and one entry per feature with its distinct details joined (issue #17: no repeated lines). */
+  const result = (model?: Model): ParseResult => {
+    const byFeature = new Map<UnsupportedFeature, { details: string[]; fields: string[] }>();
+    for (const u of unsupported) {
+      const e = byFeature.get(u.feature) ?? { details: [], fields: [] };
+      if (!e.details.includes(u.detail)) e.details.push(u.detail);
+      for (const f of u.fields) if (!e.fields.includes(f)) e.fields.push(f);
+      byFeature.set(u.feature, e);
+    }
+    return {
+      ...(model ? { model } : {}),
+      missing: [...new Set(missing)],
+      unsupported: [...byFeature].map(([feature, e]) => ({ feature, detail: e.details.join('; '), fields: e.fields })),
+      notes,
+    };
+  };
   const t: Obj = isObj(config.text_config) ? config.text_config : isObj(config.llm_config) ? config.llm_config : config;
 
   const hidden = num(t, 'hidden_size');
@@ -299,7 +411,8 @@ export function parseHfConfig(
 
   // NemotronH configs omit num_hidden_layers; the per-layer block list is the layer count.
   const declaredLayers = num(t, 'num_hidden_layers');
-  const kinds = layerKinds(t, declaredLayers, missing);
+  unmodelledStructure(t, fail);
+  const kinds = layerKinds(t, declaredLayers, fail);
   const layers = declaredLayers ?? kinds?.length;
   if (layers === undefined) missing.push('num_hidden_layers');
   else if (kinds && kinds.length !== layers) {
@@ -308,7 +421,9 @@ export function parseHfConfig(
 
   // Gemma 4 small models can share KV across layers; KV accounting for that is not modelled.
   const shared = num(t, 'num_kv_shared_layers');
-  if (shared !== undefined && shared > 0) missing.push('num_kv_shared_layers > 0 (KV sharing not supported)');
+  if (shared !== undefined && shared > 0) {
+    fail('num_kv_shared_layers > 0 (KV sharing not supported)', 'cross-layer-kv', `KV shared across layers: num_kv_shared_layers ${shared}`);
+  }
 
   // MLA (latent KV): kv_lora_rank + qk_rope_head_dim; the prefill (MHA) path also needs qk_nope_head_dim and
   // v_head_dim (Ruling R40). DeepSeek-style keys; Mistral's params.json uses the same names.
@@ -337,7 +452,7 @@ export function parseHfConfig(
     if (topK === undefined) missing.push('num_experts_per_tok');
     if (expertFfnDim === undefined) missing.push('moe_intermediate_size');
     if (topK !== undefined && expertFfnDim !== undefined) moe = { experts, topK, expertFfnDim };
-    unsupportedMoe(t, kinds, layers, missing);
+    unsupportedMoe(t, kinds, layers, fail);
   }
 
   // Embedding size (spec §5.1: embedding / lm_head stay 16-bit under vLLM FP8 / AWQ). vocab_size is required;
@@ -457,14 +572,17 @@ export function parseHfConfig(
     let quant: string | undefined;
     if (qc.key === 'hf_quant_config.json') {
       const mo = modeloptNativeQuant(qc.value);
-      if ('missing' in mo) missing.push(mo.missing);
+      if ('missing' in mo) fail(mo.missing, 'native-quant');
       else ({ method, quant } = mo);
     } else {
       method = isObj(qc.value) && typeof qc.value.quant_method === 'string' ? qc.value.quant_method : undefined;
       quant = method !== undefined && Object.hasOwn(NATIVE_QUANT_IDS, method) ? NATIVE_QUANT_IDS[method] : undefined;
-      if (qc.key !== 'quantization_config') missing.push(`${qc.key} (native quantization not supported)`);
+      if (qc.key !== 'quantization_config') fail(`${qc.key} (native quantization not supported)`, 'native-quant');
       else if (method === undefined) missing.push('quantization_config.quant_method');
-      else if (quant === undefined) missing.push(`quantization_config.quant_method ${JSON.stringify(method)} (native quantization not supported)`);
+      else if (quant === undefined) {
+        fail(`quantization_config.quant_method ${JSON.stringify(method)} (native quantization not supported)`, 'native-quant',
+          `quant_method ${JSON.stringify(method)}`);
+      }
     }
     const bytes = opts.checkpointWeightBytes;
     if (bytes === undefined || bytes === null) missing.push('checkpoint weight bytes (model.safetensors.index.json file sizes)');
@@ -483,7 +601,12 @@ export function parseHfConfig(
   if (safetensorsTotal === null) missing.push('safetensors.total');
   if (!opts.origin) missing.push('origin (developer, country)');
 
-  if (missing.length > 0) return { missing, notes };
+  // Hyper-connections widen the residual stream only: their weights are in safetensors.total, and they keep no
+  // per-sequence cache, so nothing the calculator sizes changes (stated, not silent).
+  const hc = firstNum(t, ['hc_mult', 'hc_count']);
+  if (hc !== undefined && hc > 1) notes.push(`hyper-connections (${hc} residual streams): weights counted in the total; no per-sequence cache`);
+
+  if (missing.length > 0) return result();
 
   const source = hfSourceId(repo, sha);
   const verified = opts.verified ?? new Date().toISOString().slice(0, 10);
@@ -512,7 +635,8 @@ export function parseHfConfig(
   };
   const r = ModelSchema.safeParse(candidate);
   if (!r.success) {
-    return { missing: r.error.issues.map((i) => `invalid ${i.path.join('.') || 'model'}: ${i.message}`), notes };
+    missing.push(...r.error.issues.map((i) => `invalid ${i.path.join('.') || 'model'}: ${i.message}`));
+    return result();
   }
-  return { model: r.data, missing: [], notes };
+  return result(r.data);
 }

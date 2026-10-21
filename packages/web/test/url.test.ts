@@ -49,12 +49,11 @@ describe('url', () => {
     expect(d.customModel?.kind === 'hf' && d.customModel.imported).toBeUndefined();
     expect(d.model).toBe('custom');
   });
-  it('hf origin round-trips through x.hfo; an invalid one is dropped (Ruling W1)', () => {
-    const origin = { developer: 'OpenAI', country: 'US' };
-    const s: CalcState = { ...s0, model: 'custom', customModel: { kind: 'hf', repo: 'openai/gpt-oss-20b', sha: SHA, origin } };
-    expect(decodeUrl(b, encodeUrl(s)).customModel).toEqual({ kind: 'hf', repo: 'openai/gpt-oss-20b', sha: SHA, origin });
-    const bad: CalcState = { ...s0, model: 'custom', customModel: { kind: 'hf', repo: 'openai/gpt-oss-20b', sha: SHA, origin: { developer: 'OpenAI', country: 'usa' } } };
-    expect(decodeUrl(b, encodeUrl(bad)).customModel).toEqual({ kind: 'hf', repo: 'openai/gpt-oss-20b', sha: SHA });
+  it('an older link with x.hfo (publisher origin) is ignored; the HF model still loads (Ruling W12)', () => {
+    const hf = new URLSearchParams(encodeUrl({ ...s0, model: 'custom', customModel: { kind: 'hf', repo: 'openai/gpt-oss-20b', sha: SHA } }));
+    hf.set('x', btoa(JSON.stringify({ hfo: { developer: 'OpenAI', country: 'US' } })).replace(/=+$/, ''));
+    expect(decodeUrl(b, hf.toString()).customModel).toEqual({ kind: 'hf', repo: 'openai/gpt-oss-20b', sha: SHA });
+    expect(encodeUrl(decodeUrl(b, hf.toString()))).not.toContain('x=');
   });
   it('does not write openRow, pins or dialogs', () => {
     const q = encodeUrl({ ...s0, openRow: 'nano4-h200', dialog: 'basis' });

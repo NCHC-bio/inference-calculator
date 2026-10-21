@@ -190,7 +190,7 @@
 
 ### 6.3 瀏覽器內 HF 匯入
 
-把 `packages/data/src/hf-import.ts` 的抓取流程（API → config.json → hf_quant_config.json → safetensors index）抽成不依賴 Node 的 `hf-fetch.ts`：`fetchHfModel(repo, { fetch, token?, revision? })` → `{ ok: true, model, source, notes } | { ok: false, status: 'denied' | 'not-found' | 'unparsable', missing?: string[], message }`。CLI 與網站共用；網站經 `@nchc/data/hf` 子路徑匯入。token 只留在記憶體，不寫入網址或儲存。
+把 `packages/data/src/hf-import.ts` 的抓取流程（API → config.json → hf_quant_config.json → safetensors index）抽成不依賴 Node 的 `hf-fetch.ts`：`fetchHfModel(repo, { fetch, token?, revision?, origin? })` → `{ ok: true, model, source, notes } | { ok: false, status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network' | 'gguf', message, missing?, unsupported?, repo?, sha?, baseModels? }`（issue #17：`unsupported` 為尚未建模的結構，每種一項；`gguf` 附 model card 的 `base_model`）。CLI 與網站共用；網站經 `@nchc/data/hf` 子路徑匯入。token 只留在記憶體，不寫入網址或儲存。
 
 ### 6.4 準確度摘要
 
@@ -232,7 +232,7 @@
 網站（ledger `.superpowers/sdd/2026-10-21-web-v8/progress.md`）：
 
 - W1：HF 模型從網址載入、尚未重新抓取時，答案顯示載入中（`MainView` 的 `loading`），失敗時提示並退回預設模型。
-- W2：HF 匯入 Drawer 先請使用者確認發表者與 ISO2 國別（core R6），`invalid` 有自己的訊息。
+- W2：~~HF 匯入 Drawer 先請使用者確認發表者與 ISO2 國別（core R6）~~（2026-10-22 由 W12 取代），`invalid` 有自己的訊息。
 - W3：新增硬體的算力欄位依引擎標示：vLLM 為每張卡 dense 峰值，MLX 為實測可達（effective）（core R3）。
 - W4：句子元件測試在整套測試的負載下也要穩定（等待結果狀態，不依賴預設 5 秒）。
 - W5：網站匯入 `accuracy.json` 後，`typecheck`、`web:dev`、`web:build` 先跑 `data:build` 與 `calibrate`，並從乾淨狀態驗證 typecheck。
@@ -242,6 +242,8 @@
 - W9：「卡數 → 每人速度」畫每個卡數下能服務目前人數的最快切法（`SweepPoint.fastest`，見 5.2），曲線不下降。
 - W10：core 顯示給使用者的文字不用「副本」，改「每份模型 N 張卡」。
 - W11：CI 在 `pnpm test` 之後加跑 `pnpm web:build`（抓 Vite 建置失敗）；`web:e2e` 需要瀏覽器、較重，只在本機跑。
+- W12（2026-10-22，取代 W2 的發表者確認與 core R6）：自訂模型（HF 匯入、手動輸入）不詢問發表者與國別，也不做來源國檢查（主設計 §2.2）。兩個自訂模型 Drawer 在任何輸入之前，以醒目的警告（antd `Alert` warning，粗體標題「國網中心模型使用規定」）顯示 `CUSTOM_MODEL_WARNING` 的規定全文；結果照常帶同一段警告。匯入的模型記錄 `UNCHECKED_ORIGIN`（`{ developer: '使用者自訂', country: 'ZZ' }`，與手動輸入的模型相同；ZZ 為 ISO 3166 使用者自訂代碼）。網址不再存發表者（舊連結的 `x.hfo` 忽略）；從網址載入的 HF 模型一律直接重新抓取，gated repo 則開啟 Drawer 並直接顯示 token 欄位。目錄模型（建議清單、預設）照常由 `data:build` 依 `policy.yaml` 檢查，CLI 的 `data:import` 仍必須帶 `--developer`／`--country`。
+- W13（2026-10-22，issue #17）：HF 匯入失敗時，Drawer 只顯示一次原因：無法解析的模型以使用者的語言列出尚未建模的結構，技術細節收在 `Collapse` 內，並提供「回報這個模型」（開啟預填 repo、commit、原因的 GitHub issue form `.github/ISSUE_TEMPLATE/unsupported-model.yml`；連結不含 token，原因上限 1,500 字）；GGUF repo 提供「改匯入 <原始模型>」按鈕（model card 的 `base_model`）。
 
 core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
 
@@ -250,5 +252,5 @@ core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
 - R3：MLX 範本 `etaCompute = 1.0`，因為目錄裡 Mac 的 TFLOPS 是實測可達值。
 - R4：自訂平台的 basis 路徑以列為鍵：`estimateRequirements`／`explain` 用 `custom:<i>.<field>`，單一平台的 `estimatePerformance`／Sweep 用 `custom.<field>`。
 - R5：漏斗的 `requestsPerActivePerDay`（7）標 `estimate`（工作日數是假設，來源沒寫），不是 `derived`。
-- R6：`fetchHfModel` 必須帶 `origin`（發表者與國別），由使用者確認，不自動猜測。
+- R6：~~`fetchHfModel` 必須帶 `origin`（發表者與國別），由使用者確認，不自動猜測。~~ 2026-10-22 起 `origin` 選填（W12）：CLI 一律帶入；網站不帶，模型記錄 `UNCHECKED_ORIGIN`。
 - R7：選定切法的功耗只算該切法用到的 GPU（tp × 份數），閒置的卡在 `powerNote` 註明。
