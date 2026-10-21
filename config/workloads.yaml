@@ -82,9 +82,9 @@ benchmark:
 # λ = 總人數 × dailyActiveShare × requestsPerActivePerDay × peakHourShare ÷ 3600；同時數 = λ × 服務時間。
 # 數值取自 docs/research/user-questions.md §3；GWDG 為學術 HPC 聊天服務（只有平日使用），套用到其他機構是外推。
 funnel:
-  # GWDG 註冊約 9,000 人、平日活躍約 400–500 人（約 4.4–5.6%），論文 §6.4 直接報告，取 5%。
+  # 論文 §6.4 報告註冊約 9,000 人、平日活躍約 400–500 人；比例由本專案相除（約 4.4–5.6%），取 5%，所以是 estimate。
   # 原文引句見 docs/research/user-questions.md §3「GWDG 數字的出處與推算」。
-  dailyActiveShare: { value: 0.05, status: measured, source: gwdg-chat-ai, verified: 2026-10-21 }
+  dailyActiveShare: { value: 0.05, status: estimate, basis: '本專案由 GWDG 論文 §6.4 的兩個數字相除，論文未直接報告比例：平日活躍 400–500 人 ÷ 註冊約 9,000 人 ≈ 4.4–5.6%，取 5%。限制：註冊數是 2024 年 6 月的數字，活躍數是平均值，時間點不完全相同。引句與計算見 docs/research/user-questions.md §3「GWDG 數字的出處與推算」', evidence: [gwdg-chat-ai], verified: 2026-10-21 }
   # 論文沒有報告每人每日則數，此為本專案推算（約 113 個工作日是假設，論文未給），所以是 estimate；算式與限制見同一節。
   requestsPerActivePerDay: { value: 7, status: estimate, basis: '本專案由 GWDG 論文 §6.4 的數字推算，論文未直接報告：350,000 則累計訊息（至 2024-07-30）÷ 約 113 個工作日（2024-02-22 至 07-30 約 159 天，假設平日使用占 5/7；工作日數論文未給）÷ 約 450 位平日活躍者 ≈ 6.9，取整 7。限制：訊息可能含 API 流量，活躍人數是平均值。引句與計算見 docs/research/user-questions.md §3「GWDG 數字的出處與推算」', evidence: [gwdg-chat-ai], verified: 2026-10-21 }
   # 規劃工具頁（secondary，不能當 measured）寫最忙一小時佔每日流量 10–20%（docs/research/user-questions.md §3 表）；

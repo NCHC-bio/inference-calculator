@@ -300,8 +300,9 @@ describe('config values (Task 3 table)', () => {
     expect(b.benchmark.maxModelLenMarginTokens.basis).toContain('187');
   });
 
-  it('funnel defaults cite GWDG (paper) and the planner page (secondary, so only an estimate); requests per user is an estimate', () => {
-    expectSV(b.funnel.dailyActiveShare, 0.05, 'measured', 'gwdg-chat-ai');
+  it('funnel defaults cite GWDG (paper) and the planner page (secondary); the daily-active share and requests per user are our arithmetic, so estimates', () => {
+    expectSV(b.funnel.dailyActiveShare, 0.05, 'estimate', 'gwdg-chat-ai');
+    expect(b.funnel.dailyActiveShare.basis).toContain('9,000');
     expect(b.funnel.requestsPerActivePerDay).toMatchObject({ value: 7, status: 'estimate', evidence: ['gwdg-chat-ai'] });
     expect(b.funnel.requestsPerActivePerDay.basis).toContain('user-questions.md');
     expect(b.funnel.peakHourShare).toMatchObject({ value: 0.2, status: 'estimate', evidence: ['rate-limit-planner'] });
