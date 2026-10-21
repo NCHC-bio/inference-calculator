@@ -111,13 +111,13 @@
 
 ### 5.6 機器圖示照 v7 原型（使用者指出不符規格）
 
-第二階段的圖示是「每個 node 一個圖示」，Mac 和 GPU 一樣是藍色。這不符合使用者核可的 v7 原型（`docs/prototypes/calculator-demo-v7.html` 的 `Machines`）。改為完全照 v7：
+第二階段的圖示中，Mac 和 GPU 一樣是藍色，不符合使用者核可的 v7 原型（`docs/prototypes/calculator-demo-v7.html` 的 `Machines`）。
 
-- **GPU 平台**：每張 GPU 一個直立方塊（10 × 20，圓角 2），填色 `colorPrimary`。同一個 node 的方塊之間間距 3，node 與 node 之間再多空 6，讓「幾張卡、幾個 node」一眼可見。
-- **Mac／DGX Spark（以台為單位）**：每台一個橫向方塊（20 × 13，圓角 2），填色與外框都是 `colorTextTertiary`（灰色），方塊間距 4。
+- **GPU 平台**：維持第二階段的「每個 node 一個圖示」，未滿一個 node 時只填滿相應比例，填色 `colorPrimary`（使用者 2026-10-21 確認：「One per node is acceptable」）。這是和 v7（每張 GPU 一個方塊）之間**已核可的差異**。
+- **Mac／DGX Spark（以台為單位）**：照 v7，每台一個橫向方塊（20 × 13，圓角 2），填色與外框都是 `colorTextTertiary`（灰色），方塊間距 4。
 - 實心是預期數量，虛線外框（`stroke-dasharray 3 2`、無填色）是保守估計多出的數量；外框顏色同該平台的填色。
 - 最多畫 16 個方塊，超過時在後面加上 `+N` 文字（`colorTextSecondary`）。
-- 圖示的說明框文字照 v7：GPU 平台「每個方塊 = 1 張 GPU（每 N 張為一個 node）；實心為預期需要，虛線為保守估計多出的張數」，Mac「每個方塊 = 1 台；實心為預期需要，虛線為保守估計多出的台數」。
+- 圖示的說明框文字：GPU 平台「每個方塊 = 1 個 node（N 張 GPU）；未滿一個 node 時只填滿用到的比例；實心為預期需要，虛線為保守估計多出的部分」，Mac 照 v7「每個方塊 = 1 台；實心為預期需要，虛線為保守估計多出的台數」。
 - 第 5.1 節的「建議」刻度畫在這組方塊上。
 
 ### 5.7 圖示一律用 Ant Design Icons（使用者指定）
