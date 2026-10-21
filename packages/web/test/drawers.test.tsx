@@ -19,7 +19,9 @@ import { formatCommand, splitVerify } from '../src/components/drawers/CodeBlock'
 import { FunnelDrawer } from '../src/components/drawers/FunnelDrawer';
 import { HardwareDrawer } from '../src/components/drawers/HardwareDrawer';
 import { HfImportDrawer, HfRefetch } from '../src/components/drawers/HfImportDrawer';
-import { ManualModelDrawer } from '../src/components/drawers/ManualModelDrawer';
+import { keptLabel, ManualModelDrawer } from '../src/components/drawers/ManualModelDrawer';
+import { t as tAny, tZh as tZhFn } from '../src/i18n/t';
+const tEn = (k: Parameters<typeof tZhFn>[0], v?: Record<string, string | number>) => tAny('en', k, v);
 import { SpeedDrawer } from '../src/components/drawers/SpeedDrawer';
 import { VerifyDrawer } from '../src/components/drawers/VerifyDrawer';
 import { WorkloadDrawer } from '../src/components/drawers/WorkloadDrawer';
@@ -387,10 +389,28 @@ describe('ManualModelDrawer re-save (v8 minor 7)', () => {
     expect(state().customModel).toEqual({ kind: 'manual', value: moeModel });
     openDialog({ type: 'dialog', id: 'manualModel' });
     const d = await drawer();
-    expect(within(d).getByTestId('manual-kept')).toHaveTextContent('moe、slidingWindow');
+    // Translated labels, not schema keys (fix round D).
+    expect(within(d).getByTestId('manual-kept')).toHaveTextContent('MoE 專家設定、滑動視窗');
+    expect(within(d).getByTestId('manual-kept').textContent).not.toMatch(/moe|slidingWindow/);
     await fill(d, /層數/, '20');
     await userEvent.click(within(d).getByRole('button', { name: '加入' }));
     await waitFor(() => expect(state().customModel).toEqual({ kind: 'manual', value: { ...moeModel, layers: 20 } }));
+  });
+
+  it('kept-field labels in en, every schema field translated, unknown keys as they are (fix round D)', async () => {
+    const en = (k: Parameters<typeof tEn>[0], v?: Record<string, string | number>) => tEn(k, v);
+    expect(keptLabel('moe', en)).toBe('MoE experts');
+    expect(keptLabel('slidingWindow', en)).toBe('sliding window');
+    for (const k of ['hfRepo', 'baseModel', 'origin', 'baseOrigin', 'attention', 'mla', 'layerGroups', 'moe', 'slidingWindow']) {
+      expect(keptLabel(k, en)).not.toBe(k);
+      expect(keptLabel(k, tZhFn)).not.toBe(k);
+    }
+    expect(keptLabel('somethingNew', en)).toBe('somethingNew');
+    const seeded: CalcState = { ...defaultState(b), lang: 'en', model: 'custom', customModel: { kind: 'manual', value: moeModel } };
+    renderWith(<ManualModelDrawer />, '?' + encodeUrl(seeded));
+    openDialog({ type: 'dialog', id: 'manualModel' });
+    const d = await drawer();
+    expect(within(d).getByTestId('manual-kept')).toHaveTextContent('This form does not edit MoE experts, sliding window');
   });
 
   it('a plain model shows no kept-fields note', async () => {

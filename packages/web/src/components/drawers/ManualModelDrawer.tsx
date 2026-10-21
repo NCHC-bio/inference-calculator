@@ -2,6 +2,7 @@ import { ModelOverrideSchema, type ModelOverride } from '@nchc/core';
 import { Alert, App as AntApp, Button, Form, Input, InputNumber, Typography } from 'antd';
 import { useState, type JSX } from 'react';
 import { useLang, useT, type MsgKey } from '../../i18n';
+import type { TFn } from '../../i18n/t';
 import { useCalc } from '../../state/store';
 import { CalcDrawer } from './CalcDrawer';
 
@@ -17,6 +18,24 @@ const FIELDS: { key: Num; label: MsgKey; int: boolean }[] = [
 ];
 type Values = { name?: string } & Partial<Record<Num, number>>;
 const FORM_KEYS: ReadonlySet<string> = new Set(['name', ...FIELDS.map((f) => f.key)]);
+
+/** Labels of the ModelOverride fields this form does not edit (fix round D). */
+const KEPT_LABELS: Record<string, MsgKey> = {
+  hfRepo: 'manual.field.hfRepo',
+  baseModel: 'manual.field.baseModel',
+  origin: 'manual.field.origin',
+  baseOrigin: 'manual.field.baseOrigin',
+  attention: 'manual.field.attention',
+  mla: 'manual.field.mla',
+  layerGroups: 'manual.field.layerGroups',
+  moe: 'manual.field.moe',
+  slidingWindow: 'manual.field.slidingWindow',
+};
+
+/** A kept field's label in the current language; a field without one is shown by its key. */
+export function keptLabel(key: string, tr: TFn): string {
+  return Object.hasOwn(KEPT_LABELS, key) ? tr(KEPT_LABELS[key]!) : key;
+}
 
 function Body(): JSX.Element {
   const tr = useT();
@@ -72,7 +91,7 @@ function Body(): JSX.Element {
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
-          title={tr('manual.kept', { fields: kept.join(lang === 'en' ? ', ' : '、') })}
+          title={tr('manual.kept', { fields: kept.map((k) => keptLabel(k, tr)).join(lang === 'en' ? ', ' : '、') })}
         />
       )}
       <Form<Values>
