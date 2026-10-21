@@ -76,6 +76,26 @@ describe('ErrorBoundary', () => {
       quiet.mockRestore();
     }
   });
+
+  it('offers a way back: 回到預設設定 reloads the page without its query (v8 minor 2)', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, pathname: '/calc/', search: '?n=0', assign });
+    try {
+      renderStore(
+        <ErrorBoundary>
+          <Boom />
+        </ErrorBoundary>,
+      );
+      const reset = screen.getByRole('button', { name: new RegExp(t('zh-TW', 'app.reset')) });
+      expect(screen.getByRole('alert')).toContainElement(reset);
+      await userEvent.click(reset);
+      expect(assign).toHaveBeenCalledWith('/calc/');
+    } finally {
+      vi.unstubAllGlobals();
+      quiet.mockRestore();
+    }
+  });
 });
 
 describe('page theme', () => {

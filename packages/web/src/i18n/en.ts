@@ -7,6 +7,7 @@ const en = {
   'lang.en': 'English',
   'footer.dataVersion': 'Data version {version}',
   'app.error': 'Something went wrong. Change the inputs or reload the page.',
+  'app.reset': 'Reset to defaults',
   'sentence.users.pre': 'Up to',
   'sentence.users.post': 'people use it at the same time,',
   'sentence.workload.pre': 'doing',

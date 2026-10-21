@@ -6,6 +6,7 @@ const zhTW = {
   'lang.en': 'English',
   'footer.dataVersion': '資料版本 {version}',
   'app.error': '畫面發生錯誤，請調整輸入或重新整理頁面',
+  'app.reset': '回到預設設定',
   // Fill-in sentence (spec §8.3.3); each pair wraps one control.
   'sentence.users.pre': '同時最多有',
   'sentence.users.post': '人會使用，',

@@ -1,4 +1,5 @@
-import { Alert, App as AntApp, Card, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
+import { ReloadOutlined } from '@ant-design/icons';
+import { Alert, App as AntApp, Button, Card, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
@@ -46,6 +47,12 @@ function ErrorAlert({ error }: { error: unknown }) {
       role="alert"
       title={tr('app.error')}
       description={error instanceof Error ? error.message : String(error)}
+      action={
+        // The state that crashed lives in the URL: reload the page without its query (v8 minor 2).
+        <Button size="small" icon={<ReloadOutlined />} onClick={() => window.location.assign(window.location.pathname)}>
+          {tr('app.reset')}
+        </Button>
+      }
       style={{ margin: 16 }}
     />
   );
