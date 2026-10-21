@@ -151,7 +151,7 @@
 
 ### 5.2 `estimatePerformanceSweep`：卡數範圍的速度曲線
 
-輸入：同 5.1，`gpus` 改為 `gpusList: number[]`（1～64 個，各 1～1e5，遞增不重複）。回傳每個卡數的 `{ gpus, ok, why, shape, tokPerSecPerUser, ttftSec, maxConcurrent }`（切法照 5.1 的預設排序；權重放不下時速度與首字為 null）以及一份共用的 `basis`／`hasEstimate`／`hasUser`／`warnings`。曲線點在切法改變時可能不單調（例如多一張卡讓另一種切法服務更多人），這是真實的；網站在點的 hover 說明寫出該點的切法。
+輸入：同 5.1，`gpus` 改為 `gpusList: number[]`（1～64 個，各 1～1e5，遞增不重複）。回傳每個卡數的 `{ gpus, ok, why, shape, tokPerSecPerUser, ttftSec, maxConcurrent }`（切法照 5.1 的預設排序；權重放不下時速度與首字為 null）以及一份共用的 `basis`／`hasEstimate`／`hasUser`／`warnings`。每個點另附 `fastest: { shape, tokPerSecPerUser, ttftSec } | null`：在這個卡數下、能服務目前人數且達標的切法中每人最快的一種（取自同一份切法評估，沒有新公式；沒有任何切法達標時為 null）。預設切法的點在切法改變時可能不單調（例如多一張卡讓另一種切法服務更多人），這是真實的；但「卡數 → 每人速度」圖畫的是每個卡數的 `fastest`（Ruling W9：多出的卡只會讓同一 t 的份數變多，所以最快的達標切法對卡數不會下降，看得出曲線何時變平），沒有達標切法的卡數退回預設切法的數字、畫成虛線。點一下設定 `{ gpus, tp: 該點的切法 }`（與預設切法相同時不帶 tp）；網站在點的 hover 說明寫出該點的切法。
 
 ### 5.3 自訂硬體 `CustomPlatformInput`
 
@@ -182,7 +182,7 @@
 
 ### 6.1 漏斗預設值
 
-`config/workloads.yaml` 新增 `funnel`：`dailyActiveShare`（0.05，`measured`，GWDG）、`requestsPerActivePerDay`（7，`derived`，GWDG 推算）、`peakHourShare`（0.2，`estimate`，取 15–20% 區間的上限以偏保守，evidence 為 `docs/research/user-questions.md` §3 的來源）。來源補進 `config/sources.yaml`。
+`config/workloads.yaml` 新增 `funnel`：`dailyActiveShare`（0.05，`measured`，GWDG）、`requestsPerActivePerDay`（7，`estimate`，由 GWDG 數字推算，Ruling R5）、`peakHourShare`（0.2，`estimate`，取 15–20% 區間的上限以偏保守，evidence 為 `docs/research/user-questions.md` §3 的來源）。來源補進 `config/sources.yaml`。
 
 ### 6.2 自訂硬體範本
 
@@ -226,3 +226,28 @@
 - 驗證指令用 code block。
 - 依據改 Modal，與引用一致。
 - GPU 平台每 node 一個圖示（與 v7 每張 GPU 一個方塊的已核可差異）。
+
+## 11. 實作時的決定（2026-10-21）
+
+網站（ledger `.superpowers/sdd/2026-10-21-web-v8/progress.md`）：
+
+- W1：HF 模型從網址載入、尚未重新抓取時，答案顯示載入中（`MainView` 的 `loading`），失敗時提示並退回預設模型。
+- W2：HF 匯入 Drawer 先請使用者確認發表者與 ISO2 國別（core R6），`invalid` 有自己的訊息。
+- W3：新增硬體的算力欄位依引擎標示：vLLM 為每張卡 dense 峰值，MLX 為實測可達（effective）（core R3）。
+- W4：句子元件測試在整套測試的負載下也要穩定（等待結果狀態，不依賴預設 5 秒）。
+- W5：網站匯入 `accuracy.json` 後，`typecheck`、`web:dev`、`web:build` 先跑 `data:build` 與 `calibrate`，並從乾淨狀態驗證 typecheck。
+- W6：列上的卡數輸入只在 Enter、失焦與 −/+ 時送出；不合法的值不改狀態，失焦後顯示上次的值。
+- W7：「人數降到 M」保留該列的卡數（在我的卡上服務較少的人）。
+- W8：權重或 1 人都放不下的切法在切法選單中停用並標「放不下」，不會讓使用者卡在只有原因的畫面。
+- W9：「卡數 → 每人速度」畫每個卡數下能服務目前人數的最快切法（`SweepPoint.fastest`，見 5.2），曲線不下降。
+- W10：core 顯示給使用者的文字不用「副本」，改「每份模型 N 張卡」。
+
+core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
+
+- R1：`estimatePerformance` 的規模測試：gpus 100001 丟 `invalid-input`；gpus 1e5 配 1e7 人回傳 `ok: false` 與 why，不丟錯。
+- R2：自訂平台沒有 NVLink，或借用的 all-reduce 延遲為 0（MLX 範本）時只有 TP 1，避免 TP>1 的通訊被當成免費。
+- R3：MLX 範本 `etaCompute = 1.0`，因為目錄裡 Mac 的 TFLOPS 是實測可達值。
+- R4：自訂平台的 basis 路徑以列為鍵：`estimateRequirements`／`explain` 用 `custom:<i>.<field>`，單一平台的 `estimatePerformance`／Sweep 用 `custom.<field>`。
+- R5：漏斗的 `requestsPerActivePerDay`（7）標 `estimate`（工作日數是假設，來源沒寫），不是 `derived`。
+- R6：`fetchHfModel` 必須帶 `origin`（發表者與國別），由使用者確認，不自動猜測。
+- R7：選定切法的功耗只算該切法用到的 GPU（tp × 份數），閒置的卡在 `powerNote` 註明。
