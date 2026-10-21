@@ -126,26 +126,29 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 test.describe('no horizontal scroll', () => {
-  for (const width of [390, 768, 1024, 1440]) {
-    test(`${width} px: 480 H200 and 20 ${MAC}, collapsed and expanded`, async ({ page }) => {
-      await page.setViewportSize({ width, height: 900 });
-      await page.goto(OVERFLOW_URL);
-      const h200 = row(page, 'nano4-h200');
-      await expect(h200.locator('text.brace-label')).toHaveText(/× 60 node/);
-      await expect(row(page, MAC).getByTestId('isotype')).toBeVisible();
-      await settle(page);
-      const collapsed = await widths(page);
-      await page.screenshot({ path: test.info().outputPath(`overflow-${width}.png`), fullPage: true });
-      await openRow(page, 'nano4-h200');
-      await settle(page);
-      const expanded = await widths(page);
-      await page.screenshot({ path: test.info().outputPath(`overflow-${width}-open.png`), fullPage: true });
-      const report = { width, collapsed, expanded };
-      console.log(`overflow ${JSON.stringify(report)}`);
-      await test.info().attach(`overflow-${width}.json`, { body: JSON.stringify(report), contentType: 'application/json' });
-      expect(collapsed.scrollWidth).toBeLessThanOrEqual(collapsed.innerWidth);
-      expect(expanded.scrollWidth).toBeLessThanOrEqual(expanded.innerWidth);
-    });
+  // Both languages: the English sentence is longer than the Chinese one (fix round A).
+  for (const lang of ['zh-TW', 'en'] as const) {
+    for (const width of [390, 768, 1024, 1440]) {
+      test(`${lang} ${width} px: 480 H200 and 20 ${MAC}, collapsed and expanded`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(url({ w: 'chat', m: 'gemma-4-12b-it', s: 'ok', o: `nano4-h200:480,${MAC}:20`, lang }));
+        const h200 = row(page, 'nano4-h200');
+        await expect(h200.locator('text.brace-label')).toHaveText(/× 60/);
+        await expect(row(page, MAC).getByTestId('isotype')).toBeVisible();
+        await settle(page);
+        const collapsed = await widths(page);
+        await page.screenshot({ path: test.info().outputPath(`overflow-${lang}-${width}.png`), fullPage: true });
+        await openRow(page, 'nano4-h200');
+        await settle(page);
+        const expanded = await widths(page);
+        await page.screenshot({ path: test.info().outputPath(`overflow-${lang}-${width}-open.png`), fullPage: true });
+        const report = { lang, width, collapsed, expanded };
+        console.log(`overflow ${JSON.stringify(report)}`);
+        await test.info().attach(`overflow-${lang}-${width}.json`, { body: JSON.stringify(report), contentType: 'application/json' });
+        expect(collapsed.scrollWidth).toBeLessThanOrEqual(collapsed.innerWidth);
+        expect(expanded.scrollWidth).toBeLessThanOrEqual(expanded.innerWidth);
+      });
+    }
   }
 });
 

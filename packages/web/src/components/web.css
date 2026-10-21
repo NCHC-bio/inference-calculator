@@ -189,6 +189,11 @@ body {
   .sent {
     font-size: 17px;
   }
+  /* English clauses are longer than the card on a phone (390 px): there they may wrap at their own spaces; the
+     controls stay whole (inline-block). Still one sentence; zh-TW keeps whole clauses (fix round A). */
+  .sent:lang(en) .clause {
+    white-space: normal;
+  }
 }
 
 /* Option descriptions (design §3.2): open for the active / selected option (OptionSelect adds .on; every option
