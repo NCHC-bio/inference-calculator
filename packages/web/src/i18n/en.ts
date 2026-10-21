@@ -94,6 +94,15 @@ const en = {
   'typing.caption': 'The first word appears after {ttft} s, then about {tps} words per second',
   'typing.tip': 'A demo: 1 word approximates 1 token. {tps} tok/s per user, TTFT {ttft} s',
   'typing.waiting': 'Waiting for the first word',
+  // Workbench suggested actions (design §4.5); numbers are formatted by the component.
+  'action.quant': 'Use {name}: {tps} words/s per user',
+  'action.speed': 'Relax the speed to "{name}"',
+  'action.users': 'Lower the users to {n}',
+  'action.model': 'Use {name}',
+  'action.reset.gpu': 'Back to the suggested {n} GPUs',
+  'action.reset.machine': 'Back to the suggested {n} machines',
+  'action.moreUsers': 'Room for {n} more users',
+  'action.biggerModel': 'Can run a larger model: {name} ({params} B)',
 } satisfies Record<keyof typeof zhTW, string>;
 
 export default en;

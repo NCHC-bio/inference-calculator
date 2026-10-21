@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
-import { computeView, type NeedView } from '../src/compute/compute';
+import { computeMain, type MainView } from '../src/compute/compute';
 import { decodeUrl } from '../src/state/url';
 import { defaultState } from '../src/state/state';
 import { setMedia } from './setup';
@@ -21,7 +21,7 @@ describe('PlatformList', () => {
     expect(screen.getByText('自建')).toBeInTheDocument();
   });
   it('best row is marked; its big number equals expected.gpus', () => {
-    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
     render(<App />);
     const best = bestRow();
     expect(best.dataset.platform).toBe(r.best);
@@ -29,13 +29,13 @@ describe('PlatformList', () => {
     expect(within(best).getByTestId('count')).toHaveTextContent(String(p.expected.ok && p.expected.gpus));
   });
   it('capacity bar reads 同時 {users} / {maxConcurrent} 人 from core', () => {
-    const b = getBundle(); const s = defaultState(b); const r = (computeView(b, s) as NeedView).result;
+    const b = getBundle(); const s = defaultState(b); const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;
     render(<App />);
     const p = r.perPlatform.find((x) => x.platform === r.best)!;
     expect(within(bestRow()).getByTestId('capacity')).toHaveTextContent(`同時 ${s.users} / ${p.maxConcurrent} 人`);
   });
   it('infeasible row shows one short reason, detail in a click popover', async () => {
-    const b = getBundle(); const r = (computeView(b, decodeUrl(b, INFEASIBLE_MAC)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, decodeUrl(b, INFEASIBLE_MAC)) as MainView & { kind: 'main' }).result;
     const mac = r.perPlatform.find((x) => x.platform === 'mac-mini-m6-32')!;
     expect(mac.expected.ok).toBe(false);
     history.replaceState(null, '', '/' + INFEASIBLE_MAC);
@@ -76,7 +76,7 @@ describe('PlatformList', () => {
     expect(within(row).getByTestId('row-toggle')).toHaveAttribute('aria-expanded', 'false');
   });
   it('machine icons explain themselves on tap and on focus, without toggling the row (spec §8.3.3; final review I5)', async () => {
-    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
     const p = r.perPlatform.find((x) => x.platform === r.best)!;
     const plat = b.platforms[r.best!]!;
     const per = plat.gpusPerNode.value;
@@ -100,7 +100,7 @@ describe('PlatformList', () => {
   });
   it("a platform beyond the size bound shows ✗ 規模超出上限 with core's detail (final review I2)", async () => {
     const url = '?m=gemma-4-26b-a4b-it&q=bf16&w=chat&n=200000';
-    const b = getBundle(); const r = (computeView(b, decodeUrl(b, url)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, decodeUrl(b, url)) as MainView & { kind: 'main' }).result;
     const spark = r.perPlatform.find((x) => x.platform === 'dgx-spark')!;
     expect(!spark.expected.ok && spark.expected.why).toBe('scale');
     history.replaceState(null, '', '/' + url);

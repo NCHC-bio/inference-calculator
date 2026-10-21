@@ -1,7 +1,7 @@
 import { Divider } from 'antd';
 import { Fragment, type JSX } from 'react';
 import { getBundle } from '../bundle';
-import { useView } from '../compute/useResults';
+import { useMain } from '../compute/useResults';
 import { useT } from '../i18n';
 import { workloadId } from '../state/state';
 import { useCalc } from '../state/store';
@@ -12,8 +12,8 @@ import { RowDetail } from './RowDetail';
 export function PlatformList(): JSX.Element | null {
   const tr = useT();
   const [{ openRow, workload }, dispatch] = useCalc();
-  const view = useView();
-  if (view.kind !== 'need') return null;
+  const view = useMain();
+  if (view.kind !== 'main') return null;
   const { result } = view;
   const bundle = getBundle();
   const platforms = bundle.platforms;

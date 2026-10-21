@@ -97,6 +97,15 @@ const zhTW = {
   'typing.caption': '先等 {ttft} 秒出現第一個字，之後每秒約 {tps} 字',
   'typing.tip': '示範用，1 個字近似 1 個 token：每人 {tps} tok/s，TTFT {ttft} s',
   'typing.waiting': '等待第一個字',
+  // Workbench suggested actions (design §4.5); numbers are formatted by the component.
+  'action.quant': '改用 {name}：每人 {tps} 字/秒',
+  'action.speed': '速度改為「{name}」',
+  'action.users': '人數降到 {n}',
+  'action.model': '改用 {name}',
+  'action.reset.gpu': '改回建議的 {n} 張',
+  'action.reset.machine': '改回建議的 {n} 台',
+  'action.moreUsers': '還能再多 {n} 人',
+  'action.biggerModel': '可改跑更大的模型 {name}（{params} B）',
 };
 
 export default zhTW;

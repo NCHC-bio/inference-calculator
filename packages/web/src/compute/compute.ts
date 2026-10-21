@@ -1,46 +1,68 @@
 import type { Bundle } from '@nchc/schema';
 import {
   CoreInputError,
+  estimatePerformanceSweep,
   estimateRequirements,
-  quantOptions,
-  type QueryInput,
+  type PerformanceResult,
+  type PlatformResult,
   type RequirementResult,
+  type SpeedCurve,
+  type SweepPoint,
+  type Why,
 } from '@nchc/core';
-import type { CalcState } from '../state/state';
+import { COUNT_MAX, reduce, type CalcState, type RowKey } from '../state/state';
+import { suggestActions, type SuggestedAction } from './actions';
+import { performanceQueryOf, queryOf, rowPerf } from './query';
 
-/** `users` is the (deferred) user count the result was computed for. */
-export type NeedView = { kind: 'need'; result: RequirementResult; users: number };
-export type ErrorView = { kind: 'error'; message: string };
-export type View = NeedView | ErrorView;
+export type RowView =
+  | { kind: 'infeasible'; row: RowKey; why: Why; detail: string }
+  | {
+      kind: 'ok';
+      row: RowKey;
+      /** Core's fewest cards (expected eta). */
+      suggested: number;
+      /** Core's fewest cards at conservative eta; null when that is infeasible. */
+      conservative: number | null;
+      /** The user set this row's count (or split). */
+      adjusted: boolean;
+      /** The count shown: the override's, else the suggested one. */
+      count: number;
+      /** Performance at `count` (and the override's tp). */
+      perf: PerformanceResult;
+      /** Performance at `suggested` with the best split (equals the requirement row). */
+      suggestedPerf: PerformanceResult;
+    };
+export type OkRow = RowView & { kind: 'ok' };
+export type MainView =
+  | { kind: 'main'; result: RequirementResult; rows: RowView[]; users: number }
+  | { kind: 'error'; message: string }
+  /** An HF model in the URL that is not re-imported yet (Ruling W1). */
+  | { kind: 'loading' };
 
-/**
- * The model as core takes it: catalog id, manual architecture, or an imported HF model. An HF model not re-imported
- * yet (URL reload) has no model object; its id `custom` is unknown to core (Task 2 turns this into a loading view).
- */
-export function modelInput(s: Pick<CalcState, 'model' | 'customModel'>): QueryInput['model'] {
-  const c = s.customModel;
-  if (c?.kind === 'manual') return c.value;
-  if (c?.kind === 'hf' && c.imported) return { imported: c.imported };
-  return s.model;
+function rowView(b: Bundle, s: CalcState, p: PlatformResult): RowView {
+  const row = p.platform;
+  if (!p.expected.ok) return { kind: 'infeasible', row, why: p.expected.why, detail: p.expected.detail };
+  const suggested = p.expected.gpus;
+  const suggestedPerf = rowPerf(b, s, row, { gpus: suggested });
+  const o = Object.hasOwn(s.overrides, row) ? s.overrides[row] : undefined;
+  return {
+    kind: 'ok',
+    row,
+    suggested,
+    conservative: p.conservative.ok ? p.conservative.gpus : null,
+    adjusted: o !== undefined,
+    count: o?.gpus ?? suggested,
+    perf: o ? rowPerf(b, s, row, o) : suggestedPerf,
+    suggestedPerf,
+  };
 }
 
-/**
- * State goes to core unchanged; only CoreInputError becomes an error view, anything else is rethrown. Custom platforms
- * are not passed yet: the rows that render `custom:<i>` arrive with the v8 platform list (later task).
- */
-export function computeView(bundle: Bundle, s: CalcState): View {
+/** The answer and one view per platform row; only CoreInputError becomes an error view, anything else is rethrown. */
+export function computeMain(b: Bundle, s: CalcState): MainView {
+  if (s.customModel?.kind === 'hf' && !s.customModel.imported) return { kind: 'loading' };
   try {
-    return {
-      kind: 'need',
-      users: s.users,
-      result: estimateRequirements(bundle, {
-        model: modelInput(s),
-        quant: s.quant,
-        workload: s.workload,
-        speed: s.speed,
-        users: s.users,
-      }),
-    };
+    const result = estimateRequirements(b, queryOf(b, s));
+    return { kind: 'main', result, rows: result.perPlatform.map((p) => rowView(b, s, p)), users: s.users };
   } catch (e) {
     if (e instanceof CoreInputError) return { kind: 'error', message: e.message };
     throw e;
@@ -48,28 +70,62 @@ export function computeView(bundle: Bundle, s: CalcState): View {
 }
 
 /**
- * Per model: how many platforms run it (expected.ok) at the current users / workload / speed. A model core rejects
- * with CoreInputError for these inputs counts as runnable on none (final review C1: one model's rejection used to
- * throw out of the menu render and blank the page); anything else is rethrown.
+ * Card counts of the "cards → speed" curve: 1 to max(8, suggested × 4, ceil(count × 1.5)), at most COUNT_MAX (core's
+ * GPU limit). Every count when that is ≤ 64, else 64 evenly spaced ones that always include 1, suggested, count and the
+ * end (core's sweep takes at most 64).
  */
-export function modelFeasibility(bundle: Bundle, s: CalcState): Record<string, { ok: number; total: number }> {
-  const out: Record<string, { ok: number; total: number }> = {};
-  const total = Object.keys(bundle.platforms).length;
-  for (const id of Object.keys(bundle.models)) {
-    const opts = quantOptions(bundle, id);
-    const quant = opts.includes(s.quant) ? s.quant : opts[0]!;
+export function sweepCounts(suggested: number, count: number): number[] {
+  const max = Math.min(COUNT_MAX, Math.max(8, suggested * 4, Math.ceil(count * 1.5)));
+  if (max <= 64) return Array.from({ length: max }, (_, i) => i + 1);
+  const set = new Set([1, suggested, count, max].filter((g) => g >= 1 && g <= max));
+  const free = 64 - set.size;
+  for (let i = 1; i <= free; i++) set.add(Math.round(1 + (i * (max - 1)) / (free + 1)));
+  return [...set].sort((x, y) => x - y);
+}
+
+export type BenchView = {
+  row: RowKey;
+  perf: PerformanceResult;
+  /** The best split at each sweepCounts count, at the current users. */
+  sweep: SweepPoint[];
+  /** Speed against users at the current count and split (perf.speedCurve). */
+  userCurve: SpeedCurve | null;
+  actions: SuggestedAction[];
+};
+
+/** Workbench data for the expanded row. */
+export function computeBench(b: Bundle, s: CalcState, row: OkRow): BenchView {
+  const { gpus: _g, tp: _t, ...q } = performanceQueryOf(b, s, row.row, row.count);
+  const sweep = estimatePerformanceSweep(b, { ...q, gpusList: sweepCounts(row.suggested, row.count) });
+  return { row: row.row, perf: row.perf, sweep: sweep.points, userCurve: row.perf.speedCurve, actions: suggestActions(b, s, row) };
+}
+
+export type ModelNote = { kind: 'onRow'; tps: number; ok: boolean } | { kind: 'noFit' } | { kind: 'platforms'; ok: number; total: number };
+
+/**
+ * Per catalog model, the note its option shows. With an adjusted row (the open one first, else the first adjusted):
+ * that model's speed on the row's cards, or noFit when the weights / one user's context do not fit. Otherwise how many
+ * platforms run it (expected.ok). The model keeps the current quant when it offers it, else its first option. A model
+ * core rejects with CoreInputError counts as runnable nowhere (final review C1); anything else is rethrown.
+ */
+export function modelOptionNotes(b: Bundle, s: CalcState, rows: RowView[]): Record<string, ModelNote> {
+  const adjusted = rows.filter((r): r is OkRow => r.kind === 'ok' && r.adjusted);
+  const target = adjusted.find((r) => r.row === s.openRow) ?? adjusted[0];
+  const total = Object.keys(b.platforms).length + s.customPlatforms.length;
+  const out: Record<string, ModelNote> = {};
+  for (const id of Object.keys(b.models)) {
+    const cand = reduce(b, s, { type: 'model', id });
     try {
-      const r = estimateRequirements(bundle, {
-        model: id,
-        quant,
-        workload: s.workload,
-        speed: s.speed,
-        users: s.users,
-      });
-      out[id] = { ok: r.perPlatform.filter((p) => p.expected.ok).length, total: r.perPlatform.length };
+      if (target) {
+        const perf = rowPerf(b, cand, target.row, s.overrides[target.row] ?? { gpus: target.count });
+        out[id] = perf.usage ? { kind: 'onRow', tps: perf.usage.tokPerSecPerUser, ok: perf.ok } : { kind: 'noFit' };
+      } else {
+        const r = estimateRequirements(b, queryOf(b, cand));
+        out[id] = { kind: 'platforms', ok: r.perPlatform.filter((p) => p.expected.ok).length, total: r.perPlatform.length };
+      }
     } catch (e) {
       if (!(e instanceof CoreInputError)) throw e;
-      out[id] = { ok: 0, total };
+      out[id] = target ? { kind: 'noFit' } : { kind: 'platforms', ok: 0, total };
     }
   }
   return out;

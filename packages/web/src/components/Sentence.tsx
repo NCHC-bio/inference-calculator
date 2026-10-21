@@ -1,7 +1,7 @@
 import { InputNumber, Tag, Typography } from 'antd';
 import { useId, useMemo, useState, type JSX } from 'react';
 import { getBundle } from '../bundle';
-import { useModelFeasibility } from '../compute/useResults';
+import { useModelNotes } from '../compute/useResults';
 import { useLang, useT } from '../i18n';
 import { USERS_MAX, quantChoices, workloadId } from '../state/state';
 import { useCalc } from '../state/store';
@@ -79,18 +79,19 @@ export function Sentence(): JSX.Element {
   const b = getBundle();
   const [s, dispatch] = useCalc();
   const [modelOpen, setModelOpen] = useState(false);
-  const feasibility = useModelFeasibility(modelOpen);
+  const notes = useModelNotes(modelOpen);
 
   const workloads = useMemo(() => ofRecord(b.workloads, (w) => w.description), [b]);
   const speeds = useMemo(() => ofRecord(b.speedPresets, (p) => p.description), [b]);
   const models = useMemo<Opt[]>(
     () =>
       Object.entries(b.models).map(([value, m]) => {
-        const f = feasibility?.[value];
-        const desc = f && (f.ok === 0 ? tr('model.runsNone') : tr('model.runsOn', { ok: f.ok, total: f.total }));
+        // The per-row notes (onRow / noFit) get their text with the v8 sentence (later task).
+        const f = notes?.[value];
+        const desc = f?.kind === 'platforms' ? (f.ok === 0 ? tr('model.runsNone') : tr('model.runsOn', { ok: f.ok, total: f.total })) : undefined;
         return { value, label: m.name, desc };
       }),
-    [b, feasibility, tr],
+    [b, notes, tr],
   );
   const quants = useMemo<Opt[]>(
     () =>

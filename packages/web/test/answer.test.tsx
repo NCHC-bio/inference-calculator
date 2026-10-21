@@ -6,7 +6,7 @@ import type { RequirementResult } from '@nchc/core';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { needAnswerText } from '../src/components/AnswerLine';
-import { computeView, type NeedView } from '../src/compute/compute';
+import { computeMain, type MainView } from '../src/compute/compute';
 import { tZh } from '../src/i18n';
 import { decodeUrl } from '../src/state/url';
 import { defaultState, workloadId } from '../src/state/state';
@@ -18,14 +18,14 @@ const ALL_INFEASIBLE = '?m=olmo-2-0325-32b&q=bf16&w=assist&n=100000';
 
 describe('AnswerLine', () => {
   it('need answer equals core best', () => {
-    const b = getBundle(); const r = computeView(b, defaultState(b)) as NeedView;
+    const b = getBundle(); const r = computeMain(b, defaultState(b)) as MainView & { kind: 'main' };
     render(<App />);
     expect(screen.getByTestId('answer-main')).toHaveTextContent(needAnswerText(r.result, b, tZh).main);
     expect(screen.getByTestId('answer-sub')).toHaveTextContent(needAnswerText(r.result, b, tZh).sub);
   });
   it('all NCHC platforms infeasible → plain message, rows still render (Review Focus 1)', () => {
     const b = getBundle();
-    expect((computeView(b, decodeUrl(b, ALL_INFEASIBLE)) as NeedView).result.best).toBeNull();
+    expect((computeMain(b, decodeUrl(b, ALL_INFEASIBLE)) as MainView & { kind: 'main' }).result.best).toBeNull();
     history.replaceState(null, '', '/' + ALL_INFEASIBLE);
     render(<App />);
     expect(screen.getByTestId('answer-main')).toHaveTextContent('國網機台都不可行');
@@ -33,7 +33,7 @@ describe('AnswerLine', () => {
   });
   it('basis drawer lists every basis item with its status', async () => {
     render(<App />); await userEvent.click(screen.getByRole('button', { name: /依據/ }));
-    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
     const paths = new Set(r.basis.map((x) => x.path));
     expect(screen.getAllByTestId('basis-item')).toHaveLength(paths.size);
     const first = screen.getAllByTestId('basis-item')[0]!;
@@ -48,14 +48,14 @@ describe('AnswerLine', () => {
   it('estimate tag popover lists the estimates', async () => {
     render(<App />); await userEvent.click(screen.getByText('推估'));
     await shown('查看全部依據 →');
-    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
     const est = r.basis.find((x) => x.status === 'estimate')!;
     expect(screen.getAllByText(est.text, { exact: false }).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByText('查看全部依據 →'));
     await waitFor(() => expect(screen.getAllByTestId('basis-item').length).toBeGreaterThan(0));
   });
   it('estimate tag popover also lists unverified inputs, each with its status tag (spec §2.1 rule 2; final review I4)', async () => {
-    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result;
+    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
     const unv = r.basis.find((x) => x.status === 'unverified')!;
     const est = r.basis.find((x) => x.status === 'estimate')!;
     expect(unv).toBeDefined();
@@ -76,7 +76,7 @@ describe('AnswerLine', () => {
 
 describe('needAnswerText', () => {
   const b = getBundle();
-  const base = (computeView(b, defaultState(b)) as NeedView).result;
+  const base = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
   const withGpus = (gpus: number, conservativeOk = true): RequirementResult => ({
     ...base,
     perPlatform: base.perPlatform.map((p) =>

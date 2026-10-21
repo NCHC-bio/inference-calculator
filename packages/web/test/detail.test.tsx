@@ -4,7 +4,7 @@ import type { ShapeUsage } from '@nchc/core';
 import { describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
-import { computeView, type NeedView } from '../src/compute/compute';
+import { computeMain, type MainView } from '../src/compute/compute';
 import { MemoryBar } from '../src/components/MemoryBar';
 import { rowDetailId } from '../src/components/PlatformRow';
 import { RowDetail } from '../src/components/RowDetail';
@@ -98,7 +98,7 @@ describe('MemoryBar', () => {
 
 describe('RowDetail', () => {
   it('GB200 null TDP → 功耗未查證 with the note (Review Focus 4)', async () => {
-    const b = getBundle(); const r = (computeView(b, defaultState(b)) as NeedView).result.perPlatform.find((p) => p.platform === 'nano4-gb200')!;
+    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result.perPlatform.find((p) => p.platform === 'nano4-gb200')!;
     expect(r.expected.ok).toBe(true);
     expect(r.powerKw).toBeNull();
     expect(r.powerNote).toBeTruthy();
@@ -142,7 +142,7 @@ describe('RowDetail', () => {
     expect(document.body.textContent).not.toMatch(/排隊/);
   });
   it('opens under the row with the toggle-controlled id and core data', async () => {
-    const b = getBundle(); const s = defaultState(b); const res = (computeView(b, s) as NeedView).result;
+    const b = getBundle(); const s = defaultState(b); const res = (computeMain(b, s) as MainView & { kind: 'main' }).result;
     const p = res.perPlatform.find((x) => x.platform === res.best)!;
     render(<App />);
     const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.platform === res.best)!;

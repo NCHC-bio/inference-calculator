@@ -1,9 +1,9 @@
 import { CopyOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import type { BasisItem, RequirementResult } from '@nchc/core';
-import { Alert, Button, Flex, Tag, theme, Tooltip, Typography } from 'antd';
+import { Alert, Button, Flex, Spin, Tag, theme, Tooltip, Typography } from 'antd';
 import type { JSX, ReactNode } from 'react';
 import { getBundle } from '../bundle';
-import { useView } from '../compute/useResults';
+import { useMain } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
 import { useCalc } from '../state/store';
 import { STATUS_COLOR, StatusTag, uniqueByPath } from './BasisDrawer';
@@ -53,7 +53,8 @@ export function AnswerLine(): JSX.Element {
   const lang = useLang();
   const [, dispatch] = useCalc();
   const { token } = theme.useToken();
-  const view = useView();
+  const view = useMain();
+  if (view.kind === 'loading') return <Spin style={{ marginTop: 12 }} data-testid="answer-loading" />;
   if (view.kind === 'error') {
     return <Alert type="error" showIcon title={view.message} style={{ marginTop: 12 }} data-testid="answer-error" />;
   }

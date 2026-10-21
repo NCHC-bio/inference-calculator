@@ -3,7 +3,7 @@ import type { CoreStatus } from '@nchc/schema';
 import { Card, Drawer, Flex, List, Tag, Typography } from 'antd';
 import type { JSX } from 'react';
 import { getBundle } from '../bundle';
-import { useView } from '../compute/useResults';
+import { useMain } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
 import { workloadId } from '../state/state';
 import { useCalc } from '../state/store';
@@ -102,8 +102,8 @@ export function BasisDrawer(): JSX.Element {
   const tr = useT();
   const lang = useLang();
   const [{ dialog, workload }, dispatch] = useCalc();
-  const view = useView();
-  const items = view.kind === 'error' ? [] : uniqueByPath(view.result.basis);
+  const view = useMain();
+  const items = view.kind === 'main' ? uniqueByPath(view.result.basis) : [];
   return (
     <Drawer
       title={tr('basis.title')}
