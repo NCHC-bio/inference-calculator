@@ -141,8 +141,19 @@ function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: 
     if (tp !== undefined) dispatch({ type: 'override', row: row.row, value: { gpus, tp } });
     else dispatch({ type: 'override', row: row.row, value: gpus === row.suggested ? null : { gpus } });
   };
+  const xs = bench.sweep.map((p) => p.gpus);
+  const label = tr('chart.aria.cards', {
+    title: tr(unit === 'machine' ? 'wb.chart.cards.machine' : 'wb.chart.cards.gpu'),
+    lo: fmtIn(lang, Math.min(...xs)),
+    hi: fmtIn(lang, Math.max(...xs)),
+    unit: unitText,
+    n: fmtIn(lang, row.count),
+    tps: fmtIn(lang, usage.tokPerSecPerUser),
+    s: fmtIn(lang, row.suggested),
+  });
   return (
     <SpeedChart
+      label={label}
       points={bench.sweep.map((p) => (p.fastest ? { x: p.gpus, y: p.fastest.tokPerSecPerUser } : { x: p.gpus, y: p.tokPerSecPerUser, miss: true }))}
       xTitle={tr(unit === 'machine' ? 'chart.x.cards.machine' : 'chart.x.cards.gpu', { users: fmtIn(lang, s.users) })}
       yTitle={tr('chart.y')}
@@ -170,8 +181,18 @@ function UsersChart({ row, bench, s, unitText, zones, target }: ChartCtx): JSX.E
     const why = p.why ? tr('chart.note.why', { why: tr(WHY[p.why]) }) : '';
     return tr('chart.note.users', { n: fmtIn(lang, x), tps: fmtIn(lang, p.tokPerSecPerUser), ttft: fmtIn(lang, p.ttftSec, 1) }) + why;
   };
+  const us = userCurve.points.map((p) => p.users);
+  const label = tr('chart.aria.users', {
+    title: tr('wb.chart.users'),
+    lo: fmtIn(lang, Math.min(...us)),
+    hi: fmtIn(lang, Math.max(...us)),
+    users: fmtIn(lang, s.users),
+    tps: fmtIn(lang, perf.usage!.tokPerSecPerUser),
+    max: fmtIn(lang, perf.maxConcurrent),
+  });
   return (
     <SpeedChart
+      label={label}
       points={userCurve.points.map((p) => ({ x: p.users, y: p.tokPerSecPerUser, miss: p.why !== null }))}
       xTitle={tr('chart.x.users', { n: fmtIn(lang, row.count), unit: unitText })}
       yTitle={tr('chart.y')}

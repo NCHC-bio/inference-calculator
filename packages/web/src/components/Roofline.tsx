@@ -109,6 +109,13 @@ export function Roofline({ roofline, unit = 'gpu', width }: { roofline: Roofline
     dot: token.colorPrimary,
   };
 
+  // Screen-reader summary from the same numbers the chart draws (v8 minor 9).
+  const label = tr(unit === 'machine' ? 'roofline.aria.machine' : 'roofline.aria.gpu', {
+    peak: fmt(roofline.peakTflopsPerGpu),
+    bw: fmt(roofline.memBwTBsPerGpu, 2),
+    ai: fmt(roofline.intensityFlopPerByte, 1),
+    ach: fmt(roofline.achievedTflopsPerGpu, 1),
+  });
   const key = JSON.stringify([lay, titles, colors]);
   useEffect(() => {
     const animate = prev.current !== null && prev.current.key !== key && prev.current.w === lay.w;
@@ -126,7 +133,7 @@ export function Roofline({ roofline, unit = 'gpu', width }: { roofline: Roofline
 
   return (
     <div ref={wrap} style={{ width: '100%', minWidth: 0 }}>
-      <svg ref={ref} className="chart" role="img" aria-label={`${titles.x} / ${titles.y}`} style={{ display: 'block' }} />
+      <svg ref={ref} className="chart" role="img" aria-label={label} style={{ display: 'block' }} />
       <Typography.Text type="secondary" style={{ fontSize: 11 }}>
         {tr('roofline.hint')}
       </Typography.Text>

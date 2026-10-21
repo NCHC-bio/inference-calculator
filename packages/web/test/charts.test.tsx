@@ -229,3 +229,37 @@ describe('Roofline', () => {
     await waitFor(() => expect(rf.querySelector('text.x-title')?.textContent).toBe('算術強度（FLOP/byte，對數）'));
   });
 });
+
+describe('chart screen-reader labels (v8 minor 9)', () => {
+  const nf = (n: number, d = 0) => new Intl.NumberFormat('zh-TW', { maximumFractionDigits: d }).format(n);
+
+  it('the cards and users charts are role=img with a summary of what they draw', async () => {
+    const r = okRow('', H200);
+    const bench = computeBench(getBundle(), decodeUrl(getBundle(), ''), r);
+    const wb = await openBench('');
+    const xs = bench.sweep.map((p) => p.gpus);
+    const u = r.perf.usage!;
+    const cards = within(within(wb).getByTestId('chart-cards')).getByRole('img');
+    expect(cards.tagName.toLowerCase()).toBe('svg');
+    expect(cards).toHaveAttribute(
+      'aria-label',
+      `張數 → 每人速度：${nf(Math.min(...xs))} 到 ${nf(Math.max(...xs))} 張，目前 ${nf(r.count)} 張每人 ${nf(u.tokPerSecPerUser)} 字/秒，建議 ${nf(r.suggested)} 張`,
+    );
+    const pts = bench.userCurve!.points.map((p) => p.users);
+    const users = within(within(wb).getByTestId('chart-users')).getByRole('img');
+    expect(users).toHaveAttribute(
+      'aria-label',
+      `人數 → 每人速度：${nf(Math.min(...pts))} 到 ${nf(Math.max(...pts))} 人，目前 15 人每人 ${nf(u.tokPerSecPerUser)} 字/秒，上限 ${nf(r.perf.maxConcurrent)} 人`,
+    );
+  });
+
+  it('the Roofline label states its roof and the current point', () => {
+    const roofline = { peakTflopsPerGpu: 989, memBwTBsPerGpu: 4.8, intensityFlopPerByte: 40.25, achievedTflopsPerGpu: 120.5 };
+    render(
+      <StoreProvider>
+        <Roofline roofline={roofline} width={W} />
+      </StoreProvider>,
+    );
+    expect(screen.getByRole('img')).toHaveAttribute('aria-label', 'Roofline：每張卡峰值算力 989 TFLOPS、頻寬 4.8 TB/s，目前算術強度 40.3 FLOP/byte、可達 120.5 TFLOPS');
+  });
+});

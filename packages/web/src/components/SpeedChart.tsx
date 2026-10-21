@@ -28,6 +28,8 @@ export type SpeedChartProps = {
   target?: { y: number; label: string } | null;
   /** Fixed width (tests; jsdom has no layout); otherwise the container's. */
   width?: number;
+  /** Screen-reader summary of the chart (role="img"), built by the caller from the data it plots (v8 minor 9). */
+  label?: string;
 };
 
 /** Layout (demo v8 `LineChart`): 190 tall, plot inset L 48 / R 12 / T 12 / B 40. */
@@ -215,7 +217,7 @@ function draw(el: SVGSVGElement, lay: Layout, xTitle: string, yTitle: string, c:
  * 滑過時顯示最近一點的說明（`pointNote`）。資料改變時路徑、刻度與標記一起以 motion token 過渡；首次繪製與縮放直接套用。
  */
 export function SpeedChart(props: SpeedChartProps): JSX.Element {
-  const { points, xTitle, yTitle, onPick, pointNote } = props;
+  const { points, xTitle, yTitle, onPick, pointNote, label } = props;
   const { token } = theme.useToken();
   const lang = useLang();
   const [wrap, measured] = useWidth<HTMLDivElement>();
@@ -283,6 +285,8 @@ export function SpeedChart(props: SpeedChartProps): JSX.Element {
       <svg
         ref={ref}
         className="chart"
+        role="img"
+        aria-label={label ?? `${xTitle} / ${yTitle}`}
         style={{ display: 'block', cursor: onPick ? 'pointer' : 'default' }}
         onClick={onPick ? (e) => onPick(Math.max(1, Math.round(xAt(e)))) : undefined}
         onMouseMove={onMove}
