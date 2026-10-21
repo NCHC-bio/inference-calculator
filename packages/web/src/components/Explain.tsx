@@ -11,6 +11,17 @@ import {
   type ReactNode,
 } from 'react';
 
+/**
+ * A press inside the popup must not move focus off a focused trigger: the blur would close the popup (focus trigger)
+ * and its leave motion turns off pointer events, so the click on a link inside it would be lost (seen in Chromium after
+ * a click or tap opened it). Form fields still take focus.
+ */
+function keepFocus(e: MouseEvent): void {
+  const t = e.target;
+  if (t instanceof Element && t.closest('input, textarea, select, [contenteditable]')) return;
+  e.preventDefault();
+}
+
 type TriggerProps = { onClick?: (e: MouseEvent) => void; onPointerDown?: (e: PointerEvent) => void };
 
 /**
@@ -21,8 +32,23 @@ type TriggerProps = { onClick?: (e: MouseEvent) => void; onPointerDown?: (e: Poi
  * that pointer interaction began, so the focus that precedes a tap (focus opens) does not get re-closed by the tap. While open, a pointerdown outside both trigger and popup closes it (touch devices often neither focus
  * a tapped button nor fire a reliable mouseleave), and so does Escape (WCAG 1.4.13).
  */
-export function Explain({ title, content, children }: { title?: ReactNode; content: ReactNode; children: ReactElement }): JSX.Element {
-  const [open, setOpen] = useState(false);
+export function Explain({
+  title,
+  content,
+  children,
+  open: openProp,
+  onOpenChange,
+}: {
+  title?: ReactNode;
+  content: ReactNode;
+  children: ReactElement;
+  /** Controlled open state (e.g. a link inside the popup closes it); uncontrolled when omitted. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}): JSX.Element {
+  const [inner, setInner] = useState(false);
+  const open = openProp ?? inner;
+  const setOpen = onOpenChange ?? setInner;
   const popupRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   const triggerDown = useRef<{ event: Event; wasOpen: boolean; mouse: boolean } | null>(null);
@@ -67,7 +93,11 @@ export function Explain({ title, content, children }: { title?: ReactNode; conte
   return (
     <Popover
       title={title && <div ref={titleRef}>{title}</div>}
-      content={<div ref={popupRef}>{content}</div>}
+      content={
+        <div ref={popupRef} onMouseDown={keepFocus}>
+          {content}
+        </div>
+      }
       trigger={['hover', 'focus']}
       open={open}
       onOpenChange={setOpen}

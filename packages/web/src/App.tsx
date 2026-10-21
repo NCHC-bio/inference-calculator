@@ -7,7 +7,8 @@ import { useLang, useT, type Lang } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import { AnswerLine } from './components/AnswerLine';
 import { PlatformList } from './components/PlatformList';
-import { BasisDrawer } from './components/BasisDrawer';
+import { BasisModal } from './components/BasisModal';
+import { CiteModal } from './components/CiteModal';
 import { Sentence } from './components/Sentence';
 import { antdTheme, useDarkMode, useReducedMotion } from './theme';
 
@@ -92,7 +93,8 @@ function Shell() {
       <Sentence />
       <AnswerLine />
       <PlatformList />
-      <BasisDrawer />
+      <BasisModal />
+      <CiteModal />
       <footer style={{ marginTop: 24, opacity: 0.65 }}>
         {tr('footer.dataVersion', { version: getBundle().meta.dataVersion })}
       </footer>

@@ -9,6 +9,12 @@
   }
 }
 
+/* No UA body margin: antd's scroll lock sets body width to 100% while a Modal / Drawer is open, and the default 8 px
+   margin then pushes the page 8 px past the viewport (horizontal scroll). The main column keeps its own 16 px gutter. */
+body {
+  margin: 0;
+}
+
 /* Opens / closes smoothly: grid-template-rows 0fr → 1fr. */
 .reveal {
   display: grid;

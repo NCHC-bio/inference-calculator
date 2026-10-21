@@ -180,7 +180,7 @@ test.describe('touch', () => {
       .last()
       .locator('.ant-tag', { hasText: tZh('tag.estimate') });
     await tag.tap();
-    await expect(page.locator('.ant-popover:visible').filter({ hasText: tZh('answer.estimates.title') })).toBeVisible();
+    await expect(page.locator('.ant-popover:visible').filter({ hasText: tZh('answer.estimates.title', { n: 3 }) })).toBeVisible();
     await noHorizontalScroll(page);
   });
 

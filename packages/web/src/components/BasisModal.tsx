@@ -1,11 +1,13 @@
 import type { BasisItem } from '@nchc/core';
 import type { CoreStatus } from '@nchc/schema';
-import { Card, Drawer, Flex, List, Tag, Typography } from 'antd';
+import type { Source } from '@nchc/schema';
+import { Card, Flex, List, Modal, Segmented, Tag, Typography } from 'antd';
 import type { JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useMain } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
-import { workloadId } from '../state/state';
+import { workloadId, type BasisFilter } from '../state/state';
+import { sourcesOf } from './citeText';
 import { useCalc } from '../state/store';
 
 /** The one status → antd preset colour mapping (answer-line tags use it too). */
@@ -41,8 +43,7 @@ export function formatBasisValue(v: unknown, lang: Lang): string {
 
 const isHttp = (url: string) => /^https?:\/\//.test(url);
 
-function SourceLinks({ ids, tr }: { ids: string[]; tr: TFn }) {
-  const sources = getBundle().sources;
+function SourceLinks({ ids, sources, tr }: { ids: string[]; sources: Record<string, Source>; tr: TFn }) {
   const known = ids.filter((id) => Object.hasOwn(sources, id));
   if (known.length === 0) return null;
   return (
@@ -67,7 +68,7 @@ function SourceLinks({ ids, tr }: { ids: string[]; tr: TFn }) {
   );
 }
 
-function BasisRow({ item, lang, tr }: { item: BasisItem; lang: Lang; tr: TFn }) {
+function BasisRow({ item, sources, lang, tr }: { item: BasisItem; sources: Record<string, Source>; lang: Lang; tr: TFn }) {
   return (
     <List.Item data-testid="basis-item">
       <Flex vertical gap={2} style={{ width: '100%' }}>
@@ -79,7 +80,7 @@ function BasisRow({ item, lang, tr }: { item: BasisItem; lang: Lang; tr: TFn }) 
           {tr('basis.value', { value: formatBasisValue(item.value, lang) })}
           {item.lecRef && <Tag style={{ marginInlineStart: 8 }}>{tr('basis.lecRef', { ref: item.lecRef })}</Tag>}
         </Typography.Text>
-        <SourceLinks ids={item.sourceIds} tr={tr} />
+        <SourceLinks ids={item.sourceIds} sources={sources} tr={tr} />
       </Flex>
     </List.Item>
   );
@@ -98,28 +99,45 @@ function ConcurrencyReading({ workload, tr }: { workload: string; tr: TFn }) {
   );
 }
 
-export function BasisDrawer(): JSX.Element {
+export const isWeak = (x: BasisItem): boolean => x.status === 'estimate' || x.status === 'unverified';
+
+/** Every basis item of the result (or only the estimated and unverified ones), with values and sources (design §3.3). */
+export function BasisModal(): JSX.Element {
   const tr = useT();
   const lang = useLang();
-  const [{ dialog, workload }, dispatch] = useCalc();
+  const [{ dialog, basisFilter, workload, customModel }, dispatch] = useCalc();
   const view = useMain();
-  const items = view.kind === 'main' ? uniqueByPath(view.result.basis) : [];
+  const all = view.kind === 'main' ? uniqueByPath(view.result.basis) : [];
+  const weak = all.filter(isWeak);
+  const items = basisFilter === 'est' ? weak : all;
+  const sources = sourcesOf(getBundle(), customModel);
   return (
-    <Drawer
+    <Modal
       title={tr('basis.title')}
       open={dialog === 'basis'}
-      onClose={() => dispatch({ type: 'dialog', id: null })}
-      size={520}
+      onCancel={() => dispatch({ type: 'dialog', id: null })}
+      footer={null}
+      width={640}
+      styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
     >
       <Flex vertical gap="middle">
+        <Segmented<BasisFilter>
+          block
+          value={basisFilter}
+          onChange={(v) => dispatch({ type: 'dialog', id: 'basis', basisFilter: v })}
+          options={[
+            { value: 'est', label: tr('basis.filter.est', { n: weak.length }) },
+            { value: 'all', label: tr('basis.filter.all', { n: all.length }) },
+          ]}
+        />
         <ConcurrencyReading workload={workloadId(workload)} tr={tr} />
         <List
           size="small"
           dataSource={items}
           rowKey="path"
-          renderItem={(item) => <BasisRow item={item} lang={lang} tr={tr} />}
+          renderItem={(item) => <BasisRow item={item} sources={sources} lang={lang} tr={tr} />}
         />
       </Flex>
-    </Drawer>
+    </Modal>
   );
 }
