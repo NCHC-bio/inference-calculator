@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Two full GPU nodes, one partly filled, as in the site's machine icons. -->
+  <rect x="6" y="10" width="14" height="44" rx="3" fill="#1677ff"/>
+  <rect x="25" y="10" width="14" height="44" rx="3" fill="#1677ff"/>
+  <rect x="45.5" y="11.5" width="11" height="41" rx="2.5" fill="none" stroke="#1677ff" stroke-width="3"/>
+  <rect x="44" y="32" width="14" height="22" rx="3" fill="#1677ff"/>
+</svg>
