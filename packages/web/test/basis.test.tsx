@@ -40,7 +40,8 @@ describe('BasisModal', () => {
     const weak = r.basis.filter((x) => x.status === 'estimate' || x.status === 'unverified').length;
     await userEvent.click(within(m).getByText(`推估與未查證（${weak}）`));
     await waitFor(() => expect(within(m).getAllByTestId('basis-item')).toHaveLength(weak));
-  });
+    // 2.3 s alone; renders the whole App and every basis item, so a loaded full `pnpm test` run can pass 5 s.
+  }, 20_000);
 
   it('the content scrolls inside 70vh', async () => {
     render(<App />);

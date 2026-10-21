@@ -1,4 +1,4 @@
-import type { Bundle, Model, Source } from '@nchc/schema';
+import { OriginSchema, type Bundle, type Model, type Origin, type Source } from '@nchc/schema';
 import {
   CustomPlatformInputSchema,
   ModelOverrideSchema,
@@ -20,7 +20,11 @@ export type SpeedSel = string | { minTokPerSec: number; maxTtftSec: number };
 export type CustomModel =
   | null
   | { kind: 'manual'; value: ModelOverride }
-  | { kind: 'hf'; repo: string; sha: string; imported?: { model: Model; source: Source } };
+  /**
+   * `origin`: the publisher the user confirmed on import (spec §8.3.2), kept so a URL reload can refetch (Ruling W1).
+   * `imported` is absent after a URL reload until the refetch answers.
+   */
+  | { kind: 'hf'; repo: string; sha: string; origin?: Origin; imported?: { model: Model; source: Source } };
 export type Pin = {
   id: number;
   platform: string;
@@ -172,7 +176,13 @@ export function validCustomModel(v: unknown): v is Exclude<CustomModel, null> {
   const c = v as Record<string, unknown>;
   if (c.kind === 'manual') return typeof c.value === 'object' && ModelOverrideSchema.safeParse(c.value).success;
   if (c.kind === 'hf') {
-    return typeof c.repo === 'string' && HF_REPO.test(c.repo) && typeof c.sha === 'string' && HF_REVISION.test(c.sha);
+    return (
+      typeof c.repo === 'string' &&
+      HF_REPO.test(c.repo) &&
+      typeof c.sha === 'string' &&
+      HF_REVISION.test(c.sha) &&
+      (c.origin === undefined || OriginSchema.safeParse(c.origin).success)
+    );
   }
   return false;
 }

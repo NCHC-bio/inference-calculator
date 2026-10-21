@@ -1,4 +1,4 @@
-import type { Bundle } from '@nchc/schema';
+import { OriginSchema, type Bundle } from '@nchc/schema';
 import {
   CUSTOM_PLATFORMS_MAX,
   USERS_MAX,
@@ -17,7 +17,8 @@ import {
 
 /**
  * Query string of the shareable inputs (design §7): `n w m q s lang` as before, `o=rowKey:gpus[:tp],…`,
- * `x=` base64url JSON `{ hw?, wl?, sp?, mm? }` (custom hardware, workload, speed, manual model) and `hf=owner/name@sha`.
+ * `x=` base64url JSON `{ hw?, wl?, sp?, mm?, hfo? }` (custom hardware, workload, speed, manual model, HF publisher origin)
+ * and `hf=owner/name@sha`.
  * The expanded row, pins and dialogs are one visit's working state and stay out.
  */
 export function encodeUrl(s: CalcState): string {
@@ -27,11 +28,12 @@ export function encodeUrl(s: CalcState): string {
   else if (s.customModel.kind === 'hf') p.set('hf', `${s.customModel.repo}@${s.customModel.sha}`);
   p.set('q', s.quant);
   if (typeof s.speed === 'string') p.set('s', s.speed);
-  const x: { hw?: unknown; wl?: unknown; sp?: unknown; mm?: unknown } = {};
+  const x: { hw?: unknown; wl?: unknown; sp?: unknown; mm?: unknown; hfo?: unknown } = {};
   if (s.customPlatforms.length > 0) x.hw = s.customPlatforms;
   if (typeof s.workload !== 'string') x.wl = s.workload;
   if (typeof s.speed !== 'string') x.sp = s.speed;
   if (s.customModel?.kind === 'manual') x.mm = s.customModel.value;
+  if (s.customModel?.kind === 'hf' && s.customModel.origin) x.hfo = s.customModel.origin;
   if (Object.keys(x).length > 0) p.set('x', toBase64Url(JSON.stringify(x)));
   const o = Object.entries(s.overrides).map(([k, v]) => (v.tp === undefined ? `${k}:${v.gpus}` : `${k}:${v.gpus}:${v.tp}`));
   if (o.length > 0) p.set('o', o.join(','));
@@ -93,7 +95,11 @@ export function decodeUrl(b: Bundle, search: string): CalcState {
 
   const m = p.get('m');
   const hf = /^(.+)@([^@]+)$/.exec(p.get('hf') ?? '');
-  const hfModel = hf ? { kind: 'hf' as const, repo: hf[1]!, sha: hf[2]! } : null;
+  // An invalid origin is dropped on its own: the model is still refetched once the user confirms one (Ruling W1).
+  const origin = OriginSchema.safeParse(x.hfo);
+  const hfModel = hf
+    ? { kind: 'hf' as const, repo: hf[1]!, sha: hf[2]!, ...(origin.success ? { origin: origin.data } : {}) }
+    : null;
   const manual = { kind: 'manual' as const, value: x.mm };
   if (validCustomModel(manual)) s = reduce(b, s, { type: 'customModel', value: manual });
   else if (hfModel && validCustomModel(hfModel)) s = reduce(b, s, { type: 'customModel', value: hfModel });
