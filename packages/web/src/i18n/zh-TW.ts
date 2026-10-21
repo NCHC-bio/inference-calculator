@@ -189,7 +189,7 @@ const zhTW = {
   'chart.note.users': '{n} 人：每人 {tps} 字/秒、首字 {ttft} 秒',
   'chart.note.noFit': '{n} {unit}：放不下',
   'chart.note.why': '（{why}）',
-  'chart.aria.cards': '{title}：{lo} 到 {hi} {unit}，目前 {n} {unit}每人 {tps} 字/秒，建議 {s} {unit}',
+  'chart.aria.cards': '{title}：{lo} 到 {hi} {unit}，目前 {n} {nUnit}每人 {tps} 字/秒，建議 {s} {sUnit}',
   'chart.aria.users': '{title}：{lo} 到 {hi} 人，目前 {users} 人每人 {tps} 字/秒，上限 {max} 人',
   'roofline.aria.gpu': 'Roofline：每張卡峰值算力 {peak} TFLOPS、頻寬 {bw} TB/s，目前算術強度 {ai} FLOP/byte、可達 {ach} TFLOPS',
   'roofline.aria.machine': 'Roofline：每台峰值算力 {peak} TFLOPS、頻寬 {bw} TB/s，目前算術強度 {ai} FLOP/byte、可達 {ach} TFLOPS',

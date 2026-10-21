@@ -1,6 +1,6 @@
 import type { RequirementResult } from '@nchc/core';
 import type { Bundle } from '@nchc/schema';
-import type { Lang, TFn } from '../i18n/t';
+import { unitWord, type Lang, type TFn } from '../i18n/t';
 
 // React-free so the Playwright (Node) side can compute the expected answer with the same rules.
 
@@ -18,16 +18,16 @@ export function needAnswerParts(r: RequirementResult, bundle: Bundle, t: TFn, la
     return { feasible: false, head: t('answer.need.none'), tail: '', sub: t('answer.need.noneHint') };
   }
   const plat = bundle.platforms[row.platform]!;
-  const unit = t(plat.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
   const gpus = shown ? shown.gpus : row.expected.gpus;
+  const cons = shown ? shown.conservative : row.conservative.ok ? row.conservative.gpus : 0;
   const perNode = plat.gpusPerNode.value;
   // spec §10.2: from one node up, the node count with one decimal, none when it divides evenly.
   const nodes = gpus >= perNode ? t('answer.need.nodes', { nodes: fmt(lang, gpus / perNode, gpus % perNode ? 1 : 0) }) : '';
   return {
     feasible: true,
-    head: t('answer.need.main', { name: plat.name, gpus: fmt(lang, gpus), unit }),
+    head: t('answer.need.main', { name: plat.name, gpus: fmt(lang, gpus), unit: unitWord(t, plat.unit, fmt(lang, gpus)) }),
     tail: `${plat.sub}${nodes}`,
-    sub: row.conservative.ok ? t('answer.need.sub', { gpus: fmt(lang, shown ? shown.conservative : row.conservative.gpus), unit }) : t('answer.need.subNone'),
+    sub: row.conservative.ok ? t('answer.need.sub', { gpus: fmt(lang, cons), unit: unitWord(t, plat.unit, fmt(lang, cons)) }) : t('answer.need.subNone'),
   };
 }
 

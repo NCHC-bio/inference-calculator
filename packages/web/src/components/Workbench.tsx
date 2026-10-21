@@ -8,7 +8,7 @@ import { speedTarget } from '../compute/actions';
 import type { BenchView, OkRow } from '../compute/compute';
 import { queryOf } from '../compute/query';
 import { useBench, useDeferredState } from '../compute/useResults';
-import { useLang, useT } from '../i18n';
+import { unitWord, useLang, useT } from '../i18n';
 import type { Lang } from '../i18n/t';
 import { useTween } from '../motion/useTween';
 import { PINS_MAX, workloadId, type Action, type CalcState } from '../state/state';
@@ -112,14 +112,14 @@ export function QueueLine({ queueing }: { queueing: Queueing | null }): JSX.Elem
   );
 }
 
-type ChartCtx = { row: OkRow; bench: BenchView; s: CalcState; unit: 'gpu' | 'machine'; unitText: string; zones: ChartZone[]; target: { y: number; label: string } | null };
+type ChartCtx = { row: OkRow; bench: BenchView; s: CalcState; unit: 'gpu' | 'machine'; unitOf: (n: number) => string; zones: ChartZone[]; target: { y: number; label: string } | null };
 
 /**
  * 「卡數 → 每人速度」 over core's sweep. Ruling W9: each count plots its fastest split that serves the users on target
  * (`fastest`, solid); without one, the default split's numbers as a miss (dashed). A click sets the count with the plotted
  * split (tp only when it differs from the default); the suggested count with the recommended split clears the override.
  */
-function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: ChartCtx & { dispatch: (a: Action) => void }): JSX.Element {
+function CardsChart({ row, bench, s, unit, unitOf, zones, target, dispatch }: ChartCtx & { dispatch: (a: Action) => void }): JSX.Element {
   const tr = useT();
   const lang = useLang();
   const usage = bench.perf.usage!;
@@ -129,11 +129,11 @@ function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: 
     const n = fmtIn(lang, x);
     if (p?.fastest) {
       const f = p.fastest;
-      return tr('chart.note.cards', { n, unit: unitText, split: splitText(f.shape.tp, f.shape.replicas, unit, tr), tps: fmtIn(lang, f.tokPerSecPerUser) });
+      return tr('chart.note.cards', { n, unit: unitOf(x), split: splitText(f.shape.tp, f.shape.replicas, unit, tr), tps: fmtIn(lang, f.tokPerSecPerUser) });
     }
-    if (!p || !p.shape || p.tokPerSecPerUser === null) return tr('chart.note.noFit', { n, unit: unitText });
+    if (!p || !p.shape || p.tokPerSecPerUser === null) return tr('chart.note.noFit', { n, unit: unitOf(x) });
     const why = p.why ? tr('chart.note.why', { why: tr(WHY[p.why]) }) : '';
-    return tr('chart.note.cards', { n, unit: unitText, split: splitText(p.shape.tp, p.shape.replicas, unit, tr), tps: fmtIn(lang, p.tokPerSecPerUser) }) + why;
+    return tr('chart.note.cards', { n, unit: unitOf(x), split: splitText(p.shape.tp, p.shape.replicas, unit, tr), tps: fmtIn(lang, p.tokPerSecPerUser) }) + why;
   };
   const pick = (gpus: number) => {
     const p = at(gpus);
@@ -146,10 +146,12 @@ function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: 
     title: tr(unit === 'machine' ? 'wb.chart.cards.machine' : 'wb.chart.cards.gpu'),
     lo: fmtIn(lang, Math.min(...xs)),
     hi: fmtIn(lang, Math.max(...xs)),
-    unit: unitText,
+    unit: unitOf(Math.max(...xs)),
     n: fmtIn(lang, row.count),
+    nUnit: unitOf(row.count),
     tps: fmtIn(lang, usage.tokPerSecPerUser),
     s: fmtIn(lang, row.suggested),
+    sUnit: unitOf(row.suggested),
   });
   return (
     <SpeedChart
@@ -170,7 +172,7 @@ function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: 
 }
 
 /** 「人數 → 每人速度」 over core's speedCurve (1 … max(maxConcurrent, users)); points past the limit carry `why` (dashed). */
-function UsersChart({ row, bench, s, unitText, zones, target }: ChartCtx): JSX.Element | null {
+function UsersChart({ row, bench, s, unitOf, zones, target }: ChartCtx): JSX.Element | null {
   const tr = useT();
   const lang = useLang();
   const { perf, userCurve } = bench;
@@ -194,7 +196,7 @@ function UsersChart({ row, bench, s, unitText, zones, target }: ChartCtx): JSX.E
     <SpeedChart
       label={label}
       points={userCurve.points.map((p) => ({ x: p.users, y: p.tokPerSecPerUser, miss: p.why !== null }))}
-      xTitle={tr('chart.x.users', { n: fmtIn(lang, row.count), unit: unitText })}
+      xTitle={tr('chart.x.users', { n: fmtIn(lang, row.count), unit: unitOf(row.count) })}
       yTitle={tr('chart.y')}
       zones={zones}
       target={target}
@@ -265,7 +267,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const shape = perf.shape ?? usage.shape;
   const info = rowInfo(b, s, row.row);
   const { message } = AntApp.useApp();
-  const unitText = tr(info.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
+  const unitOf = (n: number) => unitWord(tr, info.unit, fmtIn(lang, n));
   const target = speedTarget(b, s);
   const demoText = b.workloads[workloadId(s.workload)]!.demoText;
   const tdp = info.hardware === null ? undefined : b.hardware[info.hardware]?.tdpW;
@@ -273,7 +275,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const zones = speedZones(b, tr);
   // A custom speed target that is not a zone boundary gets its own line.
   const chartTarget = typeof s.speed !== 'string' && !zones.some((z) => z.lo === target.min) ? { y: target.min, label: `${tr('chart.mark.target')} ${fmtIn(lang, target.min)}` } : null;
-  const chart: ChartCtx = { row, bench, s, unit: info.unit, unitText, zones, target: chartTarget };
+  const chart: ChartCtx = { row, bench, s, unit: info.unit, unitOf, zones, target: chartTarget };
 
   const pin = () => {
     if (s.pins.length >= PINS_MAX) {
@@ -310,7 +312,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
     <div className="wb" data-testid="workbench">
       <div className="wb-top">
         <Typography.Text type="secondary" style={small}>
-          {tr('wb.summary', { n: fmtIn(lang, row.count), unit: unitText, name: info.name, users: fmtIn(lang, s.users) })}
+          {tr('wb.summary', { n: fmtIn(lang, row.count), unit: unitOf(row.count), name: info.name, users: fmtIn(lang, s.users) })}
           <SplitText tp={shape.tp} replicas={shape.replicas} unit={info.unit} />
         </Typography.Text>
         <Button size="small" icon={<PushpinOutlined />} onClick={pin}>
@@ -374,7 +376,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
           <Heading>
             {tr('wb.chart.users')}{' '}
             <Typography.Text type="secondary" style={{ ...small, fontWeight: 400 }}>
-              {tr('wb.chart.users.hint', { n: fmtIn(lang, row.count), unit: unitText })}
+              {tr('wb.chart.users.hint', { n: fmtIn(lang, row.count), unit: unitOf(row.count) })}
             </Typography.Text>
           </Heading>
           <div data-testid="chart-users" className="wb-chart">

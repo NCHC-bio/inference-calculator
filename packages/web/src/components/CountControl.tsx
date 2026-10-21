@@ -1,6 +1,6 @@
 import { Button, InputNumber, Space, Typography } from 'antd';
 import { useId, useRef, useState, type JSX } from 'react';
-import { useLang, useT } from '../i18n';
+import { unitWord, useLang, useT } from '../i18n';
 import { useTween } from '../motion/useTween';
 import { COUNT_MAX } from '../state/state';
 
@@ -75,7 +75,7 @@ export function CountControl({ unit, count, adjusted, onSuggest, onSet, label }:
             setEditing(false);
           }}
         />
-        <Space.Addon>{tr(unit === 'machine' ? 'unit.machine' : 'unit.gpu')}</Space.Addon>
+        <Space.Addon>{unitWord(tr, unit, editing ? (draft ?? count) : shown)}</Space.Addon>
       </Space.Compact>
       {invalid && (
         <Typography.Text type="danger" id={hintId} style={{ fontSize: 12 }}>

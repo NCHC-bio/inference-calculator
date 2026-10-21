@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useCalc } from '../state/store';
 import { t, type Lang, type TFn } from './t';
 
-export { t, tZh, type Lang, type MsgKey, type TFn } from './t';
+export { t, tZh, unitWord, type Lang, type MsgKey, type TFn } from './t';
 
 /** Single source of the active language: the central store (seeded from the `lang` URL param). */
 export function useLang(): Lang {

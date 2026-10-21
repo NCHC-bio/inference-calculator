@@ -3,7 +3,7 @@ import type { Bundle } from '@nchc/schema';
 import { Button, Space, Tag, theme, Typography } from 'antd';
 import type { JSX } from 'react';
 import type { OkRow } from '../compute/compute';
-import { useLang, useT } from '../i18n';
+import { unitWord, useLang, useT } from '../i18n';
 import type { TFn } from '../i18n/t';
 import { useTween } from '../motion/useTween';
 import { customIndex, type CalcState, type RowKey, type SubLabel } from '../state/state';
@@ -117,7 +117,6 @@ function SpeedLine({ r, unit }: { r: OkRow; unit: 'gpu' | 'machine' }) {
   const { perf, suggestedPerf } = r;
   const tps = useTween(perf.usage?.tokPerSecPerUser ?? 0);
   const ttft = useTween(perf.usage?.ttftSec ?? 0);
-  const unitText = tr(unit === 'machine' ? 'unit.machine' : 'unit.gpu');
   return (
     <Typography.Text data-testid="speed-line" style={{ fontSize: 13 }}>
       {perf.ok ? <CheckCircleOutlined style={{ color: token.colorSuccess }} /> : <CloseCircleOutlined style={{ color: token.colorError }} />}{' '}
@@ -125,7 +124,7 @@ function SpeedLine({ r, unit }: { r: OkRow; unit: 'gpu' | 'machine' }) {
       {!perf.ok && perf.why && <Typography.Text type="danger">{tr('row.speedWhy', { why: tr(WHY[perf.why]) })}</Typography.Text>}
       {suggestedPerf.usage && (
         <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 12 }}>
-          {tr('row.suggested', { n: fmt(lang, r.suggested), unit: unitText, tps: fmt(lang, suggestedPerf.usage.tokPerSecPerUser) })}
+          {tr('row.suggested', { n: fmt(lang, r.suggested), unit: unitWord(tr, unit, r.suggested), tps: fmt(lang, suggestedPerf.usage.tokPerSecPerUser) })}
         </Typography.Text>
       )}
     </Typography.Text>

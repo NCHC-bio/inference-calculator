@@ -1,6 +1,6 @@
 import type { BasisItem, RequirementResult } from '@nchc/core';
 import type { Bundle, Source } from '@nchc/schema';
-import type { TFn } from '../i18n/t';
+import { unitWord, type TFn } from '../i18n/t';
 import type { CalcState, CustomModel } from '../state/state';
 import { fmt } from './answerText';
 import { topEstimates, uniqueByPath } from './weak';
@@ -56,7 +56,6 @@ export function citeText(b: Bundle, s: CalcState, result: RequirementResult, tr:
     head = tr('cite.none', vars);
   } else {
     const plat = b.platforms[row.platform]!;
-    const unit = tr(plat.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
     const { tps, ttft } = speedOf(b, s);
     head = tr('cite.body', {
       ...vars,
@@ -65,8 +64,8 @@ export function citeText(b: Bundle, s: CalcState, result: RequirementResult, tr:
       name: plat.name,
       sub: plat.sub,
       gpus: n(row.expected.gpus),
-      unit,
-      cons: row.conservative.ok ? tr('cite.cons', { gpus: n(row.conservative.gpus), unit }) : tr('cite.consNone'),
+      unit: unitWord(tr, plat.unit, n(row.expected.gpus)),
+      cons: row.conservative.ok ? tr('cite.cons', { gpus: n(row.conservative.gpus), unit: unitWord(tr, plat.unit, n(row.conservative.gpus)) }) : tr('cite.consNone'),
     });
   }
   // A custom workload or speed target is part of what was computed: its numbers travel with the text, marked 自訂

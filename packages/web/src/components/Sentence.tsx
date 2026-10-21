@@ -3,7 +3,7 @@ import { Button, InputNumber, Popover, Space, Tag, Typography } from 'antd';
 import { useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import { getBundle } from '../bundle';
 import { useDeferredState, useModelNotes, type ModelNotesView } from '../compute/useResults';
-import { useLang, useT, type Lang, type TFn } from '../i18n';
+import { unitWord, useLang, useT, type Lang, type TFn } from '../i18n';
 import { CUSTOM_MODEL_ID, USERS_MAX, quantChoices, workloadId, type Action, type CalcState } from '../state/state';
 import { useCalc } from '../state/store';
 import { fmt } from './answerText';
@@ -134,7 +134,7 @@ function modelDesc(view: ModelNotesView | null, id: string, s: CalcState, tr: TF
   if (note.kind === 'platforms') return note.ok === 0 ? tr('model.runsNone') : tr('model.runsOn', { ok: note.ok, total: note.total });
   if (!view.row) return undefined;
   const info = rowInfo(getBundle(), s, view.row.row);
-  const where = { count: fmt(lang, view.row.count), unit: tr(info.unit === 'machine' ? 'unit.machine' : 'unit.gpu'), name: info.name };
+  const where = { count: fmt(lang, view.row.count), unit: unitWord(tr, info.unit, view.row.count), name: info.name };
   if (note.kind === 'noFit') return tr('model.noFit', where);
   return tr('model.onRow', { ...where, tps: fmt(lang, note.tps) }) + (note.ok ? '' : tr('model.onRowMiss'));
 }

@@ -1,7 +1,7 @@
 import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, PushpinOutlined } from '@ant-design/icons';
 import { Alert, Button, Card, Flex, Table, Tag, theme } from 'antd';
 import { useRef, type JSX } from 'react';
-import { useLang, useT } from '../i18n';
+import { unitWord, useLang, useT } from '../i18n';
 import type { Pin } from '../state/state';
 import { useCalc } from '../state/store';
 import { STATUS_COLOR } from './BasisModal';
@@ -77,7 +77,7 @@ export function CompareTable(): JSX.Element {
                   </Flex>
                 ),
               },
-              { title: tr('compare.count'), key: 'count', render: (_, p) => `${fmt(lang, p.count)} ${tr(p.unit === 'machine' ? 'unit.machine' : 'unit.gpu')}` },
+              { title: tr('compare.count'), key: 'count', render: (_, p) => `${fmt(lang, p.count)} ${unitWord(tr, p.unit, fmt(lang, p.count))}` },
               { title: tr('compare.model'), key: 'model', render: (_, p) => (p.model.quant ? withQuant(p.model.name, p.model.quant, lang) : p.model.name) },
               { title: tr('compare.users'), dataIndex: 'users', render: (v: number) => fmt(lang, v) },
               { title: tr('compare.tps'), dataIndex: 'tps', render: (v: number | null) => num(v) },
