@@ -148,7 +148,7 @@ test('the best row expands to four usage bars and a typing demo that starts in t
   await row.getByTestId('row-name').click();
   const started = Date.now();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const detail = row.getByTestId('row-detail');
+  const detail = row.getByTestId('workbench');
   await expect(detail.getByTestId('usage-bar')).toHaveCount(4);
   for (const key of ['usage.mem', 'usage.bw', 'usage.compute', 'usage.ttft'] as const) {
     await expect(detail.getByText(tZh(key), { exact: true })).toBeVisible();
