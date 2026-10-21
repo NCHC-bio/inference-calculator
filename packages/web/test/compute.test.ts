@@ -31,10 +31,6 @@ describe('compute layer', () => {
       estimateRequirements(b, { model: s0.model, quant: s0.quant, workload: s0.workload, speed: s0.speed, users: s0.users }),
     );
   });
-  it('have mode returns estimateCapacity for havePlatform x haveCount', () => {
-    const v = computeView(b, { ...s0, mode: 'have' });
-    expect(v.kind === 'have' && v.result.expected.n).toBeGreaterThan(0);
-  });
   it('CoreInputError -> error view, not a throw', () => {
     expect(computeView(b, { ...s0, users: 0 }).kind).toBe('error');
   });

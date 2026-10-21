@@ -111,9 +111,4 @@ describe('PlatformList', () => {
     await userEvent.click(tag);
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(spark.expected.ok ? '' : spark.expected.detail));
   });
-  it('have mode shows no platform rows', async () => {
-    render(<App />);
-    await userEvent.click(screen.getByText('我已有的能撐多少'));
-    await waitFor(() => expect(screen.queryAllByTestId('platform-row')).toHaveLength(0));
-  });
 });

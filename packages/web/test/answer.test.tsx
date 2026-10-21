@@ -6,10 +6,10 @@ import type { RequirementResult } from '@nchc/core';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { needAnswerText } from '../src/components/AnswerLine';
-import { computeView, type HaveView, type NeedView } from '../src/compute/compute';
+import { computeView, type NeedView } from '../src/compute/compute';
 import { tZh } from '../src/i18n';
 import { decodeUrl } from '../src/state/url';
-import { defaultState } from '../src/state/state';
+import { defaultState, workloadId } from '../src/state/state';
 
 // Review Focus 1. The brief's `?m=mistral-medium-3.5-128b&q=bf16&w=assist&n=100000` is feasible in the current bundle
 // (mistral-medium only offers fp8; nano4-gb200 runs it at every n up to 1e6, and from ~3e6 core rejects the replica
@@ -41,7 +41,7 @@ describe('AnswerLine', () => {
   });
   it('basis drawer opens with the concurrency reading of the workload kind (spec §8.3.3)', async () => {
     render(<App />); await userEvent.click(screen.getByRole('button', { name: /依據/ }));
-    const b = getBundle(); const kind = b.workloads[defaultState(b).workload]!.kind;
+    const b = getBundle(); const kind = b.workloads[workloadId(defaultState(b).workload)]!.kind;
     const rule = kind === 'chat' ? b.concurrency.chatRule : b.concurrency.agentRule;
     expect(screen.getByTestId('concurrency-reading')).toHaveTextContent(rule.value);
   });
@@ -71,23 +71,6 @@ describe('AnswerLine', () => {
   });
   it('cite button is present but disabled', () => {
     render(<App />); expect(screen.getByRole('button', { name: /引用/ })).toBeDisabled();
-  });
-  it('have mode: 同時最多 N 人 and 保守 N 人 from core', () => {
-    history.replaceState(null, '', '/?mode=have');
-    const b = getBundle(); const r = (computeView(b, decodeUrl(b, '?mode=have')) as HaveView).result;
-    render(<App />);
-    expect(r.expected.n).toBeGreaterThan(0);
-    expect(screen.getByTestId('answer-main')).toHaveTextContent(`同時最多 ${r.expected.n.toLocaleString('zh-TW')} 人`);
-    expect(screen.getByTestId('answer-sub')).toHaveTextContent(`保守 ${r.conservative.n.toLocaleString('zh-TW')} 人`);
-  });
-  it('have mode with nobody fitting: 不可行 and core detail', () => {
-    const url = '?mode=have&m=olmo-2-0325-32b&q=bf16&w=assist';
-    const b = getBundle(); const r = (computeView(b, decodeUrl(b, url)) as HaveView).result;
-    expect(r.expected.n).toBe(0);
-    history.replaceState(null, '', '/' + url);
-    render(<App />);
-    expect(screen.getByTestId('answer-main')).toHaveTextContent('不可行');
-    expect(screen.getByTestId('answer-sub')).toHaveTextContent(r.detail!);
   });
 });
 

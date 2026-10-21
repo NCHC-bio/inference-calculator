@@ -1,14 +1,14 @@
 import type zhTW from './zh-TW';
 
 const en = {
-  'mode.need': 'How much do I need',
-  'mode.have': 'How much can what I have handle',
+  'app.title': 'NCHC Inference Calculator',
+  'aria.lang': 'Language',
+  'lang.zhTW': '中文',
+  'lang.en': 'English',
   'footer.dataVersion': 'Data version {version}',
   'app.error': 'Something went wrong. Change the inputs or reload the page.',
   'sentence.users.pre': 'Up to',
   'sentence.users.post': 'people use it at the same time,',
-  'sentence.have.pre': 'I have',
-  'sentence.have.post': ',',
   'sentence.workload.pre': 'doing',
   'sentence.workload.post': 'tasks,',
   'sentence.model.pre': 'with the model',
@@ -20,8 +20,6 @@ const en = {
   'unit.gpu': 'GPUs',
   'unit.machine': 'machines',
   'aria.users': 'Concurrent users',
-  'aria.haveCount': 'Count',
-  'aria.platform': 'Platform',
   'aria.workload': 'Task',
   'aria.model': 'Model',
   'aria.quant': 'Precision',

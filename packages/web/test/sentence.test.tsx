@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { shown } from './helpers';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
-import { HAVE_MAX, USERS_MAX } from '../src/state/state';
+import { USERS_MAX } from '../src/state/state';
 import { setMedia } from './setup';
 
 // antd 6 puts aria-label on the combobox <input>; the displayed selection is the surrounding .ant-select-content.
@@ -44,26 +44,6 @@ describe('Sentence', () => {
     expect(n).not.toHaveAttribute('aria-invalid', 'true');
     expect(screen.queryByText('請輸入 1–10,000,000 的整數')).toBeNull();
   });
-  it('have count: the hint names its own range (1–100,000)', async () => {
-    history.replaceState(null, '', '/?mode=have');
-    render(<App />); const u = userEvent.setup(); const n = screen.getByLabelText('數量');
-    await u.clear(n); await u.type(n, '0');
-    expect(n).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByText('請輸入 1–100,000 的整數')).toBeVisible();
-  });
-  it('platform options carry no description that only repeats their label (final review)', async () => {
-    history.replaceState(null, '', '/?mode=have');
-    setMedia({ hoverNone: true }); render(<App />); const u = userEvent.setup();
-    await u.click(screen.getByLabelText('平台'));
-    const p = getBundle().platforms['nano4-h200']!;
-    await waitFor(() => expect(screen.getAllByText(`${p.name} ${p.sub}`).length).toBeGreaterThan(0));
-    expect(screen.queryByText(`${p.name}（${p.sub}）`)).toBeNull();
-  });
-  it('have mode starts with 我有 … and a platform select', async () => {
-    render(<App />); await userEvent.click(screen.getByText('我已有的能撐多少'));
-    expect(screen.getByTestId('sentence').textContent).toMatch(/^我有/);
-    expect(screen.getByLabelText('平台')).toBeInTheDocument();
-  });
   it('touch devices show option descriptions inline', async () => {
     setMedia({ hoverNone: true }); render(<App />);
     await userEvent.click(screen.getByLabelText('工作'));
@@ -96,18 +76,6 @@ describe('Sentence', () => {
     await waitFor(() => expect(screen.getAllByText(/^可在 \d+ \/ \d+ 種機台上執行$|^目前設定下所有機台都跑不動$/)).toHaveLength(Object.keys(getBundle().models).length));
     expect(screen.getByTestId('sentence')).toBeInTheDocument();
   });
-  it('have mode: unit word follows the platform unit (張 for GPUs, 台 for machines)', async () => {
-    history.replaceState(null, '', '/?mode=have');
-    render(<App />); const u = userEvent.setup();
-    const text = () => screen.getByTestId('sentence').textContent!;
-    expect(getBundle().platforms['nano4-h200']!.unit).toBe('gpu');
-    expect(text()).toContain('張');
-    const mac = Object.values(getBundle().platforms).find((p) => p.unit === 'machine')!;
-    await u.click(screen.getByLabelText('平台'));
-    await u.click(await screen.findByTitle(`${mac.name} ${mac.sub}`));
-    expect(text()).toContain('台');
-    expect(text()).not.toContain('張');
-  });
   it('quant options describe the quantization (its description, not its name again)', async () => {
     setMedia({ hoverNone: true }); render(<App />);
     await userEvent.click(screen.getByLabelText('模型精度'));
@@ -118,7 +86,5 @@ describe('Sentence', () => {
     render(<App />);
     expect(screen.getByLabelText('同時人數')).toHaveAttribute('aria-valuemin', '1');
     expect(screen.getByLabelText('同時人數')).toHaveAttribute('aria-valuemax', String(USERS_MAX));
-    await userEvent.click(screen.getByText('我已有的能撐多少'));
-    expect(screen.getByLabelText('數量')).toHaveAttribute('aria-valuemax', String(HAVE_MAX));
   });
 });

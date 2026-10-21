@@ -4,7 +4,7 @@ import { useId, useMemo, useState, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useModelFeasibility } from '../compute/useResults';
 import { useLang, useT } from '../i18n';
-import { HAVE_MAX, USERS_MAX } from '../state/state';
+import { USERS_MAX, workloadId } from '../state/state';
 import { useCalc } from '../state/store';
 import { OptionSelect, type Opt } from './OptionSelect';
 
@@ -84,11 +84,6 @@ export function Sentence(): JSX.Element {
 
   const workloads = useMemo(() => ofRecord(b.workloads, (w) => w.description), [b]);
   const speeds = useMemo(() => ofRecord(b.speedPresets, (p) => p.description), [b]);
-  // No description: the label already is name + sub, and a line repeating it adds nothing (final review).
-  const platforms = useMemo<Opt[]>(
-    () => Object.entries(b.platforms).map(([value, p]) => ({ value, label: p.sub ? `${p.name} ${p.sub}` : p.name })),
-    [b],
-  );
   const models = useMemo<Opt[]>(
     () =>
       Object.entries(b.models).map(([value, m]) => {
@@ -107,46 +102,23 @@ export function Sentence(): JSX.Element {
     [b, s.model],
   );
 
-  const unit = b.platforms[s.havePlatform]!.unit === 'machine' ? tr('unit.machine') : tr('unit.gpu');
   return (
     <div data-testid="sentence" style={{ fontSize: 20, lineHeight: 2.4, marginTop: 16 }}>
-      {s.mode === 'need' ? (
-        <span>
-          {tr('sentence.users.pre')}{' '}
-          <CountInput
-            value={s.users}
-            max={USERS_MAX}
-            width={120}
-            ariaLabel={tr('aria.users')}
-            onChange={(value) => dispatch({ type: 'users', value })}
-          />{' '}
-          {tr('sentence.users.post')}
-        </span>
-      ) : (
-        <span>
-          {tr('sentence.have.pre')}{' '}
-          <CountInput
-            value={s.haveCount}
-            max={HAVE_MAX}
-            width={90}
-            ariaLabel={tr('aria.haveCount')}
-            onChange={(value) => dispatch({ type: 'haveCount', value })}
-          />{' '}
-          {unit}{' '}
-          <OptionSelect
-            value={s.havePlatform}
-            options={platforms}
-            width={150}
-            ariaLabel={tr('aria.platform')}
-            onChange={(id) => dispatch({ type: 'havePlatform', id })}
-          />
-          {tr('sentence.have.post')}
-        </span>
-      )}{' '}
+      <span>
+        {tr('sentence.users.pre')}{' '}
+        <CountInput
+          value={s.users}
+          max={USERS_MAX}
+          width={120}
+          ariaLabel={tr('aria.users')}
+          onChange={(value) => dispatch({ type: 'users', value })}
+        />{' '}
+        {tr('sentence.users.post')}
+      </span>{' '}
       <span>
         {tr('sentence.workload.pre')}{' '}
         <OptionSelect
-          value={s.workload}
+          value={workloadId(s.workload)}
           options={workloads}
           width={130}
           ariaLabel={tr('aria.workload')}
@@ -164,7 +136,7 @@ export function Sentence(): JSX.Element {
           ariaLabel={tr('aria.model')}
           onChange={(id) => dispatch({ type: 'model', id })}
           onOpenChange={setModelOpen}
-          popupHeader={<TierNote workload={s.workload} />}
+          popupHeader={<TierNote workload={workloadId(s.workload)} />}
         />
         {tr('sentence.model.post')}
       </span>{' '}
@@ -182,7 +154,7 @@ export function Sentence(): JSX.Element {
       <span>
         {tr('sentence.speed.pre')}{' '}
         <OptionSelect
-          value={s.speed}
+          value={typeof s.speed === 'string' ? s.speed : ''}
           options={speeds}
           width={100}
           ariaLabel={tr('aria.speed')}

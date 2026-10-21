@@ -1,5 +1,5 @@
 import { CopyOutlined, InfoCircleOutlined } from '@ant-design/icons';
-import type { BasisItem, CapacityResult, RequirementResult } from '@nchc/core';
+import type { BasisItem, RequirementResult } from '@nchc/core';
 import { Alert, Button, Flex, Tag, theme, Tooltip, Typography } from 'antd';
 import type { JSX, ReactNode } from 'react';
 import { getBundle } from '../bundle';
@@ -27,22 +27,6 @@ function needShown(r: RequirementResult, lang: Lang, tr: TFn, primary: string, e
       </>
     ),
     sub: p.sub,
-  };
-}
-
-function haveShown(r: CapacityResult, lang: Lang, tr: TFn, primary: string, error: string): Shown {
-  if (r.expected.n === 0) {
-    return { main: <span style={{ color: error }}>{tr('answer.have.none')}</span>, sub: r.detail ?? '' };
-  }
-  const n = fmt(lang, r.expected.n);
-  return {
-    main: <span style={{ color: primary }}>{tr(r.saturated ? 'answer.have.saturated' : 'answer.have.main', { n })}</span>,
-    sub: (
-      <>
-        {tr('answer.have.sub', { n: fmt(lang, r.conservative.n) })}
-        {r.saturated && r.saturatedNote && <span style={{ display: 'block' }}>{r.saturatedNote}</span>}
-      </>
-    ),
   };
 }
 
@@ -74,11 +58,8 @@ export function AnswerLine(): JSX.Element {
     return <Alert type="error" showIcon title={view.message} style={{ marginTop: 12 }} data-testid="answer-error" />;
   }
   const r = view.result;
-  const shown =
-    view.kind === 'need'
-      ? needShown(view.result, lang, tr, token.colorPrimary, token.colorError)
-      : haveShown(view.result, lang, tr, token.colorPrimary, token.colorError);
-  const openBasis = () => dispatch({ type: 'basis', open: true });
+  const shown = needShown(view.result, lang, tr, token.colorPrimary, token.colorError);
+  const openBasis = () => dispatch({ type: 'dialog', id: 'basis' });
   return (
     <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 14, marginTop: 6 }}>
       <Flex align="center" gap={12} wrap="wrap">

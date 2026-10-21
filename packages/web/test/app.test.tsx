@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { App, ErrorBoundary } from '../src/App';
 import { renderStore } from './helpers';
@@ -7,17 +8,25 @@ import { t } from '../src/i18n';
 import { setMedia } from './setup';
 
 describe('App', () => {
-  it('renders the mode switch and a data version from the bundle', () => {
+  it('renders the title, the language switch, no mode switch, and a data version from the bundle', () => {
     render(<App />);
-    expect(screen.getByText('我需要多少')).toBeInTheDocument();
-    expect(screen.getByText('我已有的能撐多少')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('國網推論算力計算機');
+    expect(screen.getByText('中文')).toBeInTheDocument();
+    expect(screen.getByText('English')).toBeInTheDocument();
+    expect(screen.queryByText('我需要多少')).toBeNull();
+    expect(screen.queryByText('我已有的能撐多少')).toBeNull();
     expect(screen.getByText(new RegExp(getBundle().meta.dataVersion))).toBeInTheDocument();
   });
   it('?lang=en switches UI copy', () => {
     history.replaceState(null, '', '/?lang=en');
     render(<App />);
-    expect(screen.getByText(t('en', 'mode.need'))).toBeInTheDocument();
-    expect(t('en', 'mode.need')).toBe('How much do I need');
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(t('en', 'app.title'));
+  });
+  it('the language switch changes the copy and the URL', async () => {
+    render(<App />);
+    await userEvent.click(screen.getByText('English'));
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('NCHC Inference Calculator');
+    expect(new URLSearchParams(location.search).get('lang')).toBe('en');
   });
 });
 

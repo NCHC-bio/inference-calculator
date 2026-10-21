@@ -7,13 +7,13 @@ type Feasibility = Record<string, { ok: number; total: number }>;
 
 export function useView(): View {
   const [s] = useCalc();
-  const { mode, users, haveCount, havePlatform, workload, model, quant, speed } = s;
-  const key = { mode, users, haveCount, havePlatform, workload, model, quant, speed };
+  const { users, workload, model, quant, speed, customModel } = s;
+  const key = { users, workload, model, quant, speed, customModel };
   const deferred = useDeferredValue(key);
   return useMemo(
     () => computeView(getBundle(), { ...s, ...deferred }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [deferred.mode, deferred.users, deferred.haveCount, deferred.havePlatform, deferred.workload, deferred.model, deferred.quant, deferred.speed],
+    [deferred.users, deferred.workload, deferred.model, deferred.quant, deferred.speed, deferred.customModel],
   );
 }
 

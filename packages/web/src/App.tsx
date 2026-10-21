@@ -1,17 +1,15 @@
-import { Alert, App as AntApp, ConfigProvider, Segmented, theme } from 'antd';
+import { Alert, App as AntApp, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { getBundle } from './bundle';
-import { useLang, useT } from './i18n';
+import { useLang, useT, type Lang } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
-import type { Mode } from './state/state';
 import { AnswerLine } from './components/AnswerLine';
-import { HaveResult } from './components/HaveResult';
 import { PlatformList } from './components/PlatformList';
 import { BasisDrawer } from './components/BasisDrawer';
 import { Sentence } from './components/Sentence';
-import { antdTheme, useDarkMode } from './theme';
+import { antdTheme, useDarkMode, useReducedMotion } from './theme';
 
 /** antd does not paint body: sync page background, text colour and color-scheme from the theme tokens. */
 function PageTheme({ dark }: { dark: boolean }) {
@@ -63,22 +61,37 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: u
   }
 }
 
-function Shell() {
+/** Title and the language switch (demo v8 header). */
+function Header() {
   const tr = useT();
-  const [{ mode }, dispatch] = useCalc();
+  const [{ lang }, dispatch] = useCalc();
   return (
-    <main style={{ maxWidth: 960, margin: '0 auto', padding: 16 }}>
-      <Segmented<Mode>
-        value={mode}
-        onChange={(m) => dispatch({ type: 'mode', mode: m })}
+    <Flex component="header" align="center" justify="space-between" gap={8} wrap="wrap" style={{ marginBottom: 8 }}>
+      <Typography.Title level={1} style={{ fontSize: 16, margin: 0 }}>
+        {tr('app.title')}
+      </Typography.Title>
+      <Segmented<Lang>
+        size="small"
+        aria-label={tr('aria.lang')}
+        value={lang}
+        onChange={(l) => dispatch({ type: 'lang', lang: l })}
         options={[
-          { value: 'need', label: tr('mode.need') },
-          { value: 'have', label: tr('mode.have') },
+          { value: 'zh-TW', label: tr('lang.zhTW') },
+          { value: 'en', label: tr('lang.en') },
         ]}
       />
+    </Flex>
+  );
+}
+
+function Shell() {
+  const tr = useT();
+  return (
+    <main style={{ maxWidth: 980, margin: '0 auto', padding: 16 }}>
+      <Header />
       <Sentence />
       <AnswerLine />
-      {mode === 'need' ? <PlatformList /> : <HaveResult />}
+      <PlatformList />
       <BasisDrawer />
       <footer style={{ marginTop: 24, opacity: 0.65 }}>
         {tr('footer.dataVersion', { version: getBundle().meta.dataVersion })}
@@ -89,10 +102,11 @@ function Shell() {
 
 function ThemedApp() {
   const dark = useDarkMode();
+  const reduced = useReducedMotion();
   const lang = useLang();
   return (
     <ConfigProvider
-      theme={antdTheme(dark)}
+      theme={antdTheme(dark, reduced)}
       button={{ autoInsertSpace: false }}
       locale={lang === 'en' ? enUS : zhTWLocale}
     >

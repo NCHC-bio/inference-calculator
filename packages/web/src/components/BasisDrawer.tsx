@@ -5,6 +5,7 @@ import type { JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useView } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
+import { workloadId } from '../state/state';
 import { useCalc } from '../state/store';
 
 /** The one status → antd preset colour mapping (answer-line tags use it too). */
@@ -100,18 +101,18 @@ function ConcurrencyReading({ workload, tr }: { workload: string; tr: TFn }) {
 export function BasisDrawer(): JSX.Element {
   const tr = useT();
   const lang = useLang();
-  const [{ basisOpen, workload }, dispatch] = useCalc();
+  const [{ dialog, workload }, dispatch] = useCalc();
   const view = useView();
   const items = view.kind === 'error' ? [] : uniqueByPath(view.result.basis);
   return (
     <Drawer
       title={tr('basis.title')}
-      open={basisOpen}
-      onClose={() => dispatch({ type: 'basis', open: false })}
+      open={dialog === 'basis'}
+      onClose={() => dispatch({ type: 'dialog', id: null })}
       size={520}
     >
       <Flex vertical gap="middle">
-        <ConcurrencyReading workload={workload} tr={tr} />
+        <ConcurrencyReading workload={workloadId(workload)} tr={tr} />
         <List
           size="small"
           dataSource={items}

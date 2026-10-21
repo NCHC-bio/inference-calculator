@@ -1,10 +1,17 @@
-import { quantOptions } from '@nchc/core';
+import { quantOptions, type CustomPlatformInput } from '@nchc/core';
 import { describe, expect, it } from 'vitest';
 import { getBundle } from '../src/bundle';
-import { defaultState, reduce } from '../src/state/state';
+import { CUSTOM_PLATFORMS_MAX, defaultState, reduce, type Action, type CalcState, type Pin } from '../src/state/state';
 
 const b = getBundle();
 const s0 = defaultState(b);
+
+// Test fixtures (not catalog values).
+const gpu = (name: string): CustomPlatformInput => ({ name, unit: 'gpu', gpusPerNode: 8, memGB: 80, memBwTBs: 3, tflops: 900, engine: 'vllm' });
+const manual = { name: 'My 8B', totalParamsB: 8, layers: 32, heads: 32, kvHeads: 8, headDim: 128, hidden: 4096 };
+const pin: Omit<Pin, 'id'> = { platform: 'H200', count: '8', model: 'M', users: 15, tps: 30, ttft: 1, max: 40, kw: null };
+
+const run = (s: CalcState, ...as: Action[]) => as.reduce((x, a) => reduce(b, x, a), s);
 
 describe('reduce', () => {
   it('each select changes only its own field (spec §8.3.3 demo 缺陷)', () => {
@@ -21,27 +28,99 @@ describe('reduce', () => {
     }
     expect(reduce(b, s0, { type: 'users', value: 200 }).users).toBe(200);
   });
-  it('haveCount: 1..1e5 integers only', () => {
-    for (const v of [null, 0, 1.5, 1e5 + 1]) {
-      expect(reduce(b, s0, { type: 'haveCount', value: v }).haveCount).toBe(s0.haveCount);
-    }
-    expect(reduce(b, s0, { type: 'haveCount', value: 4 }).haveCount).toBe(4);
-  });
   it('model change keeps quant when the new model offers it, else takes its first option', () => {
     const native = reduce(b, s0, { type: 'model', id: 'gpt-oss-120b' });
     expect(native.quant).toBe(quantOptions(b, 'gpt-oss-120b')[0]);
     const kept = reduce(b, s0, { type: 'model', id: 'llama-3.3-70b-instruct-fp8' });
     expect(kept.quant).toBe(s0.quant);
   });
-  it('unknown ids are ignored', () => {
+  it('unknown ids and invalid custom values are ignored', () => {
     expect(reduce(b, s0, { type: 'model', id: 'no-such' })).toEqual(s0);
-    expect(reduce(b, s0, { type: 'havePlatform', id: 'no-such' })).toEqual(s0);
     expect(reduce(b, s0, { type: 'quant', id: 'no-such' })).toEqual(s0);
+    expect(reduce(b, s0, { type: 'workloadCustom', value: { base: 'no-such', inputTokens: 1, outputTokens: 1, cacheHitRate: 0 } })).toEqual(s0);
+    expect(reduce(b, s0, { type: 'workloadCustom', value: { base: 'chat', inputTokens: 1, outputTokens: 0, cacheHitRate: 0 } })).toEqual(s0);
+    expect(reduce(b, s0, { type: 'speedCustom', value: { minTokPerSec: 0, maxTtftSec: 1 } })).toEqual(s0);
+    expect(reduce(b, s0, { type: 'customModel', value: { kind: 'manual', value: { ...manual, layers: 0 } } })).toEqual(s0);
+    expect(reduce(b, s0, { type: 'addPlatform', value: { ...gpu('x'), name: '' } })).toEqual(s0);
   });
-  it('mode, lang, openRow and basis set their own field', () => {
-    expect(reduce(b, s0, { type: 'mode', mode: 'have' }).mode).toBe('have');
+  it('lang, openRow and dialog set their own field', () => {
     expect(reduce(b, s0, { type: 'lang', lang: 'en' }).lang).toBe('en');
-    expect(reduce(b, s0, { type: 'openRow', id: 'nano4-h200' }).openRow).toBe('nano4-h200');
-    expect(reduce(b, s0, { type: 'basis', open: true }).basisOpen).toBe(true);
+    expect(reduce(b, s0, { type: 'openRow', row: 'nano4-h200' }).openRow).toBe('nano4-h200');
+    const d = reduce(b, s0, { type: 'dialog', id: 'basis', basisFilter: 'all' });
+    expect([d.dialog, d.basisFilter]).toEqual(['basis', 'all']);
+    expect(reduce(b, d, { type: 'dialog', id: null }).dialog).toBeNull();
+  });
+  it('a custom model sets model to custom; a catalog model clears it', () => {
+    const c = reduce(b, s0, { type: 'customModel', value: { kind: 'manual', value: manual } });
+    expect(c.model).toBe('custom');
+    expect(c.customModel).toEqual({ kind: 'manual', value: manual });
+    const back = reduce(b, c, { type: 'model', id: 'gpt-oss-120b' });
+    expect([back.model, back.customModel]).toEqual(['gpt-oss-120b', null]);
+  });
+  it('inputs clear overrides', () => {
+    // A model with several quantizations, so a quant change is possible.
+    const multi = Object.keys(b.models).find((id) => quantOptions(b, id).length > 1)!;
+    const sm = reduce(b, s0, { type: 'model', id: multi });
+    const o = reduce(b, sm, { type: 'override', row: 'nano4-h200', value: { gpus: 8 } });
+    expect(o.overrides).toEqual({ 'nano4-h200': { gpus: 8 } });
+    const inputs: Action[] = [
+      { type: 'users', value: 99 },
+      { type: 'workload', id: 'chat' },
+      { type: 'workloadCustom', value: { base: 'chat', inputTokens: 1000, outputTokens: 200, cacheHitRate: 0.5 } },
+      { type: 'model', id: 'gpt-oss-120b' },
+      { type: 'customModel', value: { kind: 'manual', value: manual } },
+      { type: 'quant', id: quantOptions(b, multi).find((q) => q !== sm.quant)! },
+      { type: 'speed', id: 'ok' },
+      { type: 'speedCustom', value: { minTokPerSec: 12, maxTtftSec: 3 } },
+    ];
+    for (const a of inputs) {
+      const next = reduce(b, o, a);
+      expect(next, a.type).not.toBe(o);
+      expect(next.overrides, a.type).toEqual({});
+    }
+  });
+  it('override bounds', () => {
+    for (const value of [{ gpus: 0 }, { gpus: 1.5 }, { gpus: 100001 }, { gpus: 8, tp: 3 }]) {
+      expect(reduce(b, s0, { type: 'override', row: 'nano4-h200', value })).toEqual(s0);
+    }
+    expect(reduce(b, s0, { type: 'override', row: 'no-such', value: { gpus: 8 } })).toEqual(s0);
+    expect(reduce(b, s0, { type: 'override', row: 'custom:0', value: { gpus: 8 } })).toEqual(s0);
+    const ok = reduce(b, s0, { type: 'override', row: 'nano4-h200', value: { gpus: 8, tp: 2 } });
+    expect(ok.overrides).toEqual({ 'nano4-h200': { gpus: 8, tp: 2 } });
+    expect(reduce(b, ok, { type: 'override', row: 'nano4-h200', value: null }).overrides).toEqual({});
+  });
+  it('removing a custom platform reindexes overrides', () => {
+    const s = run(
+      s0,
+      { type: 'addPlatform', value: gpu('A') },
+      { type: 'addPlatform', value: gpu('B') },
+      { type: 'addPlatform', value: gpu('C') },
+      { type: 'override', row: 'custom:0', value: { gpus: 2 } },
+      { type: 'override', row: 'custom:2', value: { gpus: 16, tp: 8 } },
+      { type: 'openRow', row: 'custom:1' },
+    );
+    expect(Object.keys(s.overrides).sort()).toEqual(['custom:0', 'custom:2']);
+    const r = reduce(b, s, { type: 'removePlatform', index: 1 });
+    expect(r.customPlatforms.map((p) => p.name)).toEqual(['A', 'C']);
+    expect(r.overrides).toEqual({ 'custom:0': { gpus: 2 }, 'custom:1': { gpus: 16, tp: 8 } });
+    expect(r.openRow).toBeNull();
+  });
+  it('editPlatform replaces the entry', () => {
+    const s = run(s0, { type: 'addPlatform', value: gpu('A') }, { type: 'editPlatform', index: 0, value: gpu('Z') });
+    expect(s.customPlatforms.map((p) => p.name)).toEqual(['Z']);
+    expect(reduce(b, s, { type: 'editPlatform', index: 3, value: gpu('Q') })).toEqual(s);
+  });
+  it('pins cap at three', () => {
+    const s = run(s0, ...Array.from({ length: 4 }, (): Action => ({ type: 'pin', pin })));
+    expect(s.pins).toHaveLength(3);
+    expect(new Set(s.pins.map((p) => p.id)).size).toBe(3);
+    expect(reduce(b, s, { type: 'unpin', id: s.pins[0]!.id }).pins).toHaveLength(2);
+    expect(reduce(b, s, { type: 'clearPins' }).pins).toEqual([]);
+  });
+  it('addPlatform caps at eight', () => {
+    const s = run(s0, ...Array.from({ length: 9 }, (_, i): Action => ({ type: 'addPlatform', value: gpu(`P${i}`) })));
+    expect(s.customPlatforms).toHaveLength(CUSTOM_PLATFORMS_MAX);
+    expect(CUSTOM_PLATFORMS_MAX).toBe(8);
   });
 });
+
