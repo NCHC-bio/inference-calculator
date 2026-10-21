@@ -107,6 +107,8 @@ export type AccuracyReport = {
   dataVersion: string;
   tolerancePct: typeof TOLERANCE_PCT;
   points: CalibrationResult[];
+  /** Mean / max |errorPct| per platform × metric × role (n ≥ 1 only; order: bundle.platforms, then metric). */
+  byPlatform: PlatformAccuracy[];
   /** Ids of `validate` points outside tolerance (CI warnings, not failures). */
   warnings: string[];
   skipped: SkippedCalibrationPoint[];
@@ -116,12 +118,48 @@ export type AccuracyReport = {
   gapDetails: Array<{ id: string; platforms: string[]; note: string }>;
 };
 
+export type PlatformAccuracy = {
+  platform: string;
+  metric: CalibrationPoint['metric'];
+  role: CalibrationPoint['role'];
+  n: number;
+  meanAbsErrorPct: number;
+  maxAbsErrorPct: number;
+};
+
+/** Per platform × metric × role error summary; points without a finite errorPct are not counted. */
+function summarizeByPlatform(bundle: Bundle, points: CalibrationResult[]): PlatformAccuracy[] {
+  const metrics = Object.keys(TOLERANCE_PCT) as CalibrationPoint['metric'][];
+  const roles: CalibrationPoint['role'][] = ['fit', 'validate'];
+  const out: PlatformAccuracy[] = [];
+  for (const platform of Object.keys(bundle.platforms)) {
+    for (const metric of metrics) {
+      for (const role of roles) {
+        const abs = points
+          .filter((p) => p.platform === platform && p.metric === metric && p.role === role && Number.isFinite(p.errorPct))
+          .map((p) => Math.abs(p.errorPct));
+        if (abs.length === 0) continue;
+        out.push({
+          platform,
+          metric,
+          role,
+          n: abs.length,
+          meanAbsErrorPct: abs.reduce((a, b) => a + b, 0) / abs.length,
+          maxAbsErrorPct: Math.max(...abs),
+        });
+      }
+    }
+  }
+  return out;
+}
+
 export function buildAccuracyReport(bundle: Bundle, points: CalibrationResult[]): AccuracyReport {
   const gapDetails = Object.values(bundle.calibrationGaps).map((g) => ({ ...g, platforms: [...g.platforms] }));
   return {
     dataVersion: bundle.meta.dataVersion,
     tolerancePct: TOLERANCE_PCT,
     points,
+    byPlatform: summarizeByPlatform(bundle, points),
     warnings: points.filter((p) => p.role === 'validate' && !p.withinTolerance).map((p) => p.id),
     skipped: Object.values(bundle.skippedCalibrationPoints),
     gaps: gapDetails.map((g) => g.id),
