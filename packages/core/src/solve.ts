@@ -1,3 +1,8 @@
+/** "TP t，共 t 張卡" (Macs: machines): the memory figures beside it are per replica, not per card or per node. */
+function perReplica(platform: ResolvedPlatform, t: number): string {
+  return `TP ${t}，共 ${t} ${platform.unit === 'machine' ? '台' : '張卡'}`;
+}
+
 /**
  * Deployment solver: legal tensor-parallel sizes, shape feasibility, minimum-GPU solve and
  * capacity search. Allocation unit is the GPU (spec §10.2): a replica uses t GPUs inside one
@@ -502,7 +507,7 @@ export function singleUserWhy(
     const r = platform.replicaFor(tMax, eta);
     return {
       why: 'weights',
-      detail: `模型權重需要 ${GB(ctxWeightBytes(ctx))} GB，${where}（TP ${tMax}）只有 ${GB(r.memBytes * r.memUtil)} GB 可用（跨 node 切分尚未支援）`,
+      detail: `模型權重需要 ${GB(ctxWeightBytes(ctx))} GB，但${where}內最大的一份模型（${perReplica(platform, tMax)}）只有 ${GB(r.memBytes * r.memUtil)} GB 可用（跨 node 切分尚未支援）`,
     };
   }
   if (furthest === 1) {
@@ -514,8 +519,8 @@ export function singleUserWhy(
     return {
       why: 'mem',
       detail: startup
-        ? `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}（TP ${tOne}，可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 vLLM 啟動檢查的 1 人上限（約 ${(kv.upperBound / 1e9).toFixed(1)} GB，sliding window 層以 window − 1 + 進行中的 ${platform.slidingInFlightTokens} 個 token 計，取整到 KV block 後再加 1 個 block），vLLM 啟動時會拒絕（跨 node 切分尚未支援）`
-        : `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}（TP ${tOne}，可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 1 人的上下文（約 ${(Math.max(kv.perSeq + kv.reserve, kv.upperBound) / 1e9).toFixed(1)} GB）（跨 node 切分尚未支援）`,
+        ? `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}內的一份模型（${perReplica(platform, tOne)}，每份可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 vLLM 啟動檢查的 1 人上限（約 ${(kv.upperBound / 1e9).toFixed(1)} GB，sliding window 層以 window − 1 + 進行中的 ${platform.slidingInFlightTokens} 個 token 計，取整到 KV block 後再加 1 個 block），vLLM 啟動時會拒絕（跨 node 切分尚未支援）`
+        : `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}內的一份模型（${perReplica(platform, tOne)}，每份可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 1 人的上下文（約 ${(Math.max(kv.perSeq + kv.reserve, kv.upperBound) / 1e9).toFixed(1)} GB）（跨 node 切分尚未支援）`,
     };
   }
   if (furthest === 2) {

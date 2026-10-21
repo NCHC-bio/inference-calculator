@@ -169,6 +169,7 @@ describe('review focus', () => {
     expect(r).toMatchObject({ ok: false, why: 'weights' });
     if (r.ok) throw new Error('unreachable');
     expect(r.detail).toContain('跨 node 切分尚未支援');
+    expect(r.detail).toContain('最大的一份模型（TP 8，共 8 張卡）只有');
     expect(r.detail).not.toMatch(/NaN/);
   });
   it('legal TP follows vLLM head divisibility', () => {
