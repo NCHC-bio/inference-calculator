@@ -90,6 +90,7 @@ const en = {
   'status.user': 'Custom',
   'platforms.self': 'Self-hosted',
   'platforms.addHardware': "Can't find your hardware? Add hardware",
+  'platforms.addFull': 'At most {n} custom machines',
   'platforms.customSub': '{mem} GB × {gpn} per machine · {engine}',
   'row.suggest': 'Suggested',
   'row.count': 'Count of {name}',

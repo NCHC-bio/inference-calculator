@@ -4,8 +4,10 @@ import { useRef, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useDeferredState, useMain } from '../compute/useResults';
 import { useT } from '../i18n';
+import { CUSTOM_PLATFORMS_MAX } from '../state/state';
 import { useCalc } from '../state/store';
 import { BestMarker } from './BestMarker';
+import { Explain } from './Explain';
 import { CustomActions, RowExtra, RowName, rowInfo, WhyTag } from './PlatformRow';
 import { Workbench } from './Workbench';
 
@@ -77,6 +79,19 @@ export function PlatformList(): JSX.Element | null {
       children: <Workbench row={r} />,
     });
   }
+  const full = current.customPlatforms.length >= CUSTOM_PLATFORMS_MAX;
+  const add = (
+    <Button
+      type="dashed"
+      block
+      disabled={full}
+      icon={<PlusOutlined />}
+      style={{ marginTop: 8, whiteSpace: 'normal', height: 'auto' }}
+      onClick={() => dispatch({ type: 'dialog', id: 'hardware', editingPlatform: null })}
+    >
+      {tr('platforms.addHardware')}
+    </Button>
+  );
   const open = view.rows.find((r) => r.row === current.openRow && r.kind === 'ok')?.row;
 
   return (
@@ -93,15 +108,16 @@ export function PlatformList(): JSX.Element | null {
         onChange={(keys) => dispatch({ type: 'openRow', row: keys[0] ?? null })}
         items={items}
       />
-      <Button
-        type="dashed"
-        block
-        icon={<PlusOutlined />}
-        style={{ marginTop: 8, whiteSpace: 'normal', height: 'auto' }}
-        onClick={() => dispatch({ type: 'dialog', id: 'hardware', editingPlatform: null })}
-      >
-        {tr('platforms.addHardware')}
-      </Button>
+      {full ? (
+        // A disabled button gets no pointer events: the hint hangs on a focusable wrapper (v8 minor 3).
+        <Explain content={<div style={{ maxWidth: 280 }}>{tr('platforms.addFull', { n: CUSTOM_PLATFORMS_MAX })}</div>}>
+          <span data-testid="add-hardware" tabIndex={0} style={{ display: 'block', cursor: 'not-allowed' }}>
+            {add}
+          </span>
+        </Explain>
+      ) : (
+        add
+      )}
     </div>
   );
 }

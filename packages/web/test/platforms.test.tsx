@@ -6,10 +6,10 @@ import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { PlatformList } from '../src/components/PlatformList';
 import { computeMain, type MainView, type OkRow } from '../src/compute/compute';
-import { defaultState, type CalcState } from '../src/state/state';
+import { CUSTOM_PLATFORMS_MAX, defaultState, type CalcState } from '../src/state/state';
 import { useCalc } from '../src/state/store';
 import { decodeUrl, encodeUrl } from '../src/state/url';
-import { renderStore } from './helpers';
+import { renderStore, shown } from './helpers';
 import { setMedia } from './setup';
 
 // mistral-medium only offers fp8, so `q=bf16` falls back to it; its weights still do not fit the 32 GB Mac mini.
@@ -229,6 +229,22 @@ describe('PlatformList', () => {
     await userEvent.click(add);
     expect(latest!.dialog).toBe('hardware');
     expect(latest!.editingPlatform).toBeNull();
+  });
+
+  it('the add-hardware button is disabled at the custom-hardware limit, with a hover hint (v8 minor 3)', async () => {
+    const s: CalcState = { ...defaultState(getBundle()), customPlatforms: Array.from({ length: CUSTOM_PLATFORMS_MAX }, (_, i) => ({ ...CUSTOM, name: `Lab ${i}` })) };
+    visit(s);
+    renderList();
+    const add = screen.getByRole('button', { name: /找不到你的硬體？新增硬體/ });
+    expect(add).toBeDisabled();
+    await userEvent.hover(screen.getByTestId('add-hardware'));
+    await shown(`最多 ${CUSTOM_PLATFORMS_MAX} 台自訂硬體`);
+  });
+
+  it('below the limit the add-hardware button is enabled', () => {
+    visit({ ...defaultState(getBundle()), customPlatforms: [CUSTOM] });
+    renderList();
+    expect(screen.getByRole('button', { name: /找不到你的硬體？新增硬體/ })).toBeEnabled();
   });
 
   it('custom rows have a tag, edit and delete', async () => {

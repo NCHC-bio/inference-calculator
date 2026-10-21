@@ -92,6 +92,7 @@ const zhTW = {
   // Platform rows (spec §8.3.3-4).
   'platforms.self': '自建',
   'platforms.addHardware': '找不到你的硬體？新增硬體',
+  'platforms.addFull': '最多 {n} 台自訂硬體',
   'platforms.customSub': '{mem} GB × {gpn}／台・{engine}',
   'row.suggest': '建議',
   'row.count': '{name} 的數量',
