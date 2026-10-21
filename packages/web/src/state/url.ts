@@ -60,7 +60,7 @@ const parseInt10 = (raw: string | null): number | null =>
 
 /** `rowKey:gpus[:tp]`; null when malformed. */
 function parseOverride(item: string): [string, Override] | null {
-  const m = /^(custom:\d{1,3}|[^:]+):(\d{1,9})(?::(\d{1,9}))?$/.exec(item);
+  const m = /^(custom:(?:0|[1-9]\d{0,2})|[^:]+):(\d{1,9})(?::(\d{1,9}))?$/.exec(item);
   if (!m) return null;
   const v: Override = m[3] === undefined ? { gpus: Number(m[2]) } : { gpus: Number(m[2]), tp: Number(m[3]) };
   return validOverride(v) ? [m[1]!, v] : null;

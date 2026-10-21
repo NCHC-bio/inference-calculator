@@ -85,6 +85,21 @@ describe('reduce', () => {
     }
     expect(reduce(b, s0, { type: 'override', row: 'no-such', value: { gpus: 8 } })).toEqual(s0);
     expect(reduce(b, s0, { type: 'override', row: 'custom:0', value: { gpus: 8 } })).toEqual(s0);
+    for (const row of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(reduce(b, s0, { type: 'override', row, value: { gpus: 8 } }), row).toEqual(s0);
+    }
+    const one = reduce(b, s0, { type: 'addPlatform', value: gpu('A') });
+    expect(reduce(b, one, { type: 'override', row: 'custom:00', value: { gpus: 8 } })).toEqual(one);
+    expect(reduce(b, s0, { type: 'override', row: 'constructor', value: null })).toEqual(s0);
+    for (const base of ['constructor', 'toString', '__proto__']) {
+      expect(reduce(b, s0, { type: 'workloadCustom', value: { base, inputTokens: 1, outputTokens: 1, cacheHitRate: 0 } }), base).toEqual(s0);
+    }
+    for (const id of ['constructor', 'toString', '__proto__']) {
+      expect(reduce(b, s0, { type: 'workload', id })).toEqual(s0);
+      expect(reduce(b, s0, { type: 'speed', id })).toEqual(s0);
+      expect(reduce(b, s0, { type: 'model', id })).toEqual(s0);
+      expect(reduce(b, s0, { type: 'quant', id })).toEqual(s0);
+    }
     const ok = reduce(b, s0, { type: 'override', row: 'nano4-h200', value: { gpus: 8, tp: 2 } });
     expect(ok.overrides).toEqual({ 'nano4-h200': { gpus: 8, tp: 2 } });
     expect(reduce(b, ok, { type: 'override', row: 'nano4-h200', value: null }).overrides).toEqual({});

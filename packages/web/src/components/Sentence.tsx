@@ -1,10 +1,9 @@
-import { quantOptions } from '@nchc/core';
 import { InputNumber, Tag, Typography } from 'antd';
 import { useId, useMemo, useState, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useModelFeasibility } from '../compute/useResults';
 import { useLang, useT } from '../i18n';
-import { USERS_MAX, workloadId } from '../state/state';
+import { USERS_MAX, quantChoices, workloadId } from '../state/state';
 import { useCalc } from '../state/store';
 import { OptionSelect, type Opt } from './OptionSelect';
 
@@ -95,11 +94,11 @@ export function Sentence(): JSX.Element {
   );
   const quants = useMemo<Opt[]>(
     () =>
-      quantOptions(b, s.model).map((id) => {
+      quantChoices(b, s.model, s.customModel).map((id) => {
         const q = b.quantization[id]!;
         return { value: id, label: q.name, desc: q.description };
       }),
-    [b, s.model],
+    [b, s.model, s.customModel],
   );
 
   return (

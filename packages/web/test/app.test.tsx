@@ -5,6 +5,8 @@ import { App, ErrorBoundary } from '../src/App';
 import { renderStore } from './helpers';
 import { getBundle } from '../src/bundle';
 import { t } from '../src/i18n';
+import { defaultState } from '../src/state/state';
+import { encodeUrl } from '../src/state/url';
 import { setMedia } from './setup';
 
 describe('App', () => {
@@ -21,6 +23,27 @@ describe('App', () => {
     history.replaceState(null, '', '/?lang=en');
     render(<App />);
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(t('en', 'app.title'));
+  });
+  it('a URL with a custom model (manual or HF) renders without the error alert', () => {
+    // Test fixture architecture, not a catalog value.
+    const manual = { name: 'My 8B', totalParamsB: 8, layers: 32, heads: 32, kvHeads: 8, headDim: 128, hidden: 4096 };
+    const b = getBundle();
+    const urls = [
+      encodeUrl({ ...defaultState(b), model: 'custom', customModel: { kind: 'manual', value: manual } }),
+      encodeUrl({ ...defaultState(b), model: 'custom', customModel: { kind: 'hf', repo: 'openai/gpt-oss-20b', sha: '0123456789abcdef0123456789abcdef01234567' } }),
+    ];
+    for (const q of urls) {
+      history.replaceState(null, '', '/?' + q);
+      const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const view = render(<App />);
+      try {
+        expect(screen.queryByText(t('zh-TW', 'app.error')), q).toBeNull();
+        expect(screen.getByTestId('sentence')).toBeInTheDocument();
+      } finally {
+        quiet.mockRestore();
+        view.unmount();
+      }
+    }
   });
   it('the language switch changes the copy and the URL', async () => {
     render(<App />);

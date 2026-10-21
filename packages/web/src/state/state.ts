@@ -152,7 +152,7 @@ export function validWorkload(b: Bundle, v: unknown): v is Exclude<WorkloadSel, 
   if (typeof v !== 'object' || v === null) return false;
   const w = v as Record<string, unknown>;
   const complete = ['inputTokens', 'outputTokens', 'cacheHitRate'].every((k) => typeof w[k] === 'number');
-  return complete && WorkloadSchema.safeParse(v).success && typeof w.base === 'string' && w.base in b.workloads;
+  return complete && WorkloadSchema.safeParse(v).success && typeof w.base === 'string' && Object.hasOwn(b.workloads, w.base);
 }
 
 export function validSpeed(v: unknown): v is Exclude<SpeedSel, string> {
@@ -172,13 +172,14 @@ export function validCustomModel(v: unknown): v is Exclude<CustomModel, null> {
 }
 
 const customIndex = (row: RowKey): number | null => {
-  const m = /^custom:(\d+)$/.exec(row);
+  // Canonical index only (`custom:01` is not a row key).
+  const m = /^custom:(0|[1-9]\d*)$/.exec(row);
   return m ? Number(m[1]) : null;
 };
 
 export function isRowKey(b: Bundle, s: Pick<CalcState, 'customPlatforms'>, row: RowKey): boolean {
   const i = customIndex(row);
-  return i === null ? row in b.platforms : i < s.customPlatforms.length;
+  return i === null ? Object.hasOwn(b.platforms, row) : i < s.customPlatforms.length;
 }
 
 export function validOverride(v: unknown): v is Override {
@@ -241,7 +242,7 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
     case 'override': {
       if (!isRowKey(b, s, a.row)) return s;
       if (a.value === null) {
-        if (!(a.row in s.overrides)) return s;
+        if (!Object.hasOwn(s.overrides, a.row)) return s;
         const { [a.row]: _drop, ...rest } = s.overrides;
         return { ...s, overrides: rest };
       }

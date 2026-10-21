@@ -61,6 +61,10 @@ describe('url', () => {
       'x=' + b64({ hw: [{ name: '' }] }),
       'x=' + b64({ hw: 'nope', wl: { base: 'no-such' }, sp: { minTokPerSec: -1 }, mm: { layers: 0 } }),
       'hf=not-a-repo',
+      // Inherited prototype keys are not bundle ids; custom keys must be canonical.
+      'o=constructor:4,toString:2,__proto__:8,custom:01:4',
+      'x=' + b64({ wl: { base: 'constructor', inputTokens: 1, outputTokens: 1, cacheHitRate: 0 } }),
+      'x=' + b64({ wl: { base: '__proto__', inputTokens: 1, outputTokens: 1, cacheHitRate: 0 } }),
     ];
     for (const c of cases) {
       let d: CalcState | undefined;
