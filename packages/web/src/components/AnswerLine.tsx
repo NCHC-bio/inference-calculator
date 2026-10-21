@@ -56,9 +56,10 @@ function Answer({ r }: { r: RequirementResult }): JSX.Element {
   const { message } = AntApp.useApp();
   const [estOpen, setEstOpen] = useState(false);
   const target = bestCounts(r);
-  // design §3.6: the big numbers roll from the old value to the new one.
-  const gpus = Math.round(useTween(target.gpus));
-  const conservative = Math.round(useTween(target.conservative));
+  // design §3.6: the big numbers roll from the old value to the new one, but only within one platform: when the best
+  // platform changes they jump and the line fades in, so a name is never shown with another platform's count.
+  const gpus = Math.round(useTween(target.gpus, r.best));
+  const conservative = Math.round(useTween(target.conservative, r.best));
   const p = needAnswerParts(r, getBundle(), tr, lang, { gpus, conservative });
 
   const bestBasis = r.perPlatform.find((x) => x.platform === r.best)?.basis;
@@ -78,7 +79,7 @@ function Answer({ r }: { r: RequirementResult }): JSX.Element {
     <div style={{ borderTop: `1px solid ${token.colorBorderSecondary}`, paddingTop: 14, marginTop: 6 }}>
       <Flex align="center" gap={12} wrap="wrap">
         <div style={{ minWidth: 0 }}>
-          <div data-testid="answer-main" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, overflowWrap: 'anywhere' }}>
+          <div key={`main:${r.best ?? ''}`} className="fade-in" data-testid="answer-main" style={{ fontSize: 26, fontWeight: 800, lineHeight: 1.2, overflowWrap: 'anywhere' }}>
             {p.feasible ? (
               <>
                 <span style={{ color: token.colorPrimary }}>{p.head}</span>{' '}
@@ -90,7 +91,7 @@ function Answer({ r }: { r: RequirementResult }): JSX.Element {
               <span style={{ color: token.colorError }}>{p.head}</span>
             )}
           </div>
-          <Typography.Text type="secondary" data-testid="answer-sub">
+          <Typography.Text key={`sub:${r.best ?? ''}`} type="secondary" className="fade-in" data-testid="answer-sub" style={{ display: 'inline-block' }}>
             {p.sub}
           </Typography.Text>
         </div>

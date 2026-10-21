@@ -29,7 +29,7 @@ export function CapacityBar({ users, max }: { users: number; max: number }): JSX
           strokeColor={over ? token.colorError : token.colorPrimary}
           style={{ margin: 0 }}
         />
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        <Typography.Text type="secondary" className="help-text" style={{ fontSize: 12 }}>
           {tr('capacity.text', { users: fmt(lang, shownUsers), max: fmt(lang, shownMax) })}
         </Typography.Text>
       </div>

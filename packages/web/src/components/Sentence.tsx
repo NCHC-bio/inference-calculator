@@ -59,8 +59,6 @@ function CountInput({ value, max, ariaLabel, width, onChange, hint }: CountProps
           aria-invalid={invalid}
           aria-describedby={invalid ? hintId : undefined}
           status={invalid ? 'error' : undefined}
-          variant="underlined"
-          size="large"
           precision={0}
           style={{ width }}
           value={editing ? draft : value}
@@ -183,7 +181,7 @@ export function Sentence(): JSX.Element {
         <CountInput
           value={s.users}
           max={USERS_MAX}
-          width={120}
+          width={110}
           ariaLabel={tr('aria.users')}
           onChange={(value) => dispatch({ type: 'users', value })}
           hint={(close) => (
@@ -202,7 +200,7 @@ export function Sentence(): JSX.Element {
         <OptionSelect
           value={workloadId(s.workload)}
           options={workloads}
-          width={130}
+          width={150}
           popupWidth={280}
           ariaLabel={tr('aria.workload')}
           onChange={(id) => dispatch({ type: 'workload', id })}
@@ -215,7 +213,7 @@ export function Sentence(): JSX.Element {
         <OptionSelect
           value={s.model}
           options={models}
-          width={190}
+          width={250}
           popupWidth={340}
           showSearch
           ariaLabel={tr('aria.model')}
@@ -231,7 +229,7 @@ export function Sentence(): JSX.Element {
         <OptionSelect
           value={s.quant}
           options={quants}
-          width={90}
+          width={100}
           popupWidth={240}
           ariaLabel={tr('aria.quant')}
           onChange={(id) => dispatch({ type: 'quant', id })}
@@ -243,7 +241,7 @@ export function Sentence(): JSX.Element {
         <OptionSelect
           value={typeof s.speed === 'string' ? s.speed : ''}
           options={speeds}
-          width={100}
+          width={110}
           popupWidth={280}
           ariaLabel={tr('aria.speed')}
           onChange={(id) => dispatch({ type: 'speed', id })}

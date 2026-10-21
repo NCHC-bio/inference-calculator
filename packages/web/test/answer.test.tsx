@@ -59,16 +59,34 @@ describe('AnswerLine', () => {
     expect(screen.getByTestId('answer-main')).toHaveTextContent(needAnswerText(r, b, tZh).main);
   });
 
-  it('answer numbers tween', () => {
+  it('answer numbers tween while the best platform stays', () => {
+    vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'setTimeout', 'clearTimeout', 'Date'] });
+    const b = getBundle();
+    const s0 = defaultState(b);
+    const r0 = resultOf(s0);
+    // A user count with the same best platform and a different answer.
+    const users = [2, 3, 4, 5, 6, 8, 10, 20, 25, 30, 40, 50].find((u) => {
+      const r = resultOf({ ...s0, users: u });
+      return r.best === r0.best && needAnswerText(r, b, tZh).main !== needAnswerText(r0, b, tZh).main;
+    })!;
+    expect(users).toBeDefined();
+    const final = needAnswerText(resultOf({ ...s0, users }), b, tZh);
+    renderAnswer();
+    act(() => send({ type: 'users', value: users }));
+    expect(screen.getByTestId('answer-main').textContent).not.toBe(final.main);
+    act(() => void vi.advanceTimersByTime(TRANSITION_MS + 50));
+    expect(screen.getByTestId('answer-main')).toHaveTextContent(final.main);
+    expect(screen.getByTestId('answer-sub')).toHaveTextContent(final.sub);
+  });
+
+  it('a new best platform shows its own count at once (never another platform’s number)', () => {
     vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'setTimeout', 'clearTimeout', 'Date'] });
     const b = getBundle();
     const s200 = { ...defaultState(b), users: 200 };
+    expect(resultOf(s200).best).not.toBe(resultOf(defaultState(b)).best);
     const final = needAnswerText(resultOf(s200), b, tZh);
-    expect(final.main).not.toBe(needAnswerText(resultOf(defaultState(b)), b, tZh).main);
     renderAnswer();
     act(() => send({ type: 'users', value: 200 }));
-    expect(screen.getByTestId('answer-main').textContent).not.toBe(final.main);
-    act(() => void vi.advanceTimersByTime(TRANSITION_MS + 50));
     expect(screen.getByTestId('answer-main')).toHaveTextContent(final.main);
     expect(screen.getByTestId('answer-sub')).toHaveTextContent(final.sub);
   });

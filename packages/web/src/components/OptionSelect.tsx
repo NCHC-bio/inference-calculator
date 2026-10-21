@@ -97,8 +97,6 @@ export function OptionSelect({
   return (
     <Select<string, Opt>
       aria-label={ariaLabel}
-      variant="underlined"
-      size="large"
       virtual={false}
       builtinPlacements={PLACEMENTS}
       open={open}

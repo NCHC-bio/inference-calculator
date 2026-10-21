@@ -157,7 +157,7 @@ export function Isotype(props: IsotypeCounts): JSX.Element {
   const tr = useT();
   const [wrap, measured] = useWidth<HTMLDivElement>();
   const ref = useRef<SVGSVGElement>(null);
-  const prev = useRef<string | null>(null);
+  const prev = useRef<{ key: string; measured: boolean } | null>(null);
   const lay = isotypeLayout({ expected, conservative, unit, gpusPerNode }, measured || FALLBACK_WIDTH, tr);
   const colour = unit === 'machine' ? token.colorTextTertiary : token.colorPrimary;
   const colors: Colors = { solid: colour, dashed: colour, brace: token.colorTextTertiary, text: token.colorTextSecondary };
@@ -165,12 +165,13 @@ export function Isotype(props: IsotypeCounts): JSX.Element {
 
   const layKey = JSON.stringify([lay.slots.map((s) => [s.index, s.fill, s.dashed]), lay.fits, lay.label, lay.width]);
   useEffect(() => {
-    // Animate only when the layout changes: first paint and theme changes apply at once.
-    const changed = prev.current !== null && prev.current !== layKey;
-    prev.current = layKey;
+    // Animate only when the layout changes after a measured draw: the first paint, the first real measurement (the
+    // fallback-width layout is never shown as a starting point) and theme changes apply at once.
+    const changed = prev.current !== null && prev.current.measured && prev.current.key !== layKey;
+    prev.current = { key: layKey, measured: measured > 0 };
     draw(ref.current!, lay, unit, colors, changed ? transitionMs() : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layKey, unit, colors.solid, colors.dashed, colors.brace, colors.text]);
+  }, [layKey, measured > 0, unit, colors.solid, colors.dashed, colors.brace, colors.text]);
 
   useEffect(() => {
     const el = ref.current!;

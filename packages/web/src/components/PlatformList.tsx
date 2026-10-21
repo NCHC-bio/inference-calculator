@@ -80,7 +80,7 @@ export function PlatformList(): JSX.Element | null {
   const open = view.rows.find((r) => r.row === current.openRow && r.kind === 'ok')?.row;
 
   return (
-    <div ref={wrap} data-testid="platform-list" style={{ position: 'relative', marginTop: 12 }}>
+    <div ref={wrap} data-testid="platform-list" style={{ position: 'relative' }}>
       <BestMarker container={wrap} rowKey={best} />
       <Collapse
         className="rows"

@@ -11,7 +11,7 @@ export function Footer(): JSX.Element {
   const [, dispatch] = useCalc();
   const note = (label: string, tip: string) => (
     <Explain content={<div style={{ maxWidth: 280 }}>{tip}</div>}>
-      <Typography.Text type="secondary" tabIndex={0} style={{ fontSize: 12, cursor: 'help' }}>
+      <Typography.Text type="secondary" tabIndex={0} className="help-text" style={{ fontSize: 12 }}>
         {label}
       </Typography.Text>
     </Explain>

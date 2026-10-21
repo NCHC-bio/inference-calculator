@@ -6,12 +6,26 @@ const easeCubicOut = (k: number): number => 1 - (1 - k) ** 3;
 
 /**
  * A number that tweens to `target`: from the value on screen (mid-tween included) over transitionMs(), ease-out
- * cubic. Reduced motion, or a non-finite start or target, jumps.
+ * cubic. Reduced motion, or a non-finite start or target, jumps. A change of `key` (what the number is about, e.g. the
+ * best platform) jumps too, in the same render: a count never rolls from one platform's number to another's.
  */
-export function useTween(target: number): number {
+export function useTween(target: number, key?: unknown): number {
   const [value, setValue] = useState(target);
+  const [shownKey, setShownKey] = useState(key);
   const shown = useRef(target);
   const instant = !Number.isFinite(target) || transitionMs() === 0;
+  const rekeyed = !Object.is(shownKey, key);
+  if (rekeyed) {
+    // Adjusting state while rendering (React's documented pattern): the next render already shows `target`.
+    setShownKey(key);
+    setValue(target);
+  }
+
+  // A new key starts from `target`: declared first, so the tween below starts there and has nothing to roll.
+  useEffect(() => {
+    shown.current = target;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
 
   useEffect(() => {
     const from = shown.current;
@@ -34,5 +48,5 @@ export function useTween(target: number): number {
     return () => cancelAnimationFrame(raf);
   }, [target, instant]);
 
-  return instant ? target : value;
+  return instant || rekeyed ? target : value;
 }

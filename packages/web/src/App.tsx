@@ -1,4 +1,4 @@
-import { Alert, App as AntApp, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
+import { Alert, App as AntApp, Card, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
@@ -117,9 +117,14 @@ function Shell() {
   return (
     <main style={{ maxWidth: 980, margin: '0 auto', padding: 16 }}>
       <Header />
-      <Sentence />
-      <AnswerLine />
-      <PlatformList />
+      {/* demo v8: the sentence and answer in one card, the platform list in another */}
+      <Card style={{ marginBottom: 12 }}>
+        <Sentence />
+        <AnswerLine />
+      </Card>
+      <Card styles={{ body: { padding: 12 } }}>
+        <PlatformList />
+      </Card>
       <CompareTable />
       <Dialogs />
       <Footer />
