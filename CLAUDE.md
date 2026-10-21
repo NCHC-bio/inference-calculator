@@ -16,7 +16,7 @@ pnpm workspace (pnpm 12.9.1 via `corepack enable`), Node 24, TypeScript 7, Vites
 pnpm install
 pnpm data:build      # validate config/ → packages/data/dist/bundle.json (fails on any provenance/schema/policy error)
 pnpm test            # runs data:build, then vitest across all packages
-pnpm typecheck       # tsc -b in every package
+pnpm typecheck       # data:build, then tsc -b in every package (the web imports the generated bundle.json)
 pnpm calibrate       # compare predictions with published measurements → packages/data/dist/accuracy.json (out-of-tolerance only WARNs)
 pnpm web:dev         # Vite dev server (builds the bundle first)
 pnpm web:build       # static site → packages/web/dist/

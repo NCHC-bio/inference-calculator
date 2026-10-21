@@ -5,7 +5,7 @@
   "packageManager": "pnpm@12.9.1",
   "scripts": {
     "test": "pnpm data:build && vitest run",
-    "typecheck": "pnpm -r exec tsc -b",
+    "typecheck": "pnpm data:build && pnpm -r exec tsc -b",
     "data:build": "tsx packages/data/src/build.ts",
     "data:import": "tsx packages/data/src/hf-import.ts",
     "calibrate": "tsx packages/data/src/calibrate.ts",
