@@ -4,6 +4,7 @@
  */
 import type { Model } from '@nchc/schema';
 import {
+  attentionLayers,
   kvBytesPerSequence,
   linearActiveParams,
   lmHeadParams,
@@ -52,7 +53,7 @@ export function allReduceSec(p: number, bytes: number, latencySec: number, bwPer
  * attention term of the per-token FLOPs [R-LEC A5]; the term itself is not covered by the lecture
  * (docs/research/lecture-formulas.md, "講義未涵蓋"; spec §5.2).
  * Layer accounting follows kvBytesPerSequence (Ruling R33, spec §5.2 2026-10-19 note):
- * - MLA: model.layers × ctx. `phase` picks vLLM's MLA path (review L7; vLLM v0.32.0
+ * - MLA: attentionLayers(model) × ctx (every layer, or the non-fixed-state layer groups). `phase` picks vLLM's MLA path (review L7; vLLM v0.32.0
  *   vllm/model_executor/layers/attention/mla_attention.py L12-16, L65-117, after the DeepSeek-V2 paper,
  *   arXiv 2405.04434): 'prefill' (and chunked prefill, L120-123) runs the compute-friendly MHA path (`forward_mha`),
  *   QK head dim qkNopeHeadDim + qkRopeHeadDim and V head dim vHeadDim (L65-91; `qk_head_dim` L485, `v_head_dim` L473),
@@ -71,8 +72,9 @@ export function allReduceSec(p: number, bytes: number, latencySec: number, bwPer
 export function attentionFlop(m: Model, ctx: number, phase: 'decode' | 'prefill' = 'prefill'): number {
   const perLayer = (headDim: number, tokens: number) => 4 * m.heads * headDim * tokens;
   if (m.attention === 'mla' && m.mla) {
-    if (phase === 'decode') return m.layers * 2 * m.heads * (2 * m.mla.kvLoraRank + m.mla.qkRopeHeadDim) * ctx;
-    return m.layers * 2 * m.heads * (m.mla.qkNopeHeadDim + m.mla.qkRopeHeadDim + m.mla.vHeadDim) * ctx;
+    const n = attentionLayers(m);
+    if (phase === 'decode') return n * 2 * m.heads * (2 * m.mla.kvLoraRank + m.mla.qkRopeHeadDim) * ctx;
+    return n * 2 * m.heads * (m.mla.qkNopeHeadDim + m.mla.qkRopeHeadDim + m.mla.vHeadDim) * ctx;
   }
   if (m.layerGroups) {
     let total = 0;

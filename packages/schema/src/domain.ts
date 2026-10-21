@@ -225,7 +225,7 @@ export const ModelSchema = z
      * qkNopeHeadDim + qkRopeHeadDim and V head dim vHeadDim, the decode (absorbed MQA) path with kvLoraRank +
      * qkRopeHeadDim and kvLoraRank (spec §5.2, Ruling R40).
      */
-    mla: z.strictObject({ kvLoraRank: posInt, qkRopeHeadDim: posInt, qkNopeHeadDim: posInt, vHeadDim: posInt }).optional(),
+    mla: z.strictObject({ kvLoraRank: posInt, qkRopeHeadDim: z.number().int().nonnegative(), qkNopeHeadDim: posInt, vHeadDim: posInt }).optional(),
     layerGroups: z.array(LayerGroupSchema).min(1).optional(),
     /**
      * Routed experts. Expert parameters = experts × matrices × width × expertFfnDim × layers (spec §5.1):

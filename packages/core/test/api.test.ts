@@ -181,13 +181,16 @@ describe('input validation (zod at every entry point)', () => {
     expect(() => resolveModel(bundle, { ...llama70b, layerGroups: groups })).toThrow(/layerGroups\.0\.kvHeads/);
     expect(() => resolveModel(bundle, { ...llama70b, layerGroups: [{ ...groups[0]!, kvHeads: 4 }, groups[1]!] })).not.toThrow();
   });
-  it('ModelOverride: MLA with layerGroups or a sliding window is rejected as not supported yet (Ruling R22)', () => {
+  it('ModelOverride: MLA with a sliding layer group or a sliding window is rejected as not supported yet (Ruling R22)', () => {
     const mla = { ...llama70b, attention: 'mla' as const, mla: { kvLoraRank: 512, qkRopeHeadDim: 64, qkNopeHeadDim: 128, vHeadDim: 128 } };
     expect(() => resolveModel(bundle, mla)).not.toThrow();
     expect(() => resolveModel(bundle, { ...mla, slidingWindow: null })).not.toThrow();
     const groups = [{ kind: 'sliding' as const, count: 40, window: 4096 }, { kind: 'full' as const, count: 40 }];
     expect(() => resolveModel(bundle, { ...mla, layerGroups: groups })).toThrow(CoreInputError);
-    expect(() => resolveModel(bundle, { ...mla, layerGroups: groups })).toThrow(/architecture combination not supported yet: attention 'mla' with layerGroups/);
+    expect(() => resolveModel(bundle, { ...mla, layerGroups: groups })).toThrow(/architecture combination not supported yet: attention 'mla' with a sliding layer group/);
+    // MLA layers beside fixed-state layers (an MLA / linear-attention hybrid, issue #17) are supported.
+    const hybrid = [{ kind: 'full' as const, count: 20 }, { kind: 'state' as const, count: 60, stateBytes: 1e6 }];
+    expect(() => resolveModel(bundle, { ...mla, layerGroups: hybrid })).not.toThrow();
     expect(() => resolveModel(bundle, { ...mla, slidingWindow: 4096 })).toThrow(/architecture combination not supported yet: attention 'mla' with a non-null slidingWindow/);
     expect(() => estimateRequirements(bundle, { ...query, model: { ...mla, slidingWindow: 4096 } })).toThrow(CoreInputError);
     // GQA with the same fields stays valid.
