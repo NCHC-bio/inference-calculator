@@ -26,13 +26,11 @@ import { pathToFileURL } from 'node:url';
 import { parse, stringify } from 'yaml';
 import { HF_REPO_RE, PolicySchema, type Origin, type Source } from '@nchc/schema';
 import { excludedOrgOf } from '@nchc/core';
-import { checkpointWeightBytes, hfSourceId, parseHfConfig, quantizationConfig } from './hf-parse';
+import { cardBaseModels, fetchHfModel, type HfFetchDeps } from './hf-fetch';
 import { CONFIG_DIR } from './paths';
 
-type FetchFn = (url: string, init?: { headers?: Record<string, string> }) => Promise<Response>;
-
 export interface ImportDeps {
-  fetch: FetchFn;
+  fetch: HfFetchDeps['fetch'];
   configDir: string;
   env: Record<string, string | undefined>;
   log: (line: string) => void;
@@ -40,7 +38,6 @@ export interface ImportDeps {
   today: string;
 }
 
-const HF = 'https://huggingface.co';
 const SECTION = '# --- Hugging Face model configs (written by pnpm data:import; pinned to a commit) ---';
 
 interface Args {
@@ -98,23 +95,7 @@ export function upsertSource(text: string, entry: Source): string {
   return base.includes(SECTION) ? `${base}${block}\n` : `${base}\n${SECTION}\n${block}\n`;
 }
 
-/**
- * 401/403 message. HF also answers 401 for a misspelled or private repo, so the X-Error-Code /
- * X-Error-Message headers (e.g. GatedRepo vs RepositoryNotFound) and a body snippet are printed.
- */
-async function deniedMessage(res: Response, what: string): Promise<string> {
-  const code = res.headers.get('X-Error-Code');
-  const msg = res.headers.get('X-Error-Message');
-  const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200);
-  const hint = [code && `X-Error-Code: ${code}`, msg, body && body !== msg ? `body: ${body}` : ''].filter(Boolean).join('; ');
-  return `gated: set HF token via --token-env (HTTP ${res.status} on ${what}${hint ? `; ${hint}` : ''})`;
-}
-
-/** Model-card `base_model` as a list of repos: a string, a list of strings, or absent. */
-export function cardBaseModels(v: unknown): string[] {
-  const list = typeof v === 'string' ? [v] : Array.isArray(v) ? v : [];
-  return list.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim());
-}
+export { cardBaseModels };
 
 export async function runImport(argv: string[], deps: ImportDeps): Promise<number> {
   const { args, errors } = parseArgs(argv);
@@ -149,157 +130,42 @@ export async function runImport(argv: string[], deps: ImportDeps): Promise<numbe
     }
   }
 
-  const token = deps.env[args.tokenEnv];
-  const init = token ? { headers: { Authorization: `Bearer ${token}` } } : undefined;
-
-  const at = args.revision ? `/revision/${args.revision}` : '';
-  const apiRes = await deps.fetch(`${HF}/api/models/${repo}${at}?expand[]=safetensors&expand[]=sha&expand[]=cardData&expand[]=siblings`, init);
-  if (apiRes.status === 401 || apiRes.status === 403) {
-    deps.log(await deniedMessage(apiRes, 'model API'));
-    return 3;
-  }
-  if (!apiRes.ok) {
-    deps.log(`error: model API HTTP ${apiRes.status}`);
-    return 1;
-  }
-  const api = (await apiRes.json()) as {
-    sha?: string;
-    safetensors?: { total?: number };
-    cardData?: { license?: string; license_name?: string; base_model?: unknown };
-    siblings?: Array<{ rfilename?: unknown }>;
-  };
-  if (!api.sha) {
-    deps.log('error: model API returned no sha');
-    return 1;
-  }
-  // The model card's base_model (string or list) is recorded lineage. A --base that contradicts the card is
-  // refused, so the record stays true.
-  const cardBases = cardBaseModels(api.cardData?.base_model);
-  if (cardBases.length > 0 && args.base && !cardBases.includes(args.base)) {
-    deps.log(`error: --base ${args.base} does not match the model card's base_model: ${cardBases.join(', ')}`);
-    return 2;
-  }
-  const baseRepo = args.base ?? (cardBases.length > 0 ? cardBases.join(', ') : undefined);
-  if (args.baseDeveloper && !baseRepo) {
-    deps.log('missing: --base (the base origin flags describe a base, and the model card lists no base_model)');
-    return 2;
-  }
-  if (cardBases.length > 0) {
-    deps.log(`info: model card base_model: ${cardBases.join(', ')} (recorded as baseModel)`);
-  }
-  // Read config.json at the same commit the API reported, so source and values match.
-  const cfgRes = await deps.fetch(`${HF}/${repo}/resolve/${api.sha}/config.json`, init);
-  if (cfgRes.status === 401 || cfgRes.status === 403) {
-    deps.log(await deniedMessage(cfgRes, 'config.json'));
-    return 3;
-  }
-  if (!cfgRes.ok) {
-    deps.log(`error: config.json HTTP ${cfgRes.status}`);
-    return 1;
-  }
-  const config = JSON.parse(await cfgRes.text()) as unknown;
-
-  // ModelOpt <= 0.29 keeps its quantization config in hf_quant_config.json beside config.json; vLLM reads it when
-  // config.json has none (hf-parse.ts quantizationConfig). Fetched only when the file listing has it.
-  let hfQuantConfig: unknown;
-  const listed = (api.siblings ?? []).some((s) => s.rfilename === 'hf_quant_config.json');
-  if (listed && !quantizationConfig(config)) {
-    const hqRes = await deps.fetch(`${HF}/${repo}/resolve/${api.sha}/hf_quant_config.json`, init);
-    if (hqRes.status === 401 || hqRes.status === 403) {
-      deps.log(await deniedMessage(hqRes, 'hf_quant_config.json'));
-      return 3;
-    }
-    if (!hqRes.ok) {
-      deps.log(`error: hf_quant_config.json HTTP ${hqRes.status}`);
-      return 1;
-    }
-    hfQuantConfig = JSON.parse(await hqRes.text()) as unknown;
-  }
-
-  // A natively quantized checkpoint (config.json quantization_config) is sized by its own weight files:
-  // file sizes from the revision API (blobs=true) for the files in model.safetensors.index.json, both at the
-  // same commit (hf-parse.ts checkpointWeightBytes). No index (HTTP 404) → a single model.safetensors.
-  let ckptBytes: number | null | undefined;
-  const ckptMissing: string[] = [];
-  let weightIndex: unknown;
-  if (quantizationConfig(config, hfQuantConfig)) {
-    const revRes = await deps.fetch(`${HF}/api/models/${repo}/revision/${api.sha}?blobs=true`, init);
-    if (revRes.status === 401 || revRes.status === 403) {
-      deps.log(await deniedMessage(revRes, 'revision API'));
-      return 3;
-    }
-    if (!revRes.ok) {
-      deps.log(`error: revision API HTTP ${revRes.status}`);
-      return 1;
-    }
-    const rev = (await revRes.json()) as { siblings?: unknown };
-    const idxRes = await deps.fetch(`${HF}/${repo}/resolve/${api.sha}/model.safetensors.index.json`, init);
-    // A gated / auth refusal is exit 3, as for config.json (final-review M24).
-    if (idxRes.status === 401 || idxRes.status === 403) {
-      deps.log(await deniedMessage(idxRes, 'model.safetensors.index.json'));
-      return 3;
-    }
-    let index: unknown = null;
-    if (idxRes.ok) index = JSON.parse(await idxRes.text()) as unknown;
-    else if (idxRes.status !== 404) {
-      deps.log(`error: model.safetensors.index.json HTTP ${idxRes.status}`);
-      return 1;
-    }
-    const r = checkpointWeightBytes(index, rev.siblings);
-    ckptBytes = r.bytes ?? null;
-    ckptMissing.push(...r.missing);
-    weightIndex = index;
-  }
-
-  // tie_word_embeddings absent (final-review M21): the checkpoint's tensor names decide (a separate lm_head.weight →
-  // untied); read the index at the same commit when it was not read above. No index (404) → the parser's fallback.
-  const textCfg = (c: unknown): Record<string, unknown> | undefined => {
-    if (!c || typeof c !== 'object') return undefined;
-    const o = c as Record<string, unknown>;
-    const inner = (o.text_config ?? o.llm_config) as Record<string, unknown> | undefined;
-    return inner && typeof inner === 'object' ? inner : o;
-  };
-  const tieKnown = typeof textCfg(config)?.tie_word_embeddings === 'boolean' || typeof (config as Record<string, unknown>)?.tie_word_embeddings === 'boolean';
-  if (!tieKnown && weightIndex === undefined) {
-    const idxRes = await deps.fetch(`${HF}/${repo}/resolve/${api.sha}/model.safetensors.index.json`, init);
-    if (idxRes.status === 401 || idxRes.status === 403) {
-      deps.log(await deniedMessage(idxRes, 'model.safetensors.index.json'));
-      return 3;
-    }
-    if (idxRes.ok) weightIndex = JSON.parse(await idxRes.text()) as unknown;
-    else if (idxRes.status !== 404) {
-      deps.log(`error: model.safetensors.index.json HTTP ${idxRes.status}`);
-      return 1;
-    }
-  }
-  const weightNames =
-    weightIndex && typeof weightIndex === 'object' && (weightIndex as { weight_map?: unknown }).weight_map &&
-    typeof (weightIndex as { weight_map?: unknown }).weight_map === 'object'
-      ? Object.keys((weightIndex as { weight_map: Record<string, unknown> }).weight_map)
-      : undefined;
-
   const origin: Origin = { developer: args.developer as string, country: args.country as string };
-  const base = baseRepo
-    ? {
-      repo: baseRepo,
-      ...(args.baseDeveloper ? { origin: { developer: args.baseDeveloper, country: args.baseCountry as string } } : {}),
-    }
-    : undefined;
-  const license = api.cardData?.license_name ?? api.cardData?.license;
-  const { model, missing, notes } = parseHfConfig(repo, api.sha, config, api.safetensors?.total ?? null, {
-    origin, base, license, verified: deps.today,
-    ...(ckptBytes !== undefined ? { checkpointWeightBytes: ckptBytes } : {}),
-    ...(hfQuantConfig !== undefined ? { hfQuantConfig } : {}),
-    ...(weightNames ? { weightNames } : {}),
+  const token = deps.env[args.tokenEnv];
+  const r = await fetchHfModel(repo, {
+    fetch: deps.fetch,
+    ...(token ? { token } : {}),
+    ...(args.revision ? { revision: args.revision } : {}),
+    origin,
+    today: deps.today,
+    resolveBase: (cardBases) => {
+      // The model card's base_model (string or list) is recorded lineage. A --base that contradicts the card is
+      // refused, so the record stays true.
+      if (cardBases.length > 0 && args.base && !cardBases.includes(args.base)) {
+        return { error: `error: --base ${args.base} does not match the model card's base_model: ${cardBases.join(', ')}` };
+      }
+      const baseRepo = args.base ?? (cardBases.length > 0 ? cardBases.join(', ') : undefined);
+      if (args.baseDeveloper && !baseRepo) {
+        return { error: 'missing: --base (the base origin flags describe a base, and the model card lists no base_model)' };
+      }
+      if (cardBases.length > 0) deps.log(`info: model card base_model: ${cardBases.join(', ')} (recorded as baseModel)`);
+      return {
+        base: baseRepo
+          ? { repo: baseRepo, ...(args.baseDeveloper ? { origin: { developer: args.baseDeveloper, country: args.baseCountry as string } } : {}) }
+          : undefined,
+      };
+    },
   });
-  if (!model || ckptMissing.length > 0) {
-    deps.log(`missing: ${[...ckptMissing, ...missing].join(', ')}`);
-    return 2;
+  if (!r.ok) {
+    // denied → 3; unparsable (missing fields, base-flag contradiction) → 2; everything else → 1.
+    deps.log(r.status === 'denied' || r.status === 'unparsable' ? r.message : `error: ${r.message}`);
+    return r.status === 'denied' ? 3 : r.status === 'unparsable' ? 2 : 1;
   }
+  const { model, notes, sha, source: entry } = r;
 
   // Implicit defaults are stated, in the CLI output and in the file (review M5).
   for (const n of notes) deps.log(`note: ${n}`);
-  const header = `# Generated by: pnpm data:import ${repo} (commit ${api.sha}). Do not hand-edit; re-run the import.\n` +
+  const header = `# Generated by: pnpm data:import ${repo} (commit ${sha}). Do not hand-edit; re-run the import.\n` +
     notes.map((n) => `# note: ${n}\n`).join('');
   const modelFile = join(deps.configDir, 'models', `${model.id}.yaml`);
   // Slug collision (final-review M23): another repo already owns this id; never overwrite it.
@@ -314,15 +180,6 @@ export async function runImport(argv: string[], deps: ImportDeps): Promise<numbe
   writeFileSync(modelFile, header + stringify(model));
 
   const sourcesFile = join(deps.configDir, 'sources.yaml');
-  const entry: Source = {
-    id: hfSourceId(repo, api.sha),
-    title: model.nativeQuant
-      ? `${repo} config.json、safetensors 參數量與權重檔大小（Hugging Face，commit ${api.sha.slice(0, 7)}）`
-      : `${repo} config.json 與 safetensors 參數量（Hugging Face，commit ${api.sha.slice(0, 7)}）`,
-    url: `${HF}/${repo}/tree/${api.sha}`,
-    accessed: deps.today,
-    kind: 'official',
-  };
   writeFileSync(sourcesFile, upsertSource(readFileSync(sourcesFile, 'utf8'), entry));
   deps.log(`wrote config/models/${model.id}.yaml (source ${entry.id})`);
   return 0;
