@@ -1,7 +1,7 @@
 import { CodeOutlined, PushpinOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { resolveModel, type PerformanceResult, type Queueing } from '@nchc/core';
 import type { Bundle } from '@nchc/schema';
-import { Button, Collapse, Flex, Typography } from 'antd';
+import { App as AntApp, Button, Collapse, Flex, Typography } from 'antd';
 import { useRef, useState, type JSX, type ReactNode } from 'react';
 import { getBundle } from '../bundle';
 import { speedTarget } from '../compute/actions';
@@ -10,12 +10,12 @@ import { queryOf } from '../compute/query';
 import { useBench, useDeferredState } from '../compute/useResults';
 import { useLang, useT } from '../i18n';
 import { useTween } from '../motion/useTween';
-import { workloadId, type Action, type CalcState } from '../state/state';
+import { PINS_MAX, workloadId, type Action, type CalcState } from '../state/state';
 import { useCalc } from '../state/store';
 import { ActionChips } from './ActionChips';
 import { Explain } from './Explain';
 import { MemoryBar } from './MemoryBar';
-import { rowInfo } from './PlatformRow';
+import { rowInfo, useSubText } from './PlatformRow';
 import { Roofline } from './Roofline';
 import { SpeedChart, speedZones, type ChartZone } from './SpeedChart';
 import { SplitSelect, SplitText, splitText } from './SplitSelect';
@@ -53,7 +53,7 @@ function Heading({ children }: { children: ReactNode }): JSX.Element {
 function modelLabel(b: Bundle, s: CalcState, perf: PerformanceResult): string {
   const name = s.customModel === null ? b.models[s.model]!.name : resolveModel(b, queryOf(b, s).model).model.name;
   const q = b.quantization[perf.quant]?.name;
-  return q ? `${name} ${q}` : name;
+  return q ? `${name}（${q}）` : name;
 }
 
 /** Peak power, or 「功耗未查證」 with core's note (plus the bundle TDP record's reason) on hover. */
@@ -233,6 +233,8 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const usage = perf.usage!;
   const shape = perf.shape ?? usage.shape;
   const info = rowInfo(b, s, row.row);
+  const subText = useSubText(info);
+  const { message } = AntApp.useApp();
   const unitText = tr(info.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
   const target = speedTarget(b, s);
   const demoText = b.workloads[workloadId(s.workload)]!.demoText;
@@ -243,11 +245,16 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const chartTarget = typeof s.speed !== 'string' && !zones.some((z) => z.lo === target.min) ? { y: target.min, label: `${tr('chart.mark.target')} ${fmtIn(lang, target.min)}` } : null;
   const chart: ChartCtx = { row, bench, s, unit: info.unit, unitText, zones, target: chartTarget };
 
-  const pin = () =>
+  const pin = () => {
+    if (s.pins.length >= PINS_MAX) {
+      void message.warning(tr('pin.max', { n: PINS_MAX }));
+      return;
+    }
+    void message.success(tr('pin.added'));
     dispatch({
       type: 'pin',
       pin: {
-        platform: info.name,
+        platform: `${info.name} ${subText}`,
         count: `${fmtIn(lang, row.count)} ${unitText}`,
         model: modelLabel(b, s, perf),
         users: s.users,
@@ -257,6 +264,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
         kw: perf.powerKw,
       },
     });
+  };
   const pickSplit = (tp: number) => {
     if (tp === perf.recommendedTp) {
       dispatch({ type: 'override', row: row.row, value: row.count === row.suggested ? null : { gpus: row.count } });

@@ -48,14 +48,19 @@ export function rowInfo(b: Bundle, s: CalcState, row: RowKey): RowInfo {
   return { name: p.name, sub: p.sub, unit: p.unit, gpusPerNode: p.gpusPerNode.value, custom: null, self: p.group === 'self', hardware: p.hardware };
 }
 
+/** The sub-label as text (catalog sub, or the custom platform's memory × count and engine). */
+export function useSubText(info: RowInfo): string {
+  const tr = useT();
+  const lang = useLang();
+  return typeof info.sub === 'string'
+    ? info.sub
+    : tr(info.sub.key, Object.fromEntries(Object.entries(info.sub.vars).map(([k, v]) => [k, typeof v === 'number' ? fmt(lang, v) : v])));
+}
+
 /** Header label (the only part that toggles the row): name, 「自訂」 tag, sub-label. */
 export function RowName({ info }: { info: RowInfo }): JSX.Element {
   const tr = useT();
-  const lang = useLang();
-  const sub =
-    typeof info.sub === 'string'
-      ? info.sub
-      : tr(info.sub.key, Object.fromEntries(Object.entries(info.sub.vars).map(([k, v]) => [k, typeof v === 'number' ? fmt(lang, v) : v])));
+  const sub = useSubText(info);
   return (
     <div data-testid="row-name" style={{ minWidth: 0 }}>
       <div style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>

@@ -1,11 +1,12 @@
-import { Alert, App as AntApp, Button, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
+import { Alert, App as AntApp, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
 import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
-import { getBundle } from './bundle';
 import { useLang, useT, type Lang } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import { AnswerLine } from './components/AnswerLine';
+import { CompareTable } from './components/CompareTable';
+import { Footer } from './components/Footer';
 import { PlatformList } from './components/PlatformList';
 import { BasisModal } from './components/BasisModal';
 import { CiteModal } from './components/CiteModal';
@@ -93,22 +94,6 @@ function Header() {
   );
 }
 
-/** Data version and the rarely used audit entries (design §4 item 7). */
-function Footer() {
-  const tr = useT();
-  const [, dispatch] = useCalc();
-  return (
-    <Flex component="footer" gap={16} wrap="wrap" align="center" style={{ marginTop: 24, fontSize: 12 }}>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-        {tr('footer.dataVersion', { version: getBundle().meta.dataVersion })}
-      </Typography.Text>
-      <Button type="link" size="small" style={{ padding: 0, fontSize: 12 }} onClick={() => dispatch({ type: 'dialog', id: 'accuracy' })}>
-        {tr('footer.accuracy')}
-      </Button>
-    </Flex>
-  );
-}
-
 /** Every Drawer and Modal; each opens from the store's `dialog` (design §3.3, §4 item 8). */
 function Dialogs() {
   return (
@@ -135,6 +120,7 @@ function Shell() {
       <Sentence />
       <AnswerLine />
       <PlatformList />
+      <CompareTable />
       <Dialogs />
       <Footer />
     </main>

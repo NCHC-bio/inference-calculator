@@ -209,3 +209,9 @@ body {
   overflow: hidden;
   min-height: 0;
 }
+
+/* Comparison table: cells stay on one line; the table scrolls inside its card on narrow screens. */
+.compare-card .ant-table th,
+.compare-card .ant-table td {
+  white-space: nowrap;
+}

@@ -1,3 +1,4 @@
+import { App as AntApp } from 'antd';
 import { render, screen, waitFor, type RenderResult } from '@testing-library/react';
 import type { ReactElement } from 'react';
 import { expect } from 'vitest';
@@ -7,4 +8,8 @@ import { StoreProvider } from '../src/state/store';
 export const shown = (text: string) => waitFor(() => expect(screen.getByText(text)).toBeVisible());
 
 /** Render under the central store (components using useT / useLang need it). */
-export const renderStore = (ui: ReactElement): RenderResult => render(<StoreProvider>{ui}</StoreProvider>);
+export const renderStore = (ui: ReactElement): RenderResult => render(
+    <StoreProvider>
+      <AntApp>{ui}</AntApp>
+    </StoreProvider>,
+  );
