@@ -291,6 +291,11 @@ export type SweepPoint = {
   tokPerSecPerUser: number | null;
   ttftSec: number | null;
   maxConcurrent: number;
+  /**
+   * Ruling W9: of this count's splits that serve the users on target (ok), the one with the highest per-user speed
+   * (ties: smaller tp); null when none is ok. The default split (`shape`) is unchanged.
+   */
+  fastest: { shape: Shape; tokPerSecPerUser: number; ttftSec: number; maxConcurrent: number } | null;
 };
 
 /** estimatePerformance's headline numbers at several GPU counts (the best split each), sharing one preparation. */
@@ -309,7 +314,9 @@ export function estimatePerformanceSweep(
 
   const shapes: (Shape | null)[] = [];
   const points = input.gpusList.map((gpus): SweepPoint => {
-    const best = pickSplit(evaluateSplits(ctx, platform, legal.filter((t) => t <= gpus), gpus, input.users));
+    const splits = evaluateSplits(ctx, platform, legal.filter((t) => t <= gpus), gpus, input.users);
+    const best = pickSplit(splits);
+    const top = splits.filter((e) => e.ok).sort((a, b) => b.tokPerSecPerUser - a.tokPerSecPerUser || a.shape.tp - b.shape.tp)[0];
     const shape = best?.shape ?? null;
     shapes.push(shape);
     const { why, usage } = judgeShape(ctx, platform, shape, gpus, input.users, unit);
@@ -321,6 +328,7 @@ export function estimatePerformanceSweep(
       tokPerSecPerUser: usage?.tokPerSecPerUser ?? null,
       ttftSec: usage?.ttftSec ?? null,
       maxConcurrent: best?.maxConcurrent ?? 0,
+      fastest: top ? { shape: top.shape, tokPerSecPerUser: top.tokPerSecPerUser, ttftSec: top.ttftSec, maxConcurrent: top.maxConcurrent } : null,
     };
   });
 

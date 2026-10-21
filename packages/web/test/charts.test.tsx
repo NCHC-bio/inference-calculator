@@ -6,10 +6,11 @@ import { PlatformList } from '../src/components/PlatformList';
 import { Roofline } from '../src/components/Roofline';
 import { SpeedChart, speedZones } from '../src/components/SpeedChart';
 import { niceTicks, powerTicks } from '../src/components/ticks';
-import { computeMain, type MainView, type OkRow } from '../src/compute/compute';
+import { computeBench, computeMain, type MainView, type OkRow } from '../src/compute/compute';
 import { t, type MsgKey } from '../src/i18n';
 import { decodeUrl } from '../src/state/url';
-import { StoreProvider } from '../src/state/store';
+import { StoreProvider, useCalc } from '../src/state/store';
+import type { CalcState } from '../src/state/state';
 import { renderStore } from './helpers';
 
 const zh = (k: MsgKey, v?: Record<string, string | number>) => t('zh-TW', k, v);
@@ -22,9 +23,20 @@ const rowOf = (key: string) => screen.getAllByTestId('platform-row').find((x) =>
 const main = (search: string) => computeMain(getBundle(), decodeUrl(getBundle(), search)) as MainView & { kind: 'main' };
 const okRow = (search: string, key: string) => main(search).rows.find((r) => r.row === key) as OkRow;
 
+let latest: CalcState | null = null;
+function Probe() {
+  latest = useCalc()[0];
+  return null;
+}
+
 async function openBench(search: string, key = H200): Promise<HTMLElement> {
   history.replaceState(null, '', '/' + search);
-  renderStore(<PlatformList />);
+  renderStore(
+    <>
+      <PlatformList />
+      <Probe />
+    </>,
+  );
   await userEvent.click(within(rowOf(key)).getByTestId('row-name'));
   return within(rowOf(key)).findByTestId('workbench');
 }
@@ -138,6 +150,54 @@ describe('SpeedChart', () => {
     const { container } = render(chart({ pointNote: (x) => `note ${x}` }));
     fireEvent.mouseMove(container.querySelector('svg')!, { clientX: tickX(container, '6') });
     await waitFor(() => expect(screen.getByTestId('chart-note').textContent).toBe('note 6'));
+  });
+});
+
+describe('cards chart: fastest split (Ruling W9)', () => {
+  const r = okRow('', H200);
+  const bench = computeBench(getBundle(), decodeUrl(getBundle(), ''), r);
+  /** Click the cards chart at count `n` (pixel from the linear map through the first two x ticks). */
+  const clickCount = (wb: HTMLElement, n: number) => {
+    const c = within(wb).getByTestId('chart-cards');
+    const [u, v] = ticks(c, 'x');
+    const [a, b] = [tickX(c, u!), tickX(c, v!)];
+    const [x0, x1] = [Number(u), Number(v)];
+    fireEvent.click(c.querySelector('svg')!, { clientX: a + ((n - x0) * (b - a)) / (x1 - x0) });
+  };
+
+  it('plots the fastest ok split: the default curve never drops as cards are added', async () => {
+    const wb = await openBench('');
+    const d = within(wb).getByTestId('chart-cards').querySelector('path.line')!.getAttribute('d')!;
+    const ys = [...d.matchAll(/[ML][-\d.]+,([-\d.]+)/g)].map((m) => Number(m[1]));
+    expect(ys.length).toBeGreaterThan(8);
+    // SVG y grows downward: a speed that never drops is a y that never grows.
+    for (let i = 1; i < ys.length; i++) expect(ys[i]!).toBeLessThanOrEqual(ys[i - 1]!);
+  });
+
+  it('clicking a count whose fastest split differs sets that split', async () => {
+    const pt = bench.sweep.find((p) => p.gpus !== r.suggested && p.fastest && p.shape && p.fastest.shape.tp !== p.shape.tp)!;
+    expect(pt).toBeDefined();
+    const wb = await openBench('');
+    clickCount(wb, pt.gpus);
+    await waitFor(() => expect(latest!.overrides[H200]).toEqual({ gpus: pt.gpus, tp: pt.fastest!.shape.tp }));
+  });
+
+  it('clicking a count whose fastest split is the default sets only the count', async () => {
+    const pt = bench.sweep.find((p) => p.gpus !== r.suggested && p.fastest && p.shape && p.fastest.shape.tp === p.shape.tp)!;
+    expect(pt).toBeDefined();
+    const wb = await openBench('');
+    clickCount(wb, pt.gpus);
+    await waitFor(() => expect(latest!.overrides[H200]).toEqual({ gpus: pt.gpus }));
+  });
+
+  it('clicking the suggested count with the recommended split clears the override', async () => {
+    const sug = bench.sweep.find((p) => p.gpus === r.suggested)!;
+    expect(sug.fastest!.shape.tp).toBe(sug.shape!.tp);
+    const other = bench.sweep.find((p) => p.gpus > r.suggested + 1 && p.fastest)!;
+    const wb = await openBench(`?o=${H200}:${other.gpus}`);
+    expect(latest!.overrides[H200]).toBeDefined();
+    clickCount(wb, r.suggested);
+    await waitFor(() => expect(latest!.overrides[H200]).toBeUndefined());
   });
 });
 

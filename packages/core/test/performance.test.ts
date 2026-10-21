@@ -209,6 +209,37 @@ describe('estimatePerformanceSweep', () => {
     expect(sweep.basis.length).toBeGreaterThan(0);
   });
 
+  describe('fastest (Ruling W9)', () => {
+    const counts = Array.from({ length: 16 }, (_, i) => i + 1);
+    const sweep = estimatePerformanceSweep(bundle, { ...base, gpusList: counts });
+
+    it('is at least as fast as the default split when that one is ok', () => {
+      for (const pt of sweep.points) {
+        if (pt.ok) expect(pt.fastest!.tokPerSecPerUser).toBeGreaterThanOrEqual(pt.tokPerSecPerUser!);
+      }
+    });
+
+    it('never drops as cards are added (default nano4-h200 sweep)', () => {
+      const ys = sweep.points.flatMap((p) => (p.fastest ? [p.fastest.tokPerSecPerUser] : []));
+      expect(ys.length).toBeGreaterThan(8);
+      for (let i = 1; i < ys.length; i++) expect(ys[i]!).toBeGreaterThanOrEqual(ys[i - 1]!);
+    });
+
+    it('is the fastest ok split, null when no split is ok', () => {
+      for (const pt of sweep.points) {
+        const one = estimatePerformance(bundle, { ...base, gpus: pt.gpus });
+        const ok = one.splits.filter((e) => e.ok);
+        if (ok.length === 0) {
+          expect(pt.fastest).toBeNull();
+          continue;
+        }
+        const top = Math.max(...ok.map((e) => e.tokPerSecPerUser));
+        const best = ok.filter((e) => e.tokPerSecPerUser === top).sort((x, y) => x.shape.tp - y.shape.tp)[0]!;
+        expect(pt.fastest).toEqual({ shape: best.shape, tokPerSecPerUser: best.tokPerSecPerUser, ttftSec: best.ttftSec, maxConcurrent: best.maxConcurrent });
+      }
+    });
+  });
+
   it('rejects unsorted or duplicate counts', () => {
     for (const list of [[4, 2], [2, 2]]) {
       try {

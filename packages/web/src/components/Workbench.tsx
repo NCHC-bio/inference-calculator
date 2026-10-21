@@ -104,21 +104,36 @@ export function QueueLine({ queueing }: { queueing: Queueing | null }): JSX.Elem
 
 type ChartCtx = { row: OkRow; bench: BenchView; s: CalcState; unit: 'gpu' | 'machine'; unitText: string; zones: ChartZone[]; target: { y: number; label: string } | null };
 
-/** 「卡數 → 每人速度」 over core's sweep (best split per count); a click sets the count (the suggestion clears the override). */
+/**
+ * 「卡數 → 每人速度」 over core's sweep. Ruling W9: each count plots its fastest split that serves the users on target
+ * (`fastest`, solid); without one, the default split's numbers as a miss (dashed). A click sets the count with the plotted
+ * split (tp only when it differs from the default); the suggested count with the recommended split clears the override.
+ */
 function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: ChartCtx & { dispatch: (a: Action) => void }): JSX.Element {
   const tr = useT();
   const lang = useLang();
   const usage = bench.perf.usage!;
+  const at = (x: number) => bench.sweep.find((q) => q.gpus === x);
   const note = (x: number) => {
-    const p = bench.sweep.find((q) => q.gpus === x);
+    const p = at(x);
     const n = fmtIn(lang, x);
+    if (p?.fastest) {
+      const f = p.fastest;
+      return tr('chart.note.cards', { n, unit: unitText, split: splitText(f.shape.tp, f.shape.replicas, unit, tr), tps: fmtIn(lang, f.tokPerSecPerUser) });
+    }
     if (!p || !p.shape || p.tokPerSecPerUser === null) return tr('chart.note.noFit', { n, unit: unitText });
     const why = p.why ? tr('chart.note.why', { why: tr(WHY[p.why]) }) : '';
     return tr('chart.note.cards', { n, unit: unitText, split: splitText(p.shape.tp, p.shape.replicas, unit, tr), tps: fmtIn(lang, p.tokPerSecPerUser) }) + why;
   };
+  const pick = (gpus: number) => {
+    const p = at(gpus);
+    const tp = p?.fastest && p.shape && p.fastest.shape.tp !== p.shape.tp ? p.fastest.shape.tp : undefined;
+    if (tp !== undefined) dispatch({ type: 'override', row: row.row, value: { gpus, tp } });
+    else dispatch({ type: 'override', row: row.row, value: gpus === row.suggested ? null : { gpus } });
+  };
   return (
     <SpeedChart
-      points={bench.sweep.map((p) => ({ x: p.gpus, y: p.tokPerSecPerUser, miss: !p.ok }))}
+      points={bench.sweep.map((p) => (p.fastest ? { x: p.gpus, y: p.fastest.tokPerSecPerUser } : { x: p.gpus, y: p.tokPerSecPerUser, miss: true }))}
       xTitle={tr(unit === 'machine' ? 'chart.x.cards.machine' : 'chart.x.cards.gpu', { users: fmtIn(lang, s.users) })}
       yTitle={tr('chart.y')}
       zones={zones}
@@ -127,7 +142,7 @@ function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: 
         { key: 'suggested', x: row.suggested, label: tr('chart.mark.suggested'), tone: 'muted', dashed: true },
         { key: 'current', x: row.count, y: usage.tokPerSecPerUser, label: tr('chart.mark.current'), tone: 'primary' },
       ]}
-      onPick={(gpus) => dispatch({ type: 'override', row: row.row, value: gpus === row.suggested ? null : { gpus } })}
+      onPick={pick}
       pointNote={note}
     />
   );
