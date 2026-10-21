@@ -379,6 +379,43 @@ describe('HfImportDrawer', () => {
     expect(state().customModel).toBeNull();
   });
 
+  it('the Import button is disabled while an import runs', async () => {
+    const { model, source } = importedFixture();
+    let resolve: (v: Awaited<ReturnType<typeof fetchHfModel>>) => void = () => {};
+    fetchMock.mockReturnValue(new Promise((r) => (resolve = r)));
+    renderWith(<HfImportDrawer />);
+    openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
+    const d = await drawer();
+    await origin(d);
+    const button = within(d.closest('.ant-drawer')!).getByRole('button', { name: '匯入' });
+    await userEvent.click(button);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    expect(button).toBeDisabled();
+    await act(async () => resolve({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] }));
+    await waitFor(() => expect(state().customModel?.kind).toBe('hf'));
+  });
+
+  it('closing the Drawer while an import runs drops its answer: no dispatch, no toast', async () => {
+    const { model, source } = importedFixture();
+    let resolve: (v: Awaited<ReturnType<typeof fetchHfModel>>) => void = () => {};
+    fetchMock.mockReturnValue(new Promise((r) => (resolve = r)));
+    renderWith(<HfImportDrawer />);
+    const before = state().model;
+    openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
+    const d = await drawer();
+    await origin(d);
+    await userEvent.click(within(d.closest('.ant-drawer')!).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    fireEvent.click(d.closest('.ant-drawer')!.querySelector('.ant-drawer-close')!);
+    expect(state().dialog).toBeNull();
+    await act(async () => resolve({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(state().customModel).toBeNull();
+    expect(state().model).toBe(before);
+    expect(state().dialog).toBeNull();
+    expect(document.querySelector('.ant-message-success')).toBeNull();
+  });
+
   it.each([
     ['not-found', /找不到這個模型/],
     ['network', /無法連線到 Hugging Face/],

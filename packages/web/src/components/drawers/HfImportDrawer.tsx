@@ -1,7 +1,7 @@
 import { fetchHfModel, type HfFetchResult } from '@nchc/data/hf';
 import { HF_REPO_RE, type Origin } from '@nchc/schema';
 import { Alert, App as AntApp, Button, Form, Input, Spin, Typography } from 'antd';
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 import { useT, type MsgKey, type TFn } from '../../i18n';
 import type { Action, CalcState } from '../../state/state';
 import { useCalc } from '../../state/store';
@@ -105,7 +105,13 @@ function ErrorView({ err, tr }: { err: Failure; tr: TFn }) {
 
 type Values = { repo: string; developer: string; country: string };
 
-function Body(): JSX.Element {
+/**
+ * One import at a time, owned by the Drawer: `begin` starts attempt n, `live(n)` is false once the Drawer closed (or a
+ * newer attempt began), so a late answer neither dispatches nor toasts.
+ */
+type Run = { busy: boolean; begin: () => number; live: (n: number) => boolean; end: (n: number) => void };
+
+function Body({ run }: { run: Run }): JSX.Element {
   const tr = useT();
   const [s, dispatch] = useCalc();
   const { message } = AntApp.useApp();
@@ -113,18 +119,20 @@ function Body(): JSX.Element {
   // The token lives in this component only: never in the store, the URL or storage (spec §8.3.2).
   const [token, setToken] = useState('');
   const [needToken, setNeedToken] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<Failure | null>(null);
+  const { busy } = run;
 
   const submit = async (v: Values) => {
+    if (busy) return;
     const repo = v.repo.trim();
-    setBusy(true);
+    const n = run.begin();
     setErr(null);
     const r = await importHf(repo, { developer: v.developer.trim(), country: v.country.trim() }, {
       token: token.trim() || undefined,
       revision: pending && pending.repo === repo ? pending.sha : undefined,
     });
-    setBusy(false);
+    if (!run.live(n)) return;
+    run.end(n);
     if (!r.ok) {
       setErr(r);
       if (r.status === 'denied') setNeedToken(true);
@@ -189,21 +197,42 @@ function Body(): JSX.Element {
 export function HfImportDrawer(): JSX.Element {
   const tr = useT();
   const [s, dispatch] = useCalc();
+  const [busy, setBusy] = useState(false);
+  const attempt = useRef(0);
+  const open = s.dialog === 'hf';
+  useEffect(() => {
+    if (open) return;
+    // Closed (any way): a running import is abandoned.
+    attempt.current++;
+    setBusy(false);
+  }, [open]);
+  const run: Run = {
+    busy,
+    begin: () => {
+      setBusy(true);
+      return ++attempt.current;
+    },
+    live: (n) => attempt.current === n,
+    end: (n) => {
+      if (attempt.current === n) setBusy(false);
+    },
+  };
 
   return (
     <CalcDrawer
       id="hf"
       title={tr('hf.title')}
       extra={
-        <Button type="primary" htmlType="submit" form="hfImport">
+        <Button type="primary" htmlType="submit" form="hfImport" disabled={busy}>
           {tr('hf.import')}
         </Button>
       }
       onClose={() => {
+        attempt.current++;
         if (pendingHf(s)) dispatch({ type: 'customModel', value: null });
       }}
     >
-      <Body />
+      <Body run={run} />
     </CalcDrawer>
   );
 }
