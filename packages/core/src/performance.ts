@@ -69,6 +69,59 @@ export type SplitEval = {
   maxConcurrent: number;
 };
 
+/** A SplitEval plus how far one user gets (solve.ts `progress`), the tie-break when no split serves anyone. */
+type EvaluatedSplit = SplitEval & { reach: number };
+
+/** Evaluate each legal TP (already filtered to t <= gpus) at `users`: floor(gpus / t) replicas. */
+function evaluateSplits(ctx: Ctx, platform: ResolvedPlatform, tps: number[], gpus: number, users: number): EvaluatedSplit[] {
+  return tps.map((t) => {
+    const shape: Shape = { tp: t, replicas: Math.floor(gpus / t) };
+    const c = checkShape(ctx, platform, shape, users, 'expected');
+    const one = checkShape(ctx, platform, { tp: t, replicas: 1 }, 1, 'expected');
+    return {
+      shape,
+      ok: c.ok,
+      why: c.why,
+      tokPerSecPerUser: c.tokPerSecPerUser,
+      ttftSec: c.ttftSec,
+      maxConcurrent: maxConcurrent(ctx, platform, shape, 'expected'),
+      reach: progress(one, ctx.speed.maxTtftSec, ctx.speed.minTokPerSec),
+    };
+  });
+}
+
+/**
+ * Best split: most users served, then the smaller t; when nobody is served, the one that gets furthest for one user
+ * (singleUserWhy's order), then the faster, then the smaller t. Null for an empty list.
+ */
+export function pickSplit<T extends EvaluatedSplit>(splits: T[]): T | null {
+  const anyServed = splits.some((e) => e.maxConcurrent > 0);
+  const ranked = [...splits].sort((a, b) =>
+    anyServed
+      ? b.maxConcurrent - a.maxConcurrent || a.shape.tp - b.shape.tp
+      : b.reach - a.reach || b.tokPerSecPerUser - a.tokPerSecPerUser || a.shape.tp - b.shape.tp,
+  );
+  return ranked[0] ?? null;
+}
+
+/** Verdict for a chosen shape (null: no legal TP fits): why it misses the target, and one replica's usage when meaningful. */
+function judgeShape(ctx: Ctx, platform: ResolvedPlatform, shape: Shape | null, gpus: number, users: number, unit: string) {
+  const check = shape ? checkShape(ctx, platform, shape, users, 'expected') : null;
+  let why: { why: Why; detail: string } | null = null;
+  if (!shape || !check) {
+    why = capacityWhy(ctx, platform, gpus, 'expected') ?? { why: 'mem', detail: `${gpus} ${unit}放不下 1 人` };
+  } else if (check.why !== null) {
+    why =
+      check.why === 'context' || check.why === 'weights'
+        ? chosenWhy(ctx, platform, shape, check.why, gpus, unit)
+        : { why: check.why, detail: failDetail(check, ctx.speed, users, shape) };
+  }
+  const oneUserFits = shape ? checkShape(ctx, platform, shape, 1, 'expected').capacityPerReplica >= 1 : false;
+  const hasUsage = shape !== null && check !== null && check.why !== 'context' && check.why !== 'weights' && oneUserFits;
+  const usage = hasUsage && shape ? shapeUsage(ctx, platform, shape, users, 'expected') : null;
+  return { check, why, usage, hasUsage };
+}
+
 export type PerformanceResult = QuantFields & {
   dataVersion: string;
   platform: string;
@@ -121,43 +174,15 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
     );
   }
 
-  const evals = fitting.map((t) => {
-    const shape: Shape = { tp: t, replicas: Math.floor(gpus / t) };
-    const c = checkShape(ctx, platform, shape, users, 'expected');
-    const mc = maxConcurrent(ctx, platform, shape, 'expected');
-    const one = checkShape(ctx, platform, { tp: t, replicas: 1 }, 1, 'expected');
-    const split: SplitEval = { shape, ok: c.ok, why: c.why, tokPerSecPerUser: c.tokPerSecPerUser, ttftSec: c.ttftSec, maxConcurrent: mc };
-    return { split, reach: progress(one, ctx.speed.maxTtftSec, ctx.speed.minTokPerSec) };
-  });
-  // Best split: most users served, then the smaller t; when nobody is served, the one that gets furthest for one user
-  // (singleUserWhy's order), then the faster, then the smaller t.
-  const anyServed = evals.some((e) => e.split.maxConcurrent > 0);
-  const ranked = [...evals].sort((a, b) =>
-    anyServed
-      ? b.split.maxConcurrent - a.split.maxConcurrent || a.split.shape.tp - b.split.shape.tp
-      : b.reach - a.reach || b.split.tokPerSecPerUser - a.split.tokPerSecPerUser || a.split.shape.tp - b.split.shape.tp,
-  );
-  const recommendedTp = ranked[0]?.split.shape.tp ?? null;
+  const evals = evaluateSplits(ctx, platform, fitting, gpus, users);
+  const recommendedTp = pickSplit(evals)?.shape.tp ?? null;
   const chosenTp = input.tp ?? recommendedTp;
-  const chosen = evals.find((e) => e.split.shape.tp === chosenTp)?.split ?? null;
+  const chosen = evals.find((e) => e.shape.tp === chosenTp) ?? null;
   const shape = chosen?.shape ?? null;
 
-  const check = shape ? checkShape(ctx, platform, shape, users, 'expected') : null;
-  let why: { why: Why; detail: string } | null = null;
-  if (!shape || !check) {
-    why = capacityWhy(ctx, platform, gpus, 'expected') ?? { why: 'mem', detail: `${gpus} ${unit}放不下 1 人` };
-  } else if (check.why !== null) {
-    why =
-      check.why === 'context' || check.why === 'weights'
-        ? chosenWhy(ctx, platform, shape, check.why, gpus, unit)
-        : { why: check.why, detail: failDetail(check, ctx.speed, users, shape) };
-  }
-
-  const oneUserFits = shape ? checkShape(ctx, platform, shape, 1, 'expected').capacityPerReplica >= 1 : false;
-  const hasUsage = shape !== null && check !== null && check.why !== 'context' && check.why !== 'weights' && oneUserFits;
-  const usage = hasUsage ? shapeUsage(ctx, platform, shape, users, 'expected') : null;
+  const { check, why, usage, hasUsage } = judgeShape(ctx, platform, shape, gpus, users, unit);
   const mc = chosen?.maxConcurrent ?? 0;
-  const speedCurve = hasUsage
+  const speedCurve = hasUsage && shape
     ? shapeProfile(ctx, platform, shape, Math.max(mc, users), 'expected', PERFORMANCE_CURVE_POINTS).speedCurve
     : null;
   const queueing = check?.queueing ?? null;
@@ -194,7 +219,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
     ...(why ? { detail: why.detail } : {}),
     shape,
     recommendedTp,
-    splits: evals.map((e) => e.split),
+    splits: evals.map(({ reach: _reach, ...split }) => split),
     usage,
     maxConcurrent: mc,
     speedCurve,
@@ -226,4 +251,62 @@ function failDetail(
 function chosenWhy(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, why: Why, gpus: number, unit: string): { why: Why; detail: string } {
   if (why === 'context') return { why, detail: contextDetail(ctx) };
   return singleUserWhy(ctx, platform, [shape.tp], 'expected', `${gpus} ${unit}`) ?? { why, detail: `TP ${shape.tp} 放不下模型權重` };
+}
+
+const SweepInputSchema = RequirementInputSchema.extend({
+  platform: z.string().min(1),
+  gpusList: z
+    .array(int(MAX_GPUS))
+    .min(1)
+    .max(64)
+    .refine((l) => l.every((g, i) => i === 0 || g > l[i - 1]!), { message: 'gpusList must be strictly increasing' }),
+});
+export type SweepInput = Omit<PerformanceInput, 'gpus' | 'tp'> & { gpusList: number[] };
+
+/** One GPU count of a sweep: the best split's outcome at the current users. */
+export type SweepPoint = {
+  gpus: number;
+  ok: boolean;
+  why: Why | null;
+  shape: Shape | null;
+  tokPerSecPerUser: number | null;
+  ttftSec: number | null;
+  maxConcurrent: number;
+};
+
+/** estimatePerformance's headline numbers at several GPU counts (the best split each), sharing one preparation. */
+export function estimatePerformanceSweep(
+  bundle: Bundle,
+  raw: SweepInput,
+): { points: SweepPoint[]; basis: BasisItem[]; hasEstimate: boolean; hasUser: boolean; warnings: ResultWarning[]; dataVersion: string } {
+  const input = parseInput(SweepInputSchema, raw);
+  const { ctx: baseCtx, quant, basis, warnings } = prepare(bundle, input);
+  const resolved = resolvePlatform(bundle, input.platform, quant.computeDtype);
+  const { platform } = resolved;
+  basis.add(...resolved.basis);
+  const ctx = ctxForPlatform(baseCtx, quant, resolved, basis);
+  const legal = legalTpOptions(platform.tpOptions, platform.gpusPerNode, ctx.model);
+  const unit = platform.unit === 'machine' ? '台' : '張 GPU';
+
+  const shapes: (Shape | null)[] = [];
+  const points = input.gpusList.map((gpus): SweepPoint => {
+    const best = pickSplit(evaluateSplits(ctx, platform, legal.filter((t) => t <= gpus), gpus, input.users));
+    const shape = best?.shape ?? null;
+    shapes.push(shape);
+    const { why, usage } = judgeShape(ctx, platform, shape, gpus, input.users, unit);
+    return {
+      gpus,
+      ok: why === null,
+      why: why?.why ?? null,
+      shape,
+      tokPerSecPerUser: usage?.tokPerSecPerUser ?? null,
+      ttftSec: usage?.ttftSec ?? null,
+      maxConcurrent: best?.maxConcurrent ?? 0,
+    };
+  });
+
+  addQueueingBasis(basis, bundle, resolved, shapes.some((s) => s !== null));
+  addCommBasis(basis, ctx, resolved.commBasis, shapes.filter((s): s is Shape => s !== null));
+  const list = basis.list();
+  return { points, basis: list, ...trustFlags(list), warnings, dataVersion: bundle.meta.dataVersion };
 }

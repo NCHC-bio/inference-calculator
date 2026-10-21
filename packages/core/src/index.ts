@@ -50,9 +50,13 @@ export type { Replica, WorkloadIn } from './timing';
 /** Performance of a chosen platform, GPU count and user count (spec 2026-10-21 §5.1). */
 export {
   estimatePerformance,
+  estimatePerformanceSweep,
+  pickSplit,
   PerformanceInputSchema,
   PERFORMANCE_CURVE_POINTS,
   type PerformanceInput,
   type PerformanceResult,
   type SplitEval,
+  type SweepInput,
+  type SweepPoint,
 } from './performance';

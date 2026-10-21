@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Bundle } from '@nchc/schema';
 import { CONFIG_DIR, loadConfig, validateConfig } from '../../data/src/index';
 import { CoreInputError, estimateRequirements, quantOptions, resolvePlatform, resolveModel, type RequirementInput } from '../src/api';
-import { estimatePerformance, PERFORMANCE_CURVE_POINTS } from '../src/performance';
+import { estimatePerformance, estimatePerformanceSweep, PERFORMANCE_CURVE_POINTS } from '../src/performance';
 import { legalTpOptions } from '../src/solve';
 
 function realBundle(): Bundle {
@@ -185,5 +185,50 @@ describe('estimatePerformance', () => {
     expect(pts.at(-1)!.users).toBe(400);
     expect(pts.length).toBeLessThanOrEqual(PERFORMANCE_CURVE_POINTS);
     for (const pt of pts) if (pt.users > p.maxConcurrent) expect(pt.why).not.toBeNull();
+  });
+});
+
+describe('estimatePerformanceSweep', () => {
+  const base = { ...defaults, platform: 'nano4-h200' };
+  const gpusList = [1, 2, 3, 4, 6, 8, 12, 16];
+
+  it('each point equals estimatePerformance at that count', () => {
+    const sweep = estimatePerformanceSweep(bundle, { ...base, gpusList });
+    expect(sweep.points.map((p) => p.gpus)).toEqual(gpusList);
+    for (const pt of sweep.points) {
+      const one = estimatePerformance(bundle, { ...base, gpus: pt.gpus });
+      expect(pt.shape).toEqual(one.shape);
+      expect(pt.ok).toBe(one.ok);
+      expect(pt.why).toBe(one.why);
+      expect(pt.maxConcurrent).toBe(one.maxConcurrent);
+      expect(pt.tokPerSecPerUser).toBe(one.usage?.tokPerSecPerUser ?? null);
+      expect(pt.ttftSec).toBe(one.usage?.ttftSec ?? null);
+    }
+    expect(sweep.dataVersion).toBe(bundle.meta.dataVersion);
+    expect(sweep.basis.length).toBeGreaterThan(0);
+  });
+
+  it('rejects unsorted or duplicate counts', () => {
+    for (const list of [[4, 2], [2, 2]]) {
+      try {
+        estimatePerformanceSweep(bundle, { ...base, gpusList: list });
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(CoreInputError);
+        expect((e as CoreInputError).code).toBe('invalid-input');
+      }
+    }
+  });
+
+  it('bounds the list to 1..64 counts', () => {
+    for (const list of [[], Array.from({ length: 65 }, (_, i) => i + 1)]) {
+      try {
+        estimatePerformanceSweep(bundle, { ...base, gpusList: list });
+        expect.unreachable();
+      } catch (e) {
+        expect(e).toBeInstanceOf(CoreInputError);
+        expect((e as CoreInputError).code).toBe('invalid-input');
+      }
+    }
   });
 });
