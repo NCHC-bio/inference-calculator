@@ -65,7 +65,7 @@ describe('PlatformList', () => {
     history.replaceState(null, '', '/' + INFEASIBLE_MAC);
     render(<App />);
     const row = rowOf('mac-mini-m6-32');
-    expect(row).toHaveClass('ant-collapse-item-disabled');
+    expect(row).toHaveClass('row-infeasible');
     expect(row.querySelector('.ant-collapse-expand-icon')).toBeNull();
     const tag = within(row).getByTestId('why-tag');
     expect(tag).toHaveClass('ant-tag-error');
@@ -73,7 +73,10 @@ describe('PlatformList', () => {
     expect(within(row).queryByTestId('capacity')).toBeNull();
     await userEvent.hover(tag);
     await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(mac.detail));
-    expect(row.querySelector(':scope > .ant-collapse-header')).toHaveAttribute('aria-disabled', 'true');
+    // Nothing in the header is a toggle: no tab / button role, no aria-disabled region over its controls (fix round B).
+    const header = row.querySelector(':scope > .ant-collapse-header')!;
+    expect(header.querySelector('[aria-disabled="true"], [role="tab"], [role="button"]')).toBeNull();
+    expect(header).not.toHaveAttribute('aria-disabled');
     await userEvent.click(within(row).getByText(b.platforms['mac-mini-m6-32']!.name));
     expect(row).not.toHaveClass('ant-collapse-item-active');
     expect(row.querySelector('.ant-collapse-panel, .ant-collapse-content')).toBeNull();
@@ -292,6 +295,27 @@ describe('PlatformList', () => {
     expect(latest!.customPlatforms).toEqual([]);
     expect(rows().some((x) => x.dataset.row === 'custom:0')).toBe(false);
   }, 20_000);
+
+  it('an infeasible custom row: edit and delete are outside any aria-disabled region and work from the keyboard (fix round B)', async () => {
+    const s: CalcState = { ...defaultState(getBundle()), customPlatforms: [CUSTOM] };
+    expect(main(s).rows.find((r) => r.row === 'custom:0')!.kind).toBe('infeasible');
+    visit(s);
+    renderList();
+    const row = rowOf('custom:0');
+    const edit = within(row).getByRole('button', { name: '編輯' });
+    const del = within(row).getByRole('button', { name: '刪除' });
+    for (const b of [edit, del]) {
+      expect(b.closest('[aria-disabled="true"]')).toBeNull();
+      expect(b).toBeEnabled();
+    }
+    edit.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(latest!.dialog).toBe('hardware');
+    expect(latest!.editingPlatform).toBe(0);
+    del.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(latest!.customPlatforms).toEqual([]);
+  });
 
   it('best marker sits on the best row', () => {
     const best = main(defaultState(getBundle())).result.best!;

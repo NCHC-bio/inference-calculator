@@ -93,7 +93,10 @@ export function PlatformList(): JSX.Element | null {
           {info.custom !== null && <CustomActions onEdit={onEdit} onDelete={onDelete} />}
         </div>
       );
-      items.push({ key: r.row, ...attrs, showArrow: false, collapsible: 'disabled', label: <RowName info={info} />, extra });
+      // Not `collapsible: 'disabled'`: that marks the whole header aria-disabled, so assistive tech would read a custom
+      // row's edit / delete as disabled. 'icon' without an arrow leaves nothing that toggles and no aria-disabled region;
+      // `row-infeasible` keeps the disabled look (fix round B).
+      items.push({ key: r.row, ...attrs, className: 'row-infeasible', showArrow: false, collapsible: 'icon', label: <RowName info={info} />, extra });
       continue;
     }
     items.push({

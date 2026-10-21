@@ -75,6 +75,11 @@ body {
 .ant-collapse.rows > .ant-collapse-item-disabled > .ant-collapse-header {
   cursor: default;
 }
+/* Infeasible row: antd's disabled-header colour without its aria-disabled (PlatformList, fix round B). */
+.ant-collapse.rows > .ant-collapse-item.row-infeasible > .ant-collapse-header {
+  color: var(--ant-color-text-disabled);
+  cursor: default;
+}
 .row-extra {
   display: flex;
   flex-wrap: wrap;
