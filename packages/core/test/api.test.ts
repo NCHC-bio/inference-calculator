@@ -10,6 +10,7 @@ import {
   explain,
   findFeasibleModels,
   predictMeasurement,
+  quantOptions,
   resolveModel,
   resolvePlatform,
   verifyCommand,
@@ -1095,8 +1096,8 @@ describe('verifyCommand with several replicas (review: one serve line took all N
     const cmd = verifyCommand(platform, { tp: 2, replicas: 3 }, m, w, 100, fp8);
     expect(cmd).toContain('--max-concurrency 34 --dataset-name random');
     expect(cmd).toContain('--num-prompts 340');
-    expect(cmd).toContain('共 3 個副本，每個副本分到 34 個同時生成的請求（100 ÷ 3，無條件進位）');
-    expect(cmd).toContain('每個 node 可放 4 個副本');
+    expect(cmd).toContain('共 3 份，每份模型分到 34 個同時生成的請求（100 ÷ 3，無條件進位）');
+    expect(cmd).toContain('每個 node 可放 4 份模型');
     expect(cmd.split('\n').filter((l) => l.includes('vllm serve '))).toEqual([
       expect.stringMatching(/^CUDA_VISIBLE_DEVICES=0,1 vllm serve microsoft\/phi-4 --tensor-parallel-size 2 /),
     ]);
@@ -1107,8 +1108,8 @@ describe('verifyCommand with several replicas (review: one serve line took all N
     const serve = cmd.split('\n').find((l) => l.includes('vllm serve '))!;
     expect(serve).toMatch(/ --port 8000$/);
     expect(cmd).toContain('vllm bench serve --port 8000 --model microsoft/phi-4 ');
-    expect(cmd).toContain('#   副本 2：CUDA_VISIBLE_DEVICES=2,3、--port 8001');
-    expect(cmd).toContain('#   副本 3：CUDA_VISIBLE_DEVICES=4,5、--port 8002');
+    expect(cmd).toContain('#   第 2 份：CUDA_VISIBLE_DEVICES=2,3、--port 8001');
+    expect(cmd).toContain('#   第 3 份：CUDA_VISIBLE_DEVICES=4,5、--port 8002');
     expect(cmd).toContain('--data-parallel-size');
   });
   it('--max-num-seqs is pinned only when a replica runs more requests than the vLLM default (review L10)', () => {
@@ -1125,7 +1126,7 @@ describe('verifyCommand with several replicas (review: one serve line took all N
     const cmd = verifyCommand(platform, { tp: 2, replicas: 1 }, m, w, 100, fp8);
     expect(cmd).toContain('--max-concurrency 100 ');
     expect(cmd).not.toContain('CUDA_VISIBLE_DEVICES');
-    expect(cmd).not.toContain('個副本，每個副本分到');
+    expect(cmd).not.toContain('份，每份模型分到');
   });
   it('Mac: several machines, each measured with its share', () => {
     const mac = resolvePlatform(bundle, 'mac-studio-m5u-512', 'fp8').platform;
@@ -1574,7 +1575,7 @@ describe('explain texts follow the current formulas (final-review M1, M2, M3, M7
     expect(t).toContain('t_step(D)');
   });
   it('capacity: KV in whole blocks (R37): vLLM roundUp(ctx, bs), sliding min(roundUp, window + bs − 1), MLX step 256, +1 block upper bound', () => {
-    const c = formulas.find((f) => f.startsWith('每副本可服務人數'))!;
+    const c = formulas.find((f) => f.startsWith('每份模型可服務人數'))!;
     expect(c).toContain('roundUp(上下文, bs)');
     expect(c).toContain('window + bs − 1');
     expect(c).toContain('256');
@@ -1640,5 +1641,76 @@ describe('GB200 MLA block size depends on the model (final-review M26)', () => {
         model: m, quant: 'bf16', workload: { base: 'chat', inputTokens: 1000, outputTokens: 100 }, speed: 'smooth', platform: 'nano4-gb200', gpus: 1,
       }).memoryOnlyMax;
     expect(memOnly(mla(96))).toBeLessThan(memOnly(mla(128)));
+  });
+});
+
+describe('usage (spec §8.3.3 細節面板)', () => {
+  const b = realBundle();
+  const q = { model: 'llama-3.3-70b-instruct-fp8', quant: 'fp8', workload: 'assist', speed: 'smooth', users: 15 } as const;
+  it('feasible platform: usage matches its expected shape and stays within the limits', () => {
+    const r = estimateRequirements(b, q).perPlatform.find((p) => p.platform === 'nano4-h200')!;
+    expect(r.expected.ok).toBe(true);
+    const u = r.usage!;
+    expect(u.shape).toEqual(r.expected.ok && r.expected.shape);
+    // Task 1 deferred minor: the capacity usage is that of the capacity's expected shape too.
+    const { users: _n, ...cq } = q;
+    const c = estimateCapacity(b, { ...cq, platform: 'nano4-h200', gpus: 8 });
+    expect(c.usage!.shape).toEqual(c.expected.shape);
+    expect(u.tokPerSecPerUser).toBeCloseTo(r.expected.ok ? r.expected.check.tokPerSecPerUser : NaN, 9);
+    expect(u.ttftSec).toBeCloseTo(r.expected.ok ? r.expected.check.ttftSec : NaN, 9);
+    expect(u.memory.weightsBytes + u.memory.reserveBytes + u.memory.kvBytes).toBeLessThanOrEqual(u.memory.usableBytes);
+    for (const s of Object.values(u.share)) { expect(s).toBeGreaterThanOrEqual(0); expect(s).toBeLessThanOrEqual(1); }
+  });
+  it('infeasible platform: usage is null', () => {
+    const r = estimateRequirements(b, { ...q, model: 'mistral-medium-3.5-128b', quant: 'bf16' })
+      .perPlatform.find((p) => p.platform === 'mac-mini-m6-32')!;
+    expect(r.expected.ok).toBe(false);
+    expect(r.usage).toBeNull();
+  });
+  it('capacity: usage at expected.n, null when nobody fits', () => {
+    const { users: _u, ...cq } = q;
+    const c = estimateCapacity(b, { ...cq, platform: 'nano4-h200', gpus: 8 });
+    expect(c.usage!.memory.residentPerReplica).toBeGreaterThan(0);
+    const none = estimateCapacity(b, { ...cq, model: 'mistral-medium-3.5-128b', quant: 'bf16', platform: 'mac-mini-m6-32', gpus: 1 });
+    expect(none.expected.n).toBe(0);
+    expect(none.usage).toBeNull();
+  });
+});
+describe("scale bound (final review I2: 'scale')", () => {
+  const b = realBundle();
+  // dgx-spark serves one replica per machine, so 200000 chat users on gemma-4-26b-a4b-it bf16 need more machines than
+  // the replica bound (1e5); that one platform used to throw CoreInputError for the whole request.
+  const q = { model: 'gemma-4-26b-a4b-it', quant: 'bf16', workload: 'chat', speed: 'smooth', users: 200000 } as const;
+  it('estimateRequirements: the platform beyond the bound is infeasible with why scale; NCHC platforms still ok', () => {
+    const r = estimateRequirements(b, q);
+    const spark = r.perPlatform.find((p) => p.platform === 'dgx-spark')!;
+    expect(spark.expected.ok).toBe(false);
+    expect(!spark.expected.ok && spark.expected.why).toBe('scale');
+    expect(!spark.expected.ok && spark.expected.detail).toContain('100000');
+    expect(spark.conservative.ok).toBe(false);
+    expect(spark.usage).toBeNull();
+    expect(spark.verifyCommand).toBe('');
+    expect(spark.verifyNote).toContain('100000');
+    for (const p of r.perPlatform.filter((x) => b.platforms[x.platform]!.group === 'nchc')) expect(p.expected.ok).toBe(true);
+    expect(r.best).not.toBeNull();
+  });
+  it('findFeasibleModels: the same scenario is not feasible on dgx-spark, why scale, without throwing', () => {
+    const items = findFeasibleModels(b, { workload: 'chat', speed: 'smooth', platform: 'dgx-spark', gpus: 8, users: 200000, quant: 'bf16' });
+    const g = items.find((x) => x.model === 'gemma-4-26b-a4b-it')!;
+    expect(g.feasible).toBe(false);
+    expect(g.why).toBe('scale');
+  });
+});
+
+describe('quantOptions', () => {
+  const b = realBundle();
+  it('matches the quantizations findFeasibleModels evaluates, per model', () => {
+    const items = findFeasibleModels(b, { workload: 'chat', speed: 'ok', platform: 'nano4-h200', gpus: 8 });
+    for (const id of Object.keys(b.models)) {
+      expect(quantOptions(b, id)).toEqual(items.filter((x) => x.model === id).map((x) => x.quant));
+    }
+  });
+  it('unknown model → CoreInputError unknown-id', () => {
+    expect(() => quantOptions(b, 'no-such')).toThrow(CoreInputError);
   });
 });

@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist/tsc",
+    "tsBuildInfoFile": "dist/tsc/.tsbuildinfo",
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test", "vite.config.ts", "vitest.config.ts"],
+  "references": [
+    { "path": "../schema" },
+    { "path": "../core/tsconfig.src.json" },
+    { "path": "../data/tsconfig.hf.json" },
+    { "path": "./e2e" }
+  ]
+}

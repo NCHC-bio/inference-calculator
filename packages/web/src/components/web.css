@@ -1,0 +1,227 @@
+/* Shared motion token (design §3.6): same duration and curve as TRANSITION_MS / EASE in src/motion.ts. */
+:root {
+  --motion-dur: 400ms;
+  --motion-ease: cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-dur: 0ms;
+  }
+}
+
+/* No UA body margin: antd's scroll lock sets body width to 100% while a Modal / Drawer is open, and the default 8 px
+   margin then pushes the page 8 px past the viewport (horizontal scroll). The main column keeps its own 16 px gutter. */
+body {
+  margin: 0;
+}
+
+/* Opens / closes smoothly: grid-template-rows 0fr → 1fr. */
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-dur) var(--motion-ease),
+    opacity var(--motion-dur) var(--motion-ease);
+}
+.reveal.on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.reveal > div {
+  overflow: hidden;
+  min-height: 0;
+}
+.fade-in {
+  animation: fade-in var(--motion-dur) var(--motion-ease) both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/*
+ * Platform rows. Selectors only reach the outermost rows (.rows > .ant-collapse-item > .ant-collapse-header), never a
+ * nested Collapse inside an expanded row (design §3.4). `.ant-collapse.rows` outranks antd's own (zero-specificity
+ * :where) rules regardless of injection order.
+ */
+.ant-collapse.rows > .ant-collapse-item {
+  position: relative;
+  z-index: 1;
+}
+.ant-collapse.rows > .ant-collapse-item > .ant-collapse-header {
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.ant-collapse.rows > .ant-collapse-item > .ant-collapse-header > .ant-collapse-title {
+  flex: 0 0 150px;
+  min-width: 0;
+}
+.ant-collapse.rows > .ant-collapse-item > .ant-collapse-header > .ant-collapse-extra {
+  flex: 1 1 300px;
+  min-width: 0;
+  margin-inline-start: 8px;
+}
+.ant-collapse.rows > .ant-collapse-item.row-divider > .ant-collapse-header {
+  padding-block: 4px;
+  cursor: default;
+}
+.ant-collapse.rows > .ant-collapse-item.row-divider > .ant-collapse-header > .ant-collapse-title {
+  flex: 1 1 auto;
+}
+.ant-collapse.rows > .ant-collapse-item-disabled > .ant-collapse-header {
+  cursor: default;
+}
+/* Infeasible row: antd's disabled-header colour without its aria-disabled (PlatformList, fix round B). */
+.ant-collapse.rows > .ant-collapse-item.row-infeasible > .ant-collapse-header {
+  color: var(--ant-color-text-disabled);
+  cursor: default;
+}
+.row-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  width: 100%;
+}
+.row-icons {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+.row-capacity {
+  flex: 0 1 170px;
+  min-width: 140px;
+}
+.row-speed {
+  flex-basis: 100%;
+}
+.best-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+  border-left: 3px solid;
+  transition:
+    top var(--motion-dur) var(--motion-ease),
+    height var(--motion-dur) var(--motion-ease),
+    opacity var(--motion-dur) var(--motion-ease);
+}
+@media (max-width: 640px) {
+  .ant-collapse.rows > .ant-collapse-item > .ant-collapse-header > .ant-collapse-extra {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}
+
+/* A term with a hover / tap / focus explanation. */
+.help-text {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/*
+ * Workbench (design §4.5, demo v8 `.wb`): one view, no tabs. Top line; row 1 = 體驗 | 原因; row 2 = the two charts;
+ * footer = 更多圖表 Collapse with 驗證指令 on the same line. Two columns on wide screens, stacked at ≤ 760 px.
+ */
+.wb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 4px 8px;
+}
+.wb-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.wb-row-1,
+.wb-row-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px 28px;
+  align-items: start;
+}
+.wb-row-1 > *,
+.wb-row-2 > * {
+  min-width: 0;
+}
+.wb-h {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.wb-chart {
+  min-height: 190px;
+}
+.wb-foot .ant-collapse-header {
+  padding-inline: 0;
+  align-items: center;
+}
+@media (max-width: 760px) {
+  .wb-row-1,
+  .wb-row-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.chart-note {
+  position: absolute;
+  max-width: 240px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: normal;
+  transition: opacity var(--motion-dur) var(--motion-ease);
+}
+
+/* Input sentence (demo v8 `.sent`): one sentence; each clause keeps together, the sentence wraps between clauses. */
+.sent {
+  font-size: 20px;
+  line-height: 2.4;
+  margin-top: 16px;
+}
+.sent .clause {
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .sent {
+    font-size: 17px;
+  }
+  /* English clauses are longer than the card on a phone (390 px): there they may wrap at their own spaces; the
+     controls stay whole (inline-block). Still one sentence; zh-TW keeps whole clauses (fix round A). */
+  .sent:lang(en) .clause {
+    white-space: normal;
+  }
+}
+
+/* Option descriptions (design §3.2): open for the active / selected option (OptionSelect adds .on; every option
+   under (hover: none)). Height and opacity animate with the shared motion token. */
+.opt-desc {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-dur) var(--motion-ease),
+    opacity var(--motion-dur) var(--motion-ease);
+}
+.opt-desc.on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.opt-desc > * {
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* Comparison table: cells stay on one line; the table scrolls inside its card on narrow screens. */
+.compare-card .ant-table th,
+.compare-card .ant-table td {
+  white-space: nowrap;
+}

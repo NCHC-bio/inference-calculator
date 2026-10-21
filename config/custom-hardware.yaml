@@ -1,0 +1,16 @@
+# Custom hardware templates (spec 2026-10-21-direct-manipulation-design §5.3, §6.2).
+# A user-entered GPU or machine has no measurement, so its efficiency factors (etaBw, etaBwLow, etaCompute, memUtil,
+# all-reduce latency, t_fixed, TTFT overhead), its vLLM defaults and its KV block size are borrowed from the template
+# platform of the same engine. The core marks every borrowed value estimate in the basis. The validator checks that the
+# template platform exists and that its calibration profile's engine equals the key.
+templates:
+  vllm:
+    platform: nano4-h200
+    rationale: 'H200 在 nano4（220 node）與 nano5（16 node）都有，兩個平台共用 nvidia-default 校正設定，vLLM 預設值也相同；選 nano4 只因為它是主要的 H200 機房，借用的數值與選 nano5 相同。nvidia-default 的擬合點來自 H200 SXM 實測（config/calibration.yaml 以 nano5-h200 標記，硬體與 nano4-h200 相同）'
+    # Sources of the nvidia-default fit points in calibration.yaml (InferenceX H200 TP=1 1k/1k c=4, decode + TTFT).
+    evidence: [inferencex-gptoss-h200-v022, inferencex-llama70b-fp8-1k1k-v0102]
+  mlx:
+    platform: mac-studio-m5u-512
+    rationale: 'mac-mlx 校正設定的擬合點是 Apple MLX distributed 在 M5 Ultra 512GB 上的實測（config/calibration.yaml 以 mac-studio-m5u-512 標記），是唯一有 MLX 實測的平台'
+    # Source of the mac-mlx fit point in calibration.yaml (apple-m5u-mistral128b-fp8-8k).
+    evidence: [apple-mlx-distributed]

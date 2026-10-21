@@ -1,0 +1,13 @@
+{
+  // Browser-safe subset (`@nchc/data/hf`, used by the website): no Node types, so a `node:` import or `process` fails
+  // to compile. Also part of ./tsconfig.json (the Node-side project); this one only proves the subset is Node-free.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist/tsc-hf",
+    "tsBuildInfoFile": "dist/tsc-hf/.tsbuildinfo",
+    "types": []
+  },
+  "files": ["src/hf-fetch.ts", "src/hf-parse.ts"],
+  "references": [{ "path": "../schema" }]
+}

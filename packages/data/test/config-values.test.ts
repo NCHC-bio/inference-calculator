@@ -300,6 +300,16 @@ describe('config values (Task 3 table)', () => {
     expect(b.benchmark.maxModelLenMarginTokens.basis).toContain('187');
   });
 
+  it('funnel defaults cite GWDG (paper) and the planner page (secondary); the daily-active share and requests per user are our arithmetic, so estimates', () => {
+    expectSV(b.funnel.dailyActiveShare, 0.05, 'estimate', 'gwdg-chat-ai');
+    expect(b.funnel.dailyActiveShare.basis).toContain('9,000');
+    expect(b.funnel.requestsPerActivePerDay).toMatchObject({ value: 7, status: 'estimate', evidence: ['gwdg-chat-ai'] });
+    expect(b.funnel.requestsPerActivePerDay.basis).toContain('user-questions.md');
+    expect(b.funnel.peakHourShare).toMatchObject({ value: 0.2, status: 'estimate', evidence: ['rate-limit-planner'] });
+    expect(b.sources['gwdg-chat-ai']).toMatchObject({ kind: 'paper', url: 'https://arxiv.org/abs/2407.00110' });
+    expect(b.sources['rate-limit-planner']?.kind).toBe('secondary');
+  });
+
   it('Ruling R41: NVIDIA t_fixed and per-request TTFT overhead are derived from the declared fit points; η unchanged', () => {
     const n = b.calibration['nvidia-default']!;
     expect(n.tFixedSec).toMatchObject({ value: 0.0029, unit: 's', status: 'derived', inputs: ['ix-h200-gptoss-mxfp4-tp1-1k1k-c4', 'ix-h200-llama70b-fp8-tp1-1k1k-c4'] });

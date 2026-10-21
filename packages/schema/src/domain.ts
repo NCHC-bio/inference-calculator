@@ -150,8 +150,8 @@ export const QuantizationSchema = z.strictObject({
 });
 export type Quantization = z.infer<typeof QuantizationSchema>;
 
-/** A Hugging Face repo id `owner/name`. HF owner and repo names use letters, digits, '-', '_' and '.'. */
-export const HF_REPO_RE = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/;
+/** A Hugging Face repo id `owner/name`: letters, digits, '-', '_' and '.'; the owner starts with an alphanumeric and the name contains one (so never '.' or '..'). */
+export const HF_REPO_RE = /^[A-Za-z0-9][\w.-]*\/(?=[\w.-]*[A-Za-z0-9])[\w.-]+$/;
 export const HfRepoSchema = z.string().regex(HF_REPO_RE, 'Hugging Face repo id owner/name (no URL, no bare owner)');
 
 export const OriginSchema = z.strictObject({
@@ -424,6 +424,14 @@ export const BenchmarkRuleSchema = z.strictObject({
 });
 export type BenchmarkRule = z.infer<typeof BenchmarkRuleSchema>;
 
+/** Funnel defaults: total registered users -> peak concurrent users (workloads.yaml `funnel`, spec 2026-10-21 §5.5). */
+export const FunnelSchema = z.strictObject({
+  dailyActiveShare: unitFrac,
+  requestsPerActivePerDay: posNum,
+  peakHourShare: unitFrac,
+});
+export type Funnel = z.infer<typeof FunnelSchema>;
+
 export const MetaSchema = z.strictObject({ dataVersion: z.iso.date() });
 export type Meta = z.infer<typeof MetaSchema>;
 
@@ -464,3 +472,20 @@ export const CalibrationGapSchema = z.strictObject({
   note: z.string().min(1),
 });
 export type CalibrationGap = z.infer<typeof CalibrationGapSchema>;
+
+/**
+ * Template platform a user-entered (custom) platform of one engine borrows its efficiency factors, vLLM defaults and KV
+ * block size from (spec 2026-10-21-direct-manipulation-design §5.3, §6.2). The validator checks that `platform` exists
+ * and that its calibration profile's engine equals the key; `evidence` are source ids.
+ */
+const CustomHardwareTemplateSchema = z.strictObject({
+  platform: id,
+  rationale: z.string().min(1),
+  evidence: z.array(id).min(1),
+});
+export type CustomHardwareTemplate = z.infer<typeof CustomHardwareTemplateSchema>;
+
+export const CustomHardwareSchema = z.strictObject({
+  templates: z.strictObject({ vllm: CustomHardwareTemplateSchema, mlx: CustomHardwareTemplateSchema }),
+});
+export type CustomHardware = z.infer<typeof CustomHardwareSchema>;

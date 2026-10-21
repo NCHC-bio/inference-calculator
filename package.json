@@ -4,11 +4,14 @@
   "type": "module",
   "packageManager": "pnpm@12.9.1",
   "scripts": {
-    "test": "vitest run",
-    "typecheck": "pnpm -r exec tsc -b",
+    "test": "pnpm data:build && pnpm calibrate && vitest run",
+    "typecheck": "pnpm data:build && pnpm calibrate && pnpm -r exec tsc -b",
     "data:build": "tsx packages/data/src/build.ts",
     "data:import": "tsx packages/data/src/hf-import.ts",
-    "calibrate": "tsx packages/data/src/calibrate.ts"
+    "calibrate": "tsx packages/data/src/calibrate.ts",
+    "web:dev": "pnpm --filter @nchc/web dev",
+    "web:build": "pnpm --filter @nchc/web build",
+    "web:e2e": "pnpm --filter @nchc/web exec playwright test"
   },
   "devDependencies": {
     "@types/node": "25.9.9",

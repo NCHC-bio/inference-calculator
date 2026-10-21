@@ -1,3 +1,8 @@
+/** "TP t，共 t 張卡" (Macs: machines): the memory figures beside it are per replica, not per card or per node. */
+function perReplica(platform: ResolvedPlatform, t: number): string {
+  return `TP ${t}，共 ${t} ${platform.unit === 'machine' ? '台' : '張卡'}`;
+}
+
 /**
  * Deployment solver: legal tensor-parallel sizes, shape feasibility, minimum-GPU solve and
  * capacity search. Allocation unit is the GPU (spec §10.2): a replica uses t GPUs inside one
@@ -152,9 +157,11 @@ export function kvSizing(
  * Why a shape / scenario is infeasible. 'tp': no tensor-parallel size vLLM accepts fits the platform (head
  * divisibility, t ≤ gpusPerNode); 'context': input + output beyond the model's maxContext; 'weights': the weights
  * fit on no single-node shape; 'mem': the KV cache does not fit beside them; 'bw' / 'compute': per-user speed
- * below target, by the decode bottleneck; 'ttft': first-token time above target.
+ * below target, by the decode bottleneck; 'ttft': first-token time above target; 'scale': a deployment exists but its
+ * GPU (machine) count exceeds MAX_GPUS, the bound every public entry point accepts for a GPU or replica count (final
+ * review I2: that one platform is reported infeasible instead of the request throwing).
  */
-export type Why = 'tp' | 'context' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft';
+export type Why = 'tp' | 'context' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft' | 'scale';
 
 /**
  * Prefill queueing behind vLLM max_num_batched_tokens (Ruling R36, spec §5.2, §5.3), per replica / DP rank.
@@ -218,7 +225,7 @@ export function queueingFor(
     waitSec,
     reason:
       `每步需處理約 ${Math.round(tokensPerStep)} token（解碼 ${genBatch} + 預填 ${Math.round(genBatch * r)}），` +
-      `超過 vLLM max_num_batched_tokens ${budget}：每副本最多 ${dMax} 人同時解碼，其餘 ${waiting} 人在伺服器排隊等預填，` +
+      `超過 vLLM max_num_batched_tokens ${budget}：每份模型最多 ${dMax} 人同時解碼，其餘 ${waiting} 人在伺服器排隊等預填，` +
       `平均多等約 ${wait} 秒（Little's law），已計入首字時間`,
   };
 }
@@ -231,6 +238,8 @@ export function ctxWeightBytes(ctx: Pick<Ctx, 'model' | 'bytesPerParam' | 'weigh
   return ctx.weights?.resident ?? weightBytes(ctx.model, ctx.bytesPerParam);
 }
 export const MAX_N = 1e7;
+/** Largest GPU (machine) count, and so replica count, a result may use: the public API's input bound (api.ts schemas). */
+export const MAX_GPUS = 1e5;
 
 /**
  * KV-head counts the TP divisibility rule applies to: every attention layer group's kvHeads (falling back to the
@@ -381,6 +390,68 @@ export function checkShape(
   };
 }
 
+/** One replica of `shape` at n users (spec §8.3.3 細節面板; v7 草稿 DetailT 的四根使用率條). */
+export type ShapeUsage = {
+  shape: Shape;
+  /** Bytes per replica: usable = memBytes × memUtil; kv = residentPerReplica × kvSizing.perSeq. */
+  memory: {
+    usableBytes: number;
+    weightsBytes: number;
+    kvBytes: number;
+    reserveBytes: number;
+    perUserKvBytes: number;
+    residentPerReplica: number;
+  };
+  /** 1 = at the limit. mem = (weights + reserve + kv) / usable; bw = step.bwSec / step.stepSec;
+   *  compute = step.computeSec / step.stepSec; ttft = ttftSec / speed.maxTtftSec. */
+  share: { mem: number; bw: number; compute: number; ttft: number };
+  tokPerSecPerUser: number;
+  ttftSec: number;
+  /** Roofline coordinates of one decode step per GPU (peak and bandwidth are hardware, not multiplied by η). */
+  roofline: { peakTflopsPerGpu: number; memBwTBsPerGpu: number; intensityFlopPerByte: number; achievedTflopsPerGpu: number };
+};
+
+/**
+ * Usage of one replica of `shape` serving `n` users, for the detail panel's four bars (spec §8.3.3; v7 draft DetailT):
+ * memory composition [R-LEC B3] (usable = memBytes × memUtil, weights ctxWeightBytes, the in-flight reserve and the
+ * resident sequences' steady-state KV, kvSizing) and the shares of each limit. bw / compute are the shares of the step
+ * time (v7 draft); the largest of the four shares is the bottleneck. Step, TTFT and residentPerReplica come from
+ * checkShape, so no formula is repeated here. Shares above 1 mean the shape is infeasible on that limit.
+ */
+export function shapeUsage(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, n: number, eta: EtaMode): ShapeUsage {
+  const c = checkShape(ctx, platform, shape, n, eta);
+  const r = platform.replicaFor(shape.tp, eta);
+  const usableBytes = r.memBytes * r.memUtil;
+  const weightsBytes = ctxWeightBytes(ctx);
+  const kv = kvSizing(ctx, platform, shape.tp);
+  const kvBytes = c.residentPerReplica * kv.perSeq;
+  return {
+    shape,
+    memory: {
+      usableBytes,
+      weightsBytes,
+      kvBytes,
+      reserveBytes: kv.reserve,
+      perUserKvBytes: kv.perSeq,
+      residentPerReplica: c.residentPerReplica,
+    },
+    share: {
+      mem: (weightsBytes + kv.reserve + kvBytes) / usableBytes,
+      bw: c.step.bwSec / c.step.stepSec,
+      compute: c.step.computeSec / c.step.stepSec,
+      ttft: c.ttftSec / ctx.speed.maxTtftSec,
+    },
+    tokPerSecPerUser: c.tokPerSecPerUser,
+    ttftSec: c.ttftSec,
+    roofline: {
+      peakTflopsPerGpu: r.flopsPerSec / r.tp / 1e12,
+      memBwTBsPerGpu: r.memBwBytesPerSec / r.tp / 1e12,
+      intensityFlopPerByte: c.step.flop / c.step.bytes,
+      achievedTflopsPerGpu: c.step.flop / c.step.stepSec / r.tp / 1e12,
+    },
+  };
+}
+
 const GB = (bytes: number) => (bytes / 1e9).toFixed(0);
 
 /** input + output beyond the model's maxContext (review C3); a model without maxContext never exceeds. */
@@ -395,7 +466,7 @@ export function contextDetail(ctx: Pick<Ctx, 'model' | 'workload'>): string {
 }
 
 /** How far a single-user check got before failing, in the reporting order of Ruling R24 / R25. */
-const progress = (c: ReturnType<typeof checkShape>, maxTtftSec: number, minTokPerSec: number): number =>
+export const progress = (c: ReturnType<typeof checkShape>, maxTtftSec: number, minTokPerSec: number): number =>
   c.why === 'context' ? -1
     : c.why === 'weights' ? 0
       : c.why === 'mem' ? 1
@@ -436,7 +507,7 @@ export function singleUserWhy(
     const r = platform.replicaFor(tMax, eta);
     return {
       why: 'weights',
-      detail: `模型權重需要 ${GB(ctxWeightBytes(ctx))} GB，${where}（TP ${tMax}）只有 ${GB(r.memBytes * r.memUtil)} GB 可用（跨 node 切分尚未支援）`,
+      detail: `模型權重需要 ${GB(ctxWeightBytes(ctx))} GB，但${where}內最大的一份模型（${perReplica(platform, tMax)}）只有 ${GB(r.memBytes * r.memUtil)} GB 可用（跨 node 切分尚未支援）`,
     };
   }
   if (furthest === 1) {
@@ -448,8 +519,8 @@ export function singleUserWhy(
     return {
       why: 'mem',
       detail: startup
-        ? `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}（TP ${tOne}，可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 vLLM 啟動檢查的 1 人上限（約 ${(kv.upperBound / 1e9).toFixed(1)} GB，sliding window 層以 window − 1 + 進行中的 ${platform.slidingInFlightTokens} 個 token 計，取整到 KV block 後再加 1 個 block），vLLM 啟動時會拒絕（跨 node 切分尚未支援）`
-        : `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}（TP ${tOne}，可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 1 人的上下文（約 ${(Math.max(kv.perSeq + kv.reserve, kv.upperBound) / 1e9).toFixed(1)} GB）（跨 node 切分尚未支援）`,
+        ? `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}內的一份模型（${perReplica(platform, tOne)}，每份可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 vLLM 啟動檢查的 1 人上限（約 ${(kv.upperBound / 1e9).toFixed(1)} GB，sliding window 層以 window − 1 + 進行中的 ${platform.slidingInFlightTokens} 個 token 計，取整到 KV block 後再加 1 個 block），vLLM 啟動時會拒絕（跨 node 切分尚未支援）`
+        : `模型權重 ${GB(ctxWeightBytes(ctx))} GB 放進${where}內的一份模型（${perReplica(platform, tOne)}，每份可用 ${GB(r.memBytes * r.memUtil)} GB）後，剩下的記憶體放不下 1 人的上下文（約 ${(Math.max(kv.perSeq + kv.reserve, kv.upperBound) / 1e9).toFixed(1)} GB）（跨 node 切分尚未支援）`,
     };
   }
   if (furthest === 2) {
@@ -474,6 +545,7 @@ export function singleUserWhy(
  * model ('context', review C3). Then a single user is checked at every legal t; if none works, the
  * reason comes from the t that got furthest: weights, then one sequence's KV beside the weights
  * ('mem', Ruling R25), then TTFT (independent of n and replicas), then per-user speed (Ruling R24).
+ * A fewest-GPU shape above MAX_GPUS GPUs (machines) is reported as 'scale' (final review I2).
  * Basis: spec §10.2 (allocation), §8.3.3 (concurrency).
  */
 export function solveMinGpus(
@@ -519,6 +591,10 @@ export function solveMinGpus(
   }
   // The single-user pre-check found a t where one user works, so one user per replica always does.
   if (!best) throw new Error('solveMinGpus: no feasible shape although one user fits (unreachable)');
+  if (best.gpus > MAX_GPUS) {
+    const what = platform.unit === 'machine' ? '需要的機器數' : '需要的 GPU 數';
+    return { ok: false, why: 'scale', detail: `${what}（${best.gpus}）超過計算上限（${MAX_GPUS}）` };
+  }
   return { ok: true, shape: best.shape, gpus: best.gpus, check: best.check };
 }
 
@@ -596,6 +672,8 @@ export type SpeedPoint = {
   aggregateTokPerSec: number;
   /** TTFT incl. the queueing wait. */
   ttftSec: number;
+  /** What breaks at this many users (checkShape why); null when the shape serves them. */
+  why: Why | null;
 };
 
 /** Points of the speed curve (final-review I3): this many n from 1 up to the capacity, evenly spaced. */
@@ -616,18 +694,25 @@ export function shapeProfile(
   shape: Shape,
   n: number,
   eta: EtaMode,
+  pointCount = SPEED_CURVE_POINTS,
 ): { memoryOnlyMax: number; bottleneck: Why | null; speedCurve: { shape: Shape; points: SpeedPoint[] } | null } {
   const one = checkShape(ctx, platform, shape, 1, eta);
   const memoryOnlyMax = one.why === 'context' || one.why === 'weights' ? 0 : Math.min(MAX_N, one.capacityPerReplica * shape.replicas);
   const bottleneck = n >= MAX_N ? null : checkShape(ctx, platform, shape, n + 1, eta).why;
   if (n < 1) return { memoryOnlyMax, bottleneck, speedCurve: null };
-  const ns = [...new Set(Array.from({ length: SPEED_CURVE_POINTS }, (_, i) => Math.max(1, Math.round(((i + 1) * n) / SPEED_CURVE_POINTS))))];
+  const ns = [...new Set(Array.from({ length: pointCount }, (_, i) => Math.max(1, Math.round(((i + 1) * n) / pointCount))))];
   const points = ns.map((users) => {
     const c = checkShape(ctx, platform, shape, users, eta);
     const gen = concurrencyFor(users, ctx.kind, ctx.agentShare).generating;
     const perReplica = Math.ceil(gen / shape.replicas);
     const decoding = Math.min(gen, shape.replicas * (c.queueing ? c.queueing.decodingMax : perReplica));
-    return { users, tokPerSecPerUser: c.tokPerSecPerUser, aggregateTokPerSec: decoding * c.tokPerSecPerUser, ttftSec: c.ttftSec };
+    return { users, tokPerSecPerUser: c.tokPerSecPerUser, aggregateTokPerSec: decoding * c.tokPerSecPerUser, ttftSec: c.ttftSec, why: c.why };
   });
   return { memoryOnlyMax, bottleneck, speedCurve: { shape, points } };
+}
+
+/** Plain-language split (design §3.7): one model spans `tp` cards, `replicas` copies; machine platforms are counted per machine. */
+export function splitPhrase(tp: number, replicas: number, machine: boolean): string {
+  if (machine) return `每台各跑一份模型，共 ${replicas} 份`;
+  return tp === 1 ? `每張卡各跑一份模型，共 ${replicas} 份` : `每 ${tp} 張卡合跑一份模型，共 ${replicas} 份`;
 }

@@ -5,8 +5,10 @@ import {
   checkShape,
   kvSizing,
   legalTpOptions,
+  MAX_GPUS,
   maxConcurrent,
   maxConcurrentForGpus,
+  shapeUsage,
   solveMinGpus,
   type Ctx,
   type ResolvedPlatform,
@@ -167,6 +169,7 @@ describe('review focus', () => {
     expect(r).toMatchObject({ ok: false, why: 'weights' });
     if (r.ok) throw new Error('unreachable');
     expect(r.detail).toContain('跨 node 切分尚未支援');
+    expect(r.detail).toContain('最大的一份模型（TP 8，共 8 張卡）只有');
     expect(r.detail).not.toMatch(/NaN/);
   });
   it('legal TP follows vLLM head divisibility', () => {
@@ -235,14 +238,20 @@ describe('checkShape and solver details', () => {
     expect(maxConcurrentForGpus(chatCtx, mac, 3, 'expected')).toEqual({ n: 0, shape: null });
     expect(maxConcurrentForGpus(chatCtx, h200, 0, 'expected')).toEqual({ n: 0, shape: null });
   });
-  it('no replica cap: 10 million users get an answer, consistent with the capacity path (review: old 999 cap)', () => {
-    const r = solveMinGpus(chatCtx, h200, 1e7, 'expected');
+  it('no replica cap: 1 million users get an answer, consistent with the capacity path (review: old 999 cap)', () => {
+    const r = solveMinGpus(chatCtx, h200, 1e6, 'expected');
     expect(r.ok).toBe(true);
     if (!r.ok) throw new Error('unreachable');
     expect(r.shape.replicas).toBeGreaterThan(999);
+    expect(r.gpus).toBeLessThanOrEqual(MAX_GPUS);
     // The capacity of exactly that many GPUs covers the users, and one replica fewer does not.
-    expect(maxConcurrent(chatCtx, h200, r.shape, 'expected')).toBeGreaterThanOrEqual(1e7);
-    expect(maxConcurrent(chatCtx, h200, { ...r.shape, replicas: r.shape.replicas - 1 }, 'expected')).toBeLessThan(1e7);
+    expect(maxConcurrent(chatCtx, h200, r.shape, 'expected')).toBeGreaterThanOrEqual(1e6);
+    expect(maxConcurrent(chatCtx, h200, { ...r.shape, replicas: r.shape.replicas - 1 }, 'expected')).toBeLessThan(1e6);
+  });
+  it("a fewest-GPU shape above MAX_GPUS is 'scale', naming the bound (final review I2)", () => {
+    const r = solveMinGpus(chatCtx, h200, 1e7, 'expected');
+    expect(r).toMatchObject({ ok: false, why: 'scale' });
+    expect(!r.ok && r.detail).toMatch(/^需要的 GPU 數（\d+）超過計算上限（100000）$/);
   });
   it('includeComm defaults on and only slows things down', () => {
     const on = checkShape({ ...chatCtx, includeComm: undefined }, h200, { tp: 8, replicas: 1 }, 100, 'expected');
@@ -471,7 +480,7 @@ describe('queueing model: prefill queues behind vLLM max_num_batched_tokens, wai
     expect(c.step.stepSec).toBe(t919);
     expect(c.tokPerSecPerUser).toBe(1 / t919);
     expect(q.reason).toBe(
-      '每步需處理約 8194 token（解碼 920 + 預填 7274），超過 vLLM max_num_batched_tokens 8192：每副本最多 919 人同時解碼，' +
+      '每步需處理約 8194 token（解碼 920 + 預填 7274），超過 vLLM max_num_batched_tokens 8192：每份模型最多 919 人同時解碼，' +
         '其餘 1 人在伺服器排隊等預填，平均多等約 0.02 秒（Little\'s law），已計入首字時間',
     );
   });
@@ -549,5 +558,44 @@ describe('queueing model: prefill queues behind vLLM max_num_batched_tokens, wai
     }
     // Without the budget the same shape serves far more (memory / speed bound).
     expect(maxConcurrent(loose, h200, shape, 'expected')).toBeGreaterThan(1008);
+  });
+});
+
+describe('shapeUsage (spec §8.3.3 細節面板)', () => {
+  const shape = { tp: 8, replicas: 2 };
+  it('memory composition per replica [R-LEC B3]: usable, weights, resident × perSeq KV', () => {
+    const u = shapeUsage(chatCtx, h200, shape, 100, 'expected');
+    expect(u.shape).toEqual(shape);
+    expect(u.memory.usableBytes).toBeCloseTo(8 * 141e9 * 0.9, 0);
+    expect(u.memory.weightsBytes).toBeCloseTo(70.55e9, 0);
+    expect(u.memory.residentPerReplica).toBe(50);
+    expect(u.memory.perUserKvBytes).toBe(1149 * 163840);
+    expect(u.memory.kvBytes).toBe(50 * 1149 * 163840);
+    expect(u.memory.reserveBytes).toBe(0);
+    expect(u.share.mem).toBeCloseTo((70.55e9 + 50 * 1149 * 163840) / (8 * 141e9 * 0.9), 12);
+  });
+  it('time shares and speed come from checkShape at the same n', () => {
+    const c = checkShape(chatCtx, h200, shape, 100, 'expected');
+    const u = shapeUsage(chatCtx, h200, shape, 100, 'expected');
+    expect(u.share.bw).toBeCloseTo(c.step.bwSec / c.step.stepSec, 12);
+    expect(u.share.compute).toBeCloseTo(c.step.computeSec / c.step.stepSec, 12);
+    expect(u.share.ttft).toBeCloseTo(c.ttftSec / smooth.maxTtftSec, 12);
+    expect(u.tokPerSecPerUser).toBe(c.tokPerSecPerUser);
+    expect(u.ttftSec).toBe(c.ttftSec);
+  });
+});
+
+describe('shapeUsage roofline', () => {
+  it('roofline point lies under the roof', () => {
+    const shape = { tp: 8, replicas: 2 };
+    const u = shapeUsage(chatCtx, h200, shape, 100, 'expected');
+    const c = checkShape(chatCtx, h200, shape, 100, 'expected');
+    const r = h200.replicaFor(8, 'expected');
+    const rf = u.roofline;
+    expect(rf.peakTflopsPerGpu).toBeCloseTo(r.flopsPerSec / 8 / 1e12, 12);
+    expect(rf.memBwTBsPerGpu).toBeCloseTo(r.memBwBytesPerSec / 8 / 1e12, 12);
+    expect(rf.intensityFlopPerByte).toBeCloseTo(c.step.flop / c.step.bytes, 12);
+    expect(rf.achievedTflopsPerGpu).toBeGreaterThan(0);
+    expect(rf.achievedTflopsPerGpu).toBeLessThanOrEqual(Math.min(rf.peakTflopsPerGpu, rf.intensityFlopPerByte * rf.memBwTBsPerGpu));
   });
 });

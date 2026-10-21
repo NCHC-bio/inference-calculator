@@ -174,6 +174,24 @@ describe('real config', () => {
     for (const p of report.points) expect(Number.isFinite(p.predicted)).toBe(true);
   });
 
+  it('byPlatform summarises points per platform, metric and role', () => {
+    const results = runCalibration(bundle!);
+    const sel = results.filter(
+      (r) => r.platform === 'nano5-h200' && r.metric === 'decodeTokPerSec' && r.role === 'fit' && Number.isFinite(r.errorPct),
+    );
+    expect(sel.length).toBeGreaterThan(0);
+    const abs = sel.map((r) => Math.abs(r.errorPct));
+    const row = report.byPlatform.find((x) => x.platform === 'nano5-h200' && x.metric === 'decodeTokPerSec' && x.role === 'fit')!;
+    expect(row.n).toBe(sel.length);
+    expect(row.meanAbsErrorPct).toBeCloseTo(abs.reduce((a, b) => a + b, 0) / abs.length, 9);
+    expect(row.maxAbsErrorPct).toBeCloseTo(Math.max(...abs), 9);
+    // Only combinations with n >= 1; order follows bundle.platforms.
+    expect(report.byPlatform.every((x) => x.n >= 1)).toBe(true);
+    const order = Object.keys(bundle!.platforms);
+    const idx = report.byPlatform.map((x) => order.indexOf(x.platform));
+    expect(idx).toEqual([...idx].sort((a, b) => a - b));
+  });
+
   it('lists the NVIDIA gaps: GB200 only, since InferenceX covers H100 / H200 (Ruling R41)', () => {
     expect(report.gaps).toEqual(['nvidia-gb200']);
     expect(report.gapNote.length).toBeGreaterThan(0);

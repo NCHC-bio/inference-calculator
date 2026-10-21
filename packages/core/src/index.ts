@@ -6,9 +6,16 @@ export {
   explain,
   verifyCommand,
   resolvePlatform,
+  resolveCustomPlatform,
+  CustomPlatformInputSchema,
+  type CustomPlatformInput,
+  type ResolvedApiPlatform,
   resolveModel,
   resolveQuant,
   predictMeasurement,
+  quantOptions,
+  quantOptionsFor,
+  type ImportedModelInput,
   QueryInputSchema,
   ModelOverrideSchema,
   type QueryInput,
@@ -28,6 +35,9 @@ export {
   type QuantResolution,
   type BasisItem,
   type Queueing,
+  type ShapeUsage,
+  type CapacityResult,
+  type SpeedCurve,
   CoreInputError,
   type CoreInputErrorCode,
   CUSTOM_MODEL_WARNING,
@@ -35,9 +45,25 @@ export {
 } from './api';
 /** Model math the data package reuses for config validation (Ruling R31c: one formula, no copies). */
 /** Excluded-org owner lookup used by the config validator on the catalog (spec §2.2); not applied to user input. */
-export { excludedOrgOf } from './policy';
+export { excludedOrgOf, secondarySourceIssue, nativeQuantIssue, type NativeQuantIssue } from './policy';
 export { expertParamsTotalB, activeParamsB, moeParamsIssue, mlaLayoutIssues, layerShapeIssues } from './model-math';
 export type { ResolvedPlatform, Shape, Why, EtaMode, Ctx } from './solve';
 /** vLLM's TP legality rule, shared with the config validator for calibration points (Ruling R41). */
 export { legalTpOptions } from './solve';
+/** Per-shape usage for the web detail panel (spec §8.3.3). */
+export { shapeUsage } from './solve';
 export type { Replica, WorkloadIn } from './timing';
+/** Performance of a chosen platform, GPU count and user count (spec 2026-10-21 §5.1). */
+export {
+  estimatePerformance,
+  estimatePerformanceSweep,
+  PerformanceInputSchema,
+  PERFORMANCE_CURVE_POINTS,
+  type PerformanceInput,
+  type PerformanceResult,
+  type SplitEval,
+  type SweepInput,
+  type SweepPoint,
+} from './performance';
+/** Peak concurrent users from the total registered users (spec 2026-10-21 §5.5). */
+export { peakConcurrentFromTotal, type FunnelInput, type FunnelResult } from './funnel';

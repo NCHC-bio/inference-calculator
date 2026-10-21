@@ -9,15 +9,20 @@
  * Pure: no Node or DOM APIs; the bundle is passed in.
  */
 import { z } from 'zod';
-import { HfRepoSchema, LayerGroupSchema, type Bundle, type Hardware, type Model, type Quantization } from '@nchc/schema';
+import {
+  HfRepoSchema, LayerGroupSchema, ModelSchema, SourceSchema, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
+} from '@nchc/schema';
 import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } from './basis';
 import {
   capacityWhy,
   checkShape,
   legalTpOptions,
+  MAX_GPUS,
   MAX_N,
   mlaBackendBlocks,
   shapeProfile,
+  shapeUsage,
+  type ShapeUsage,
   type SpeedPoint,
   maxConcurrent,
   maxConcurrentForGpus,
@@ -29,22 +34,24 @@ import {
   type ResolvedPlatform,
   type Shape,
   type Why,
+  splitPhrase,
 } from './solve';
 import { concurrencyFor } from './concurrency';
 import { CoreInputError, parseInput } from './errors';
 import { embeddingParams, expertParamsTotalB, hasSlidingLayers, inputEmbeddingBytes, layerShapeIssues, mlaLayoutIssues, moeParamsIssue } from './model-math';
+import { nativeQuantIssue, secondarySourceIssue } from './policy';
 import type { Replica, WorkloadIn } from './timing';
 
 export type { BasisItem } from './basis';
-export type { Queueing, SpeedPoint } from './solve';
+export type { Queueing, ShapeUsage, SpeedPoint } from './solve';
 export { CoreInputError, type CoreInputErrorCode } from './errors';
 
 // ---------------------------------------------------------------------------------------------
 // Input schemas
 // ---------------------------------------------------------------------------------------------
 
-const MAX_USERS = 1e7;
-const MAX_GPUS = 1e5;
+/** Upper bound of `users` on every entry point (also caps the funnel result). */
+export const MAX_USERS = 1e7;
 const MAX_TOKENS = 1e7;
 
 /** Bounded positive integer: bounds keep every product in the formulas finite. */
@@ -107,7 +114,8 @@ export const ModelOverrideSchema = z
   });
 export type ModelOverride = z.input<typeof ModelOverrideSchema>;
 
-const WorkloadInputSchema = z.union([
+/** Internal: used by funnel.ts; not re-exported from index.ts. */
+export const WorkloadInputSchema = z.union([
   z.string().min(1),
   z
     .strictObject({
@@ -119,12 +127,17 @@ const WorkloadInputSchema = z.union([
     .strict(),
 ]);
 
-const SpeedInputSchema = z.union([
+/** Internal: used by funnel.ts; not re-exported from index.ts. */
+export const SpeedInputSchema = z.union([
   z.string().min(1),
   z.strictObject({ minTokPerSec: z.number().positive().max(1e6), maxTtftSec: z.number().positive().max(1e6) }).strict(),
 ]);
 
-const ModelInputSchema = z.union([z.string().min(1), ModelOverrideSchema]);
+/** A model imported from Hugging Face (`data:import` output) with the source its fields cite; not in the catalog. */
+const ImportedModelSchema = z.strictObject({ imported: z.strictObject({ model: ModelSchema, source: SourceSchema }) });
+export type ImportedModelInput = { imported: { model: z.input<typeof ModelSchema>; source: z.input<typeof SourceSchema> } };
+
+const ModelInputSchema = z.union([z.string().min(1), ModelOverrideSchema, ImportedModelSchema]);
 const usersSchema = z.number().int().positive().max(MAX_USERS);
 
 /** Query shared by every entry point. */
@@ -139,8 +152,42 @@ export const QueryInputSchema = z.strictObject({
 });
 export type QueryInput = z.input<typeof QueryInputSchema>;
 
-const RequirementInputSchema = QueryInputSchema.extend({ users: usersSchema });
-/** estimateRequirements input: a QueryInput whose `users` is required. */
+/**
+ * A user-entered GPU or machine (spec 2026-10-21-direct-manipulation-design §5.3). `tflops` is the dense peak per GPU,
+ * used for any compute dtype; a machine is one per node.
+ */
+export const CustomPlatformInputSchema = z
+  .strictObject({
+    // No control or line-separator characters: the name lands in verify-command comment lines, and a newline would turn
+    // the rest of a shared link's name into a shell command.
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]+$/u, 'name must be one line without control characters'),
+    unit: z.enum(['gpu', 'machine']),
+    gpusPerNode: z.number().int().min(1).max(8),
+    memGB: z.number().positive().max(1e5),
+    memBwTBs: z.number().positive().max(1e3),
+    tflops: z.number().positive().max(1e6),
+    tdpW: z.number().positive().max(1e5).optional(),
+    nvlinkBidirGBs: z.number().positive().max(1e5).optional(),
+    engine: z.enum(['vllm', 'mlx']),
+  })
+  .refine((c) => c.unit === 'gpu' || c.gpusPerNode === 1, {
+    path: ['gpusPerNode'],
+    message: 'unit machine is one per node: gpusPerNode must be 1',
+  });
+export type CustomPlatformInput = z.input<typeof CustomPlatformInputSchema>;
+
+/** A QueryInput whose `users` is required (the base of estimateRequirements' and estimatePerformance's inputs). */
+export const UsersQueryInputSchema = QueryInputSchema.extend({ users: usersSchema });
+export const RequirementInputSchema = UsersQueryInputSchema.extend({
+  /** User-entered platforms, evaluated after the catalog as `custom:<i>` (spec 2026-10-21 §5.3). */
+  customPlatforms: z.array(CustomPlatformInputSchema).max(8).optional(),
+});
+/** estimateRequirements input: a QueryInput whose `users` is required, plus optional custom platforms. */
 export type RequirementInput = z.input<typeof RequirementInputSchema>;
 /** Capacity input: no `users` (the capacity is the answer; final-review M16 — it used to be accepted and ignored). */
 const CapacityInputSchema = QueryInputSchema.omit({ users: true }).extend({
@@ -193,11 +240,27 @@ function lookup<T>(rec: Record<string, T>, id: string, what: string): T {
  * Peak FLOPS: the dense value for `computeDtype` [R-LEC C1, C2], else `effective` (Mac).
  * Engine: the calibration profile's `engine` (review M-6).
  */
-export function resolvePlatform(
-  bundle: Bundle,
-  id: string,
-  computeDtype: Quantization['computeDtype'],
-): {
+export function resolvePlatform(bundle: Bundle, id: string, computeDtype: Quantization['computeDtype']): ResolvedApiPlatform {
+  const p = lookup(bundle.platforms, id, '平台');
+  const hw: Hardware = lookup(bundle.hardware, p.hardware, '硬體');
+  const cal = lookup(bundle.calibration, p.calibration, '校正設定');
+  const prefix = { platform: `platforms.${p.id}`, hardware: `hardware.${hw.id}`, calibration: `calibration.${cal.id}` };
+  return resolveFrom(p, hw, cal, computeDtype, {
+    item: (kind, field, label, s, lecRef) => fromSourced(`${prefix[kind]}.${field}`, label, s, lecRef),
+  });
+}
+
+/** Where a platform value comes from: the platform entry, its hardware or its calibration profile. */
+type ValueKind = 'platform' | 'hardware' | 'calibration';
+
+/** How resolveFrom turns each value it uses into a basis item (catalog: fromSourced; custom: user / borrowed). */
+type ResolveOpts = {
+  /** `field` is the value's dotted path inside its section (`memGB`, `tflops.fp8`, `vllmDefaults.maxNumSeqs`). */
+  item(kind: ValueKind, field: string, label: string, s: Parameters<typeof fromSourced>[2], lecRef?: string): BasisItem;
+};
+
+/** A platform resolved for one compute dtype (resolvePlatform / resolveCustomPlatform). */
+export type ResolvedApiPlatform = {
   platform: ApiPlatform;
   /** Values every calculation on this platform uses. */
   basis: BasisItem[];
@@ -217,13 +280,21 @@ export function resolvePlatform(
   kvBlockBasis?: KvBlockBasis;
   /** mlx-lm prefill_step_size (MLX only): added by ctxForPlatform when a prompt takes more than one chunk (Ruling R38). */
   prefillStepBasis?: BasisItem;
-} {
-  const p = lookup(bundle.platforms, id, '平台');
-  const hw: Hardware = lookup(bundle.hardware, p.hardware, '硬體');
-  const cal = lookup(bundle.calibration, p.calibration, '校正設定');
+};
+
+/**
+ * The one resolution of a platform entry, its hardware and its calibration profile (resolvePlatform for the catalog,
+ * resolveCustomPlatform for a user-entered one); `opts.item` builds every basis item.
+ */
+function resolveFrom(
+  p: Platform,
+  hw: Hardware,
+  cal: CalibrationProfile,
+  computeDtype: Quantization['computeDtype'],
+  opts: ResolveOpts,
+): ResolvedApiPlatform {
   const b = new BasisCollector();
-  const hwp = `hardware.${hw.id}`;
-  const calp = `calibration.${cal.id}`;
+  const { item } = opts;
 
   const peakKey = hw.tflops[computeDtype] ? computeDtype : hw.tflops.effective ? 'effective' : null;
   if (peakKey === null) {
@@ -232,28 +303,24 @@ export function resolvePlatform(
   const peak = hw.tflops[peakKey]!;
 
   b.add(
-    fromSourced(`platforms.${p.id}.gpusPerNode`, `${p.name} ${p.sub} 每 node 卡數`, p.gpusPerNode),
-    fromSourced(`${hwp}.memGB`, `${hw.name} 記憶體容量`, hw.memGB),
-    fromSourced(`${hwp}.memBwTBs`, `${hw.name} 記憶體頻寬`, hw.memBwTBs, 'B1'),
-    fromSourced(`${hwp}.tflops.${peakKey}`, `${hw.name} ${peakKey} 峰值算力（dense）`, peak, 'A4, C1, C2'),
+    item('platform', 'gpusPerNode', `${p.name} ${p.sub} 每 node 卡數`, p.gpusPerNode),
+    item('hardware', 'memGB', `${hw.name} 記憶體容量`, hw.memGB),
+    item('hardware', 'memBwTBs', `${hw.name} 記憶體頻寬`, hw.memBwTBs, 'B1'),
+    item('hardware', `tflops.${peakKey}`, `${hw.name} ${peakKey} 峰值算力（dense）`, peak, 'A4, C1, C2'),
     // η_bw has no lecture counterpart (lecture-formulas.md A4, B1): the calculator adds it by analogy with A4's
     // utilisation; its value is the calibration profile's, so no lecRef (review L5).
-    fromSourced(`${calp}.etaBw`, '頻寬效率 η_bw（預期；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBw),
-    fromSourced(`${calp}.etaBwLow`, '頻寬效率 η_bw（保守；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBwLow),
-    fromSourced(`${calp}.etaCompute`, '算力效率 η_compute', cal.etaCompute, 'A4'),
-    fromSourced(`${calp}.memUtil`, '記憶體可用比例', cal.memUtil),
+    item('calibration', 'etaBw', '頻寬效率 η_bw（預期；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBw),
+    item('calibration', 'etaBwLow', '頻寬效率 η_bw（保守；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBwLow),
+    item('calibration', 'etaCompute', '算力效率 η_compute', cal.etaCompute, 'A4'),
+    item('calibration', 'memUtil', '記憶體可用比例', cal.memUtil),
   );
   const latency = p.allreduceLatencyUs ?? cal.allreduceLatencyUs;
   const commBasis: BasisItem[] = [];
-  if (hw.nvlinkBidirGBs) commBasis.push(fromSourced(`${hwp}.nvlinkBidirGBs`, `${hw.name} NVLink 雙向頻寬`, hw.nvlinkBidirGBs));
+  if (hw.nvlinkBidirGBs) commBasis.push(item('hardware', 'nvlinkBidirGBs', `${hw.name} NVLink 雙向頻寬`, hw.nvlinkBidirGBs));
   commBasis.push(
-    fromSourced(
-      p.allreduceLatencyUs ? `platforms.${p.id}.allreduceLatencyUs` : `${calp}.allreduceLatencyUs`,
-      'all-reduce 延遲',
-      latency,
-    ),
+    item(p.allreduceLatencyUs ? 'platform' : 'calibration', 'allreduceLatencyUs', 'all-reduce 延遲', latency),
   );
-  const tdpBasis = fromSourced(`${hwp}.tdpW`, `${hw.name} TDP`, hw.tdpW, 'D1');
+  const tdpBasis = item('hardware', 'tdpW', `${hw.name} TDP`, hw.tdpW, 'D1');
 
   const memBytes = hw.memGB.value * 1e9;
   const bw = hw.memBwTBs.value * 1e12;
@@ -330,19 +397,19 @@ export function resolvePlatform(
     },
   };
   const kvOverrideBasis = cal.kvBytesPerElemOverride
-    ? fromSourced(`${calp}.kvBytesPerElemOverride`, 'KV cache 每元素位元組（推論引擎固定，取代量化格式的值）', cal.kvBytesPerElemOverride, 'B3, C1')
+    ? item('calibration', 'kvBytesPerElemOverride', 'KV cache 每元素位元組（推論引擎固定，取代量化格式的值）', cal.kvBytesPerElemOverride, 'B3, C1')
     : undefined;
   const vd = p.vllmDefaults;
   const vllmDefaultsBasis = vd
     ? {
-        maxNumSeqs: fromSourced(`platforms.${p.id}.vllmDefaults.maxNumSeqs`, `${p.name} ${p.sub} vLLM 預設 max_num_seqs`, vd.maxNumSeqs),
-        maxNumBatchedTokens: fromSourced(
-          `platforms.${p.id}.vllmDefaults.maxNumBatchedTokens`,
+        maxNumSeqs: item('platform', 'vllmDefaults.maxNumSeqs', `${p.name} ${p.sub} vLLM 預設 max_num_seqs`, vd.maxNumSeqs),
+        maxNumBatchedTokens: item(
+          'platform', 'vllmDefaults.maxNumBatchedTokens',
           `${p.name} ${p.sub} vLLM 預設 max_num_batched_tokens（每步 chunked prefill 的 token 上限；sliding window 層在 window 之外暫存進行中的 chunk）`,
           vd.maxNumBatchedTokens,
         ),
-        maxConcurrentBatches: fromSourced(
-          `platforms.${p.id}.vllmDefaults.maxConcurrentBatches`,
+        maxConcurrentBatches: item(
+          'platform', 'vllmDefaults.maxConcurrentBatches',
           `${p.name} ${p.sub} vLLM 同時進行的批次數 max_concurrent_batches（async scheduling 預設開啟、PP = 1：2）；× max_num_batched_tokens = 進行中 token 上限`,
           vd.maxConcurrentBatches,
         ),
@@ -352,19 +419,19 @@ export function resolvePlatform(
     cal.engine === 'vllm' && vd
       ? {
           engine: 'vllm',
-          standard: fromSourced(`platforms.${p.id}.vllmDefaults.kvBlockSize`, `${p.name} ${p.sub} vLLM KV block 大小（token；KV 以整個 block 配置）`, vd.kvBlockSize),
-          mlaFp8Kv: fromSourced(`platforms.${p.id}.vllmDefaults.mlaKvBlockSize.fp8Kv`, `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（FP8 KV，token）`, vd.mlaKvBlockSize.fp8Kv),
-          mlaBf16Kv: fromSourced(`platforms.${p.id}.vllmDefaults.mlaKvBlockSize.bf16Kv`, `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（16-bit KV，token）`, vd.mlaKvBlockSize.bf16Kv),
+          standard: item('platform', 'vllmDefaults.kvBlockSize', `${p.name} ${p.sub} vLLM KV block 大小（token；KV 以整個 block 配置）`, vd.kvBlockSize),
+          mlaFp8Kv: item('platform', 'vllmDefaults.mlaKvBlockSize.fp8Kv', `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（FP8 KV，token）`, vd.mlaKvBlockSize.fp8Kv),
+          mlaBf16Kv: item('platform', 'vllmDefaults.mlaKvBlockSize.bf16Kv', `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（16-bit KV，token）`, vd.mlaKvBlockSize.bf16Kv),
           ...(vd.mlaKvBlockSize.otherwise
             ? {
                 mlaOtherwise: {
-                  fp8Kv: fromSourced(
-                    `platforms.${p.id}.vllmDefaults.mlaKvBlockSize.otherwise.fp8Kv`,
+                  fp8Kv: item(
+                    'platform', 'vllmDefaults.mlaKvBlockSize.otherwise.fp8Kv',
                     `${p.name} ${p.sub} vLLM MLA 備用 backend 的 KV block 大小（qk_nope_head_dim 不在 ${vd.mlaKvBlockSize.qkNopeHeadDims?.join('／')} 時；FP8 KV，token）`,
                     vd.mlaKvBlockSize.otherwise.fp8Kv,
                   ),
-                  bf16Kv: fromSourced(
-                    `platforms.${p.id}.vllmDefaults.mlaKvBlockSize.otherwise.bf16Kv`,
+                  bf16Kv: item(
+                    'platform', 'vllmDefaults.mlaKvBlockSize.otherwise.bf16Kv',
                     `${p.name} ${p.sub} vLLM MLA 備用 backend 的 KV block 大小（qk_nope_head_dim 不在 ${vd.mlaKvBlockSize.qkNopeHeadDims?.join('／')} 時；16-bit KV，token）`,
                     vd.mlaKvBlockSize.otherwise.bf16Kv,
                   ),
@@ -373,19 +440,19 @@ export function resolvePlatform(
             : {}),
         }
       : cal.engine === 'mlx' && cal.mlxDefaults
-        ? { engine: 'mlx', step: fromSourced(`${calp}.mlxDefaults.kvCacheStep`, 'mlx-lm KVCache 每次擴充的 token 數（KV 以此為單位配置）', cal.mlxDefaults.kvCacheStep) }
+        ? { engine: 'mlx', step: item('calibration', 'mlxDefaults.kvCacheStep', 'mlx-lm KVCache 每次擴充的 token 數（KV 以此為單位配置）', cal.mlxDefaults.kvCacheStep) }
         : undefined;
   return {
     platform, basis: b.list(), ...(kvOverrideBasis ? { kvOverrideBasis } : {}), tdpBasis, commBasis,
-    tFixedBasis: fromSourced(`${calp}.tFixedSec`, '每步固定開銷 t_fixed（秒；decode 每步、prefill 每段各一次）', cal.tFixedSec, 'G2'),
+    tFixedBasis: item('calibration', 'tFixedSec', '每步固定開銷 t_fixed（秒；decode 每步、prefill 每段各一次）', cal.tFixedSec, 'G2'),
     // No lecture formula: the value and its form come from the R41 calibration only (final-review M7).
-    ttftOverheadBasis: fromSourced(`${calp}.ttftOverheadSec`, '每個請求的首字固定開銷（秒；每個請求一次，加在 TTFT；形式與數值都來自 Ruling R41 的校正擬合）', cal.ttftOverheadSec),
+    ttftOverheadBasis: item('calibration', 'ttftOverheadSec', '每個請求的首字固定開銷（秒；每個請求一次，加在 TTFT；形式與數值都來自 Ruling R41 的校正擬合）', cal.ttftOverheadSec),
     ...(vllmDefaultsBasis ? { vllmDefaultsBasis } : {}),
     ...(kvBlockBasis ? { kvBlockBasis } : {}),
     ...(cal.engine === 'mlx' && cal.mlxDefaults
       ? {
-          prefillStepBasis: fromSourced(
-            `${calp}.mlxDefaults.prefillStepSize`,
+          prefillStepBasis: item(
+            'calibration', 'mlxDefaults.prefillStepSize',
             'mlx-lm prefill_step_size（prompt 每段的 token 數；每段重讀一次權重）',
             cal.mlxDefaults.prefillStepSize,
           ),
@@ -395,11 +462,87 @@ export function resolvePlatform(
 }
 
 /**
+ * Placeholder provenance for a user value inside the synthetic Hardware / Platform; never shown, because
+ * resolveCustomPlatform's `item` turns every user value into a fromUser item.
+ */
+const userValue = <T>(value: T) => ({ value, status: 'unverified' as const, verified: '' });
+
+/**
+ * Resolve a custom platform (spec 2026-10-21 §5.3) through the same resolveFrom as the catalog: the user's numbers are
+ * `user` in the basis; the efficiency factors, all-reduce latency, t_fixed, TTFT overhead, vLLM defaults and KV block
+ * size come from `bundle.customHardware.templates[engine].platform` and are `estimate` ("borrowed"), citing the template
+ * value's sources plus the template's evidence. tpOptions: {1, 2, 4, 8} ≤ gpusPerNode when an interconnect bandwidth is
+ * given and the borrowed all-reduce latency is > 0 (Ruling R14), else [1]. Basis paths are `<pathPrefix>.<field>`.
+ */
+export function resolveCustomPlatform(
+  bundle: Bundle,
+  raw: CustomPlatformInput,
+  computeDtype: Quantization['computeDtype'],
+  /** Basis path prefix: 'custom' for a single platform, `custom:<i>` for row i of estimateRequirements (Ruling R4). */
+  pathPrefix = 'custom',
+): ResolvedApiPlatform {
+  const input = parseInput(CustomPlatformInputSchema, raw);
+  const tpl = bundle.customHardware.templates[input.engine];
+  const tplPlat = lookup(bundle.platforms, tpl.platform, '平台');
+  const cal = lookup(bundle.calibration, tplPlat.calibration, '校正設定');
+  if (cal.engine !== input.engine) throw new Error(`自訂硬體範本 ${tpl.platform} 的引擎是 ${cal.engine}，不是 ${input.engine}`);
+  const latency = tplPlat.allreduceLatencyUs ?? cal.allreduceLatencyUs;
+  const canSplit = input.nvlinkBidirGBs !== undefined && latency.value > 0;
+  const hw: Hardware = {
+    id: 'custom',
+    name: input.name,
+    memGB: userValue(input.memGB),
+    memBwTBs: userValue(input.memBwTBs),
+    tflops: { [computeDtype]: userValue(input.tflops) },
+    tdpW: userValue(input.tdpW ?? null),
+    ...(input.nvlinkBidirGBs !== undefined ? { nvlinkBidirGBs: userValue(input.nvlinkBidirGBs) } : {}),
+  };
+  const p: Platform = {
+    id: 'custom',
+    name: input.name,
+    sub: '自訂',
+    group: 'self',
+    unit: input.unit,
+    hardware: hw.id,
+    gpusPerNode: userValue(input.gpusPerNode),
+    tpOptions: canSplit ? ([1, 2, 4, 8] as const).filter((t) => t <= input.gpusPerNode) : [1],
+    calibration: cal.id,
+    ...(tplPlat.allreduceLatencyUs ? { allreduceLatencyUs: tplPlat.allreduceLatencyUs } : {}),
+    ...(tplPlat.vllmDefaults ? { vllmDefaults: tplPlat.vllmDefaults } : {}),
+  };
+  const borrowed = `這台硬體沒有實測，借用 ${tpl.platform} 的校正值（${tpl.rationale}）`;
+  return resolveFrom(p, hw, cal, computeDtype, {
+    item: (kind, field, label, s, lecRef) => {
+      const path = `${pathPrefix}.${field}`;
+      if (kind === 'hardware' || field === 'gpusPerNode') {
+        const u = fromUser(path, label, s.value, lecRef);
+        return s.value === null ? { ...u, text: `${label}；使用者未填` } : u;
+      }
+      const from = fromSourced(path, label, s, lecRef);
+      if (field.startsWith('vllmDefaults.')) {
+        // The template's derivation is about the template's own card; do not present it as this card's.
+        const tplHw = bundle.hardware[tplPlat.hardware];
+        const tplCard = tplHw ? `${tplHw.name} ${tplHw.memGB.value} GB` : tpl.platform;
+        return {
+          ...from,
+          status: 'estimate',
+          sourceIds: [...new Set([...from.sourceIds, ...tpl.evidence])],
+          text: `${label}；借用 ${tpl.platform} 的 vLLM 預設值（依 ${tplCard} 推得；你的卡記憶體不同時實際預設可能不同）；${borrowed}`,
+        };
+      }
+      return { ...from, status: 'estimate', sourceIds: [...new Set([...from.sourceIds, ...tpl.evidence])], text: `${from.text}；${borrowed}` };
+    },
+  });
+}
+
+/**
  * The Ctx for one platform: KV bytes per element = the platform's engine override when its
  * calibration profile has one (Ruling R32, e.g. MLX fp16 KV), else the quantization's. Adds the
  * value actually used to the basis, so the basis shows which one applied.
+ *
+ * Internal: used by performance.ts; not re-exported from index.ts.
  */
-function ctxForPlatform(
+export function ctxForPlatform(
   ctx: Ctx,
   quant: Quantization,
   resolved: {
@@ -463,8 +606,10 @@ function ctxForPlatform(
  * Add vLLM max_num_batched_tokens and the queueing rule (Little's law, Ruling R36) when the queueing model was evaluated
  * on a chosen shape: a null queue ("all decode within the budget") depends on them as much as a wait does, and the
  * wait enters the TTFT, the feasibility and the GPU count. MLX has no budget and adds nothing.
+ *
+ * Internal: used by performance.ts; not re-exported from index.ts.
  */
-function addQueueingBasis(
+export function addQueueingBasis(
   basis: BasisCollector,
   bundle: Bundle,
   resolved: { platform: ApiPlatform; vllmDefaultsBasis?: { maxNumBatchedTokens: BasisItem } },
@@ -478,8 +623,30 @@ function addQueueingBasis(
   }
 }
 
-/** Add the link bandwidth / all-reduce latency only when a chosen shape actually communicates (finding 7). */
-function addCommBasis(basis: BasisCollector, ctx: Ctx, commBasis: BasisItem[], shapes: Array<Shape | null | undefined>): void {
+/**
+ * Peak power gpus × TDP [R-LEC D1] for a feasible result (adds the TDP to `basis`); a note instead when infeasible or
+ * the TDP is unverified.
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export function powerFor(
+  basis: BasisCollector,
+  resolved: { platform: ApiPlatform; tdpBasis: BasisItem },
+  ok: boolean,
+  gpus: number,
+): { powerKw: number | null; powerNote?: string } {
+  if (!ok) return { powerKw: null, powerNote: '沒有可行配置，未計算功耗' };
+  basis.add(resolved.tdpBasis);
+  if (resolved.platform.tdpW === null) {
+    return { powerKw: null, powerNote: resolved.tdpBasis.status === 'user' ? '未填 TDP，未計算功耗' : '功耗未查證' };
+  }
+  return { powerKw: (gpus * resolved.platform.tdpW) / 1000 };
+}
+
+/**
+ * Add the link bandwidth / all-reduce latency only when a chosen shape actually communicates (finding 7).
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export function addCommBasis(basis: BasisCollector, ctx: Ctx, commBasis: BasisItem[], shapes: Array<Shape | null | undefined>): void {
   if ((ctx.includeComm ?? true) && shapes.some((s) => s && s.tp > 1)) basis.add(...commBasis);
 }
 
@@ -514,14 +681,20 @@ export const CUSTOM_MODEL_WARNING: ResultWarning = Object.freeze({
 });
 
 /**
+ * A resolved model. `pathPrefix` is the basis path root of its values: `models` for the catalog and overrides, `imported` for a
+ * model imported from Hugging Face, so an imported model's paths cannot be mistaken for a catalog entry's.
+ */
+export type ResolvedModel = { model: Model; basis: BasisItem[]; warnings: ResultWarning[]; pathPrefix: 'models' | 'imported' };
+
+/**
  * Resolve a catalog model id, or turn a user override into a Model. Override values are
  * all status 'user'. An override is not origin-checked (spec §2.2); it always yields
  * CUSTOM_MODEL_WARNING, a catalog model none.
  */
 export function resolveModel(
   bundle: Bundle,
-  idOrOverride: string | ModelOverride,
-): { model: Model; basis: BasisItem[]; warnings: ResultWarning[] } {
+  idOrOverride: string | ModelOverride | ImportedModelInput,
+): ResolvedModel {
   if (typeof idOrOverride === 'string') {
     const m = lookup(bundle.models, idOrOverride, '模型');
     const arch = {
@@ -546,8 +719,10 @@ export function resolveModel(
         text: `${m.name} 架構（層數、注意力頭、MoE 等，取自模型 config.json）`,
       },
     ];
-    return { model: m, basis, warnings: [] };
+    return { model: m, basis, warnings: [], pathPrefix: 'models' };
   }
+
+  if ('imported' in idOrOverride) return resolveImported(bundle, idOrOverride);
 
   const o = parseInput(ModelOverrideSchema, idOrOverride);
   const basis = Object.entries(o)
@@ -576,7 +751,68 @@ export function resolveModel(
     source: 'user',
     verified: bundle.meta.dataVersion,
   } as unknown as Model;
-  return { model, basis, warnings: [CUSTOM_MODEL_WARNING] };
+  return { model, basis, warnings: [CUSTOM_MODEL_WARNING], pathPrefix: 'models' };
+}
+
+/**
+ * An imported model: validated like a catalog model (schema, layer shape, MoE split, MLA layout; core's own checks,
+ * the same ones config validation runs) and every id its sourced fields cite must be the supplied source (a derived
+ * field's inputs may also be a bundle source). Not origin-checked; always carries CUSTOM_MODEL_WARNING (spec §2.2).
+ */
+function resolveImported(
+  bundle: Bundle,
+  input: ImportedModelInput,
+): ResolvedModel {
+  const { model: m, source } = parseInput(ImportedModelSchema, input).imported;
+  const issues: string[] = [];
+  for (const i of layerShapeIssues(m)) issues.push(`${i.path.join('.')}: ${i.message}`);
+  const moe = moeParamsIssue(m);
+  if (moe) issues.push(`moe: ${moe}`);
+  for (const i of mlaLayoutIssues(m)) issues.push(`${i.field}: ${i.message}`);
+  if (m.attention === 'mla' && !m.mla) issues.push("mla: attention 'mla' requires mla");
+  if (m.moe && m.moe.topK > m.moe.experts) issues.push('moe.topK: topK must not exceed experts');
+
+  const fields: [string, Model['totalParamsB']][] = [['totalParamsB', m.totalParamsB]];
+  if (m.nativeQuant) fields.push(['nativeQuant.checkpointWeightBytes', m.nativeQuant.checkpointWeightBytes]);
+  const mustBe = (where: string, id: string, allowBundle = false) => {
+    if (id !== source.id && !(allowBundle && id in bundle.sources)) issues.push(`${where}: cites '${id}', not the supplied source '${source.id}'`);
+  };
+  mustBe('source', m.source);
+  for (const [path, f] of fields) {
+    if (f.source !== undefined) mustBe(`${path}.source`, f.source);
+    for (const id of f.evidence ?? []) mustBe(`${path}.evidence`, id);
+    for (const id of f.sources ?? []) mustBe(`${path}.sources`, id);
+    for (const id of f.inputs ?? []) mustBe(`${path}.inputs`, id, true);
+  }
+  // The same two rules the config validator applies (policy.ts holds the single copy).
+  for (const [path, f] of fields) {
+    const secondary = f.source !== undefined ? secondarySourceIssue(f.status, source.id, source.kind) : undefined;
+    if (secondary) issues.push(`${path}: ${secondary}`);
+  }
+  if (m.nativeQuant) {
+    const nq = nativeQuantIssue(m.nativeQuant.quant, (id) => bundle.quantization[id]);
+    if (nq) issues.push(`nativeQuant.quant: ${nq.message}`);
+  }
+  if (issues.length > 0) throw new CoreInputError('invalid-input', `匯入的模型不合法：${issues.join('；')}`);
+
+  const arch = {
+    layers: m.layers, heads: m.heads, kvHeads: m.kvHeads, headDim: m.headDim, hidden: m.hidden, attention: m.attention,
+    ...(m.mla ? { mla: m.mla } : {}),
+    ...(m.moe ? { moe: m.moe } : {}),
+    ...(m.layerGroups ? { layerGroups: m.layerGroups } : {}),
+    ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
+  };
+  const basis: BasisItem[] = [
+    fromSourced(`imported.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
+    {
+      path: `imported.${m.id}.architecture`,
+      status: 'official',
+      value: arch,
+      sourceIds: [m.source],
+      text: `${m.name} 架構（層數、注意力頭、MoE 等，取自匯入的 config.json；${source.title}）`,
+    },
+  ];
+  return { model: m as Model, basis, warnings: [CUSTOM_MODEL_WARNING], pathPrefix: 'imported' };
 }
 
 /**
@@ -660,13 +896,18 @@ export function resolveQuant(bundle: Bundle, model: Model, requested: string): Q
  *   them 16-bit) and every other parameter at `bytesPerParam` [R-LEC B3, C1]; expert = expert parameters ×
  *   bytesPerParam. Without vocabSize (user override) every parameter is at bytesPerParam.
  */
-function weightSizing(model: Model, res: QuantResolution, basis: BasisCollector): Pick<Ctx, 'bytesPerParam' | 'weights'> {
+function weightSizing(
+  model: Model,
+  res: QuantResolution,
+  basis: BasisCollector,
+  pathPrefix: ResolvedModel['pathPrefix'] = 'models',
+): Pick<Ctx, 'bytesPerParam' | 'weights'> {
   const q = res.quant;
   const nq = model.nativeQuant;
   const bpp = q.bytesPerParam.value;
   const expertParams = model.moe ? expertParamsTotalB(model) * 1e9 : 0;
   basis.add(fromSourced(`quantization.${q.id}.bytesPerParam`, `${q.name} 每參數位元組`, q.bytesPerParam, 'B3, C1'));
-  const mp = `models.${model.id}`;
+  const mp = `${pathPrefix}.${model.id}`;
   // The separate input-embedding table is read only by the rows a step looks up (Ruling R39); it stays 16-bit under
   // every format vLLM serves (embeddingBytesPerParam), native checkpoints included. Tied / no vocabSize → 0.
   const embBppItem = fromSourced(`quantization.${q.id}.embeddingBytesPerParam`, `${q.name} embedding／lm_head 每參數位元組`, q.embeddingBytesPerParam, 'B3');
@@ -738,7 +979,7 @@ function weightSizing(model: Model, res: QuantResolution, basis: BasisCollector)
   return { bytesPerParam: bpp, weights: { resident, expert: expertParams * bpp, ...emb } };
 }
 
-type Prepared = {
+export type Prepared = {
   ctx: Ctx;
   quant: Quantization;
   res: QuantResolution;
@@ -747,30 +988,26 @@ type Prepared = {
   warnings: ResultWarning[];
 };
 
-/** A verify command copied out on its own still carries the result's warnings, as leading comment lines. */
-function withWarnings(v: { verifyCommand: string; verifyNote?: string }, warnings: ResultWarning[]): typeof v {
+/**
+ * A verify command copied out on its own still carries the result's warnings, as leading comment lines.
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export function withWarnings(v: { verifyCommand: string; verifyNote?: string }, warnings: ResultWarning[]): typeof v {
   if (v.verifyCommand === '' || warnings.length === 0) return v;
   return { ...v, verifyCommand: [...warnings.map((w) => `# ${w.text}`), v.verifyCommand].join('\n') };
 }
 
-/** Resolve quant, workload, speed and concurrency rule into a solver Ctx (model given). */
-function prepareCommon(
+/**
+ * Resolve a workload (preset or preset + user overrides) and a speed standard (preset or custom) to numbers, adding
+ * each used value to `basis` (user values as fromUser). Internal: shared with funnel.ts; not re-exported from index.ts.
+ */
+export function resolveWorkloadSpeed(
   bundle: Bundle,
-  model: Model,
-  input: {
-    quant: string;
-    workload: z.infer<typeof WorkloadInputSchema>;
-    speed: z.infer<typeof SpeedInputSchema>;
-    includeComm?: boolean | undefined;
-  },
+  workloadInput: z.infer<typeof WorkloadInputSchema>,
+  speedInput: z.infer<typeof SpeedInputSchema>,
   basis: BasisCollector,
-): { ctx: Ctx; quant: Quantization; res: QuantResolution } {
-  assertModelMath(model);
-  const res = resolveQuant(bundle, model, input.quant);
-  const q = res.quant;
-  const sizing = weightSizing(model, res, basis);
-
-  const wIn = typeof input.workload === 'string' ? { base: input.workload } : input.workload;
+): { kind: Bundle['workloads'][string]['kind']; workload: WorkloadIn; speed: Ctx['speed'] } {
+  const wIn = typeof workloadInput === 'string' ? { base: workloadInput } : workloadInput;
   const wl = lookup(bundle.workloads, wIn.base, '負載');
   const wp = `workloads.${wl.id}`;
   const field = (
@@ -793,8 +1030,8 @@ function prepareCommon(
   };
 
   let speed: Ctx['speed'];
-  if (typeof input.speed === 'string') {
-    const sp = lookup(bundle.speedPresets, input.speed, '速度標準');
+  if (typeof speedInput === 'string') {
+    const sp = lookup(bundle.speedPresets, speedInput, '速度標準');
     basis.add(
       fromSourced(`speedPresets.${sp.id}.minTokensPerSec`, `${sp.name}：每人最低 token/s`, sp.minTokensPerSec),
       fromSourced(`speedPresets.${sp.id}.maxTtftSec`, `${sp.name}：首字最長等待`, sp.maxTtftSec, 'A2'),
@@ -802,14 +1039,36 @@ function prepareCommon(
     speed = { minTokPerSec: sp.minTokensPerSec.value, maxTtftSec: sp.maxTtftSec.value };
   } else {
     basis.add(
-      fromUser('speed.minTokPerSec', '每人最低 token/s', input.speed.minTokPerSec),
-      fromUser('speed.maxTtftSec', '首字最長等待（秒）', input.speed.maxTtftSec, 'A2'),
+      fromUser('speed.minTokPerSec', '每人最低 token/s', speedInput.minTokPerSec),
+      fromUser('speed.maxTtftSec', '首字最長等待（秒）', speedInput.maxTtftSec, 'A2'),
     );
-    speed = { ...input.speed };
+    speed = { ...speedInput };
   }
+  return { kind: wl.kind, workload, speed };
+}
+
+/** Resolve quant, workload, speed and concurrency rule into a solver Ctx (model given). */
+function prepareCommon(
+  bundle: Bundle,
+  model: Model,
+  input: {
+    quant: string;
+    workload: z.infer<typeof WorkloadInputSchema>;
+    speed: z.infer<typeof SpeedInputSchema>;
+    includeComm?: boolean | undefined;
+  },
+  basis: BasisCollector,
+  pathPrefix: ResolvedModel['pathPrefix'] = 'models',
+): { ctx: Ctx; quant: Quantization; res: QuantResolution } {
+  assertModelMath(model);
+  const res = resolveQuant(bundle, model, input.quant);
+  const q = res.quant;
+  const sizing = weightSizing(model, res, basis, pathPrefix);
+
+  const { kind, workload, speed } = resolveWorkloadSpeed(bundle, input.workload, input.speed, basis);
 
   const cr = bundle.concurrency;
-  if (wl.kind === 'agent') {
+  if (kind === 'agent') {
     basis.add(
       fromSourced('concurrency.agentRule', '研究助理類人數解讀', cr.agentRule),
       fromSourced('concurrency.agentGeneratingShare', '同時在生成的比例', cr.agentGeneratingShare),
@@ -824,7 +1083,7 @@ function prepareCommon(
     // Default; ctxForPlatform replaces it per platform (Ruling R32).
     kvBytesPerElem: q.kvBytesPerElem.value,
     workload,
-    kind: wl.kind,
+    kind,
     speed,
     agentShare: cr.agentGeneratingShare.value,
     includeComm: input.includeComm ?? true,
@@ -832,16 +1091,20 @@ function prepareCommon(
   return { ctx, quant: q, res };
 }
 
-function prepare(bundle: Bundle, input: z.infer<typeof QueryInputSchema>): Prepared {
+/** Internal: used by performance.ts; not re-exported from index.ts. */
+export function prepare(bundle: Bundle, input: z.infer<typeof QueryInputSchema>): Prepared {
   const basis = new BasisCollector();
   const rm = resolveModel(bundle, input.model);
   basis.add(...rm.basis);
-  const { ctx, quant, res } = prepareCommon(bundle, rm.model, input, basis);
+  const { ctx, quant, res } = prepareCommon(bundle, rm.model, input, basis, rm.pathPrefix);
   return { ctx, quant, res, basis, warnings: rm.warnings };
 }
 
-/** Quantization fields every result carries: the resolved id, the model's native format, re-quantization flag. */
-type QuantFields = {
+/**
+ * Quantization fields every result carries: the resolved id, the model's native format, re-quantization flag.
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export type QuantFields = {
   /** Quantization id actually used ('native' resolved). */
   quant: string;
   /** The model's native quantization (absent for an unquantized checkpoint); the UI defaults to it. */
@@ -851,7 +1114,8 @@ type QuantFields = {
   quantNote?: string;
 };
 
-function quantFields(model: Model, res: QuantResolution): QuantFields {
+/** Internal: used by performance.ts; not re-exported from index.ts. */
+export function quantFields(model: Model, res: QuantResolution): QuantFields {
   const nq = nativeQuantOut(model);
   return {
     quant: res.quant.id,
@@ -948,6 +1212,11 @@ const VerifyArgsSchema = z.strictObject({
   }),
 });
 
+/** A display string flattened to one line before it lands in a shell comment (second guard behind the input schema). */
+function oneLine(s: string): string {
+  return s.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ');
+}
+
 export function verifyCommand(
   platform: ResolvedPlatform & { engine?: 'vllm' | 'mlx'; vllmDefaults?: { maxNumSeqs: number; maxNumBatchedTokens: number; maxConcurrentBatches: number } },
   shape: Shape,
@@ -984,7 +1253,7 @@ export function verifyCommand(
   if (!legal.includes(shape.tp)) {
     throw new CoreInputError(
       'invalid-input',
-      `tp ${shape.tp} 不是 ${platform.id} 上這個模型的合法 TP（可用：${legal.join('／') || '無'}；需在平台的 tpOptions 內、≤ 每 node 卡數，且注意力頭與 KV 頭可整除）`,
+      `tp ${shape.tp} 不是 ${platform.id === 'custom' ? platform.name : platform.id} 上這個模型的合法 TP（可用：${legal.join('／') || '無'}；需在平台的 tpOptions 內、≤ 每 node 卡數，且注意力頭與 KV 頭可整除）`,
     );
   }
   const { quant } = opts;
@@ -1043,13 +1312,13 @@ export function verifyCommand(
       : `# ${gLabel}（對話類：${users} 人都在生成）`,
     ...(R > 1
       ? [
-          `# 共 ${R} 個副本，每個副本分到 ${gRep} 個同時生成的請求（${g} ÷ ${R}，無條件進位），所以 --max-concurrency ${gRep}：` +
-            `只需啟動並量測其中一個副本，其餘副本相同；總吞吐約為單一副本 × ${R}`,
+          `# 共 ${R} 份，每份模型分到 ${gRep} 個同時生成的請求（${g} ÷ ${R}，無條件進位），所以 --max-concurrency ${gRep}：` +
+            `只需啟動並量測其中一份模型，其餘相同；總吞吐約為一份模型的 ${R} 倍`,
         ]
       : []),
     ...(prefixRep
       ? [
-          `# prefix_repetition：每個副本 ${residentRep} 個常駐${kind === 'agent' ? '工作階段' : '使用者'}各有一段 ${prefix} token 的固定前綴` +
+          `# prefix_repetition：每份模型 ${residentRep} 個常駐${kind === 'agent' ? '工作階段' : '使用者'}各有一段 ${prefix} token 的固定前綴` +
             `（輸入 ${workload.inputTokens} × 快取命中率 ${hit}，四捨五入），每個請求隨機取其中一段，再接 ${suffix} token 的隨機內容；` +
             `--max-concurrency ${gRep} 個同時生成。前綴快取要同時留住 ${residentRep} 段前綴才會命中，所以會用到估算的常駐記憶體`,
           '# 暖機：同一行 bench 指令先執行一次（相同的 --seed 產生相同的前綴），讓前綴進入快取，再執行第二次，以第二次的結果比對；' +
@@ -1081,7 +1350,7 @@ export function verifyCommand(
     const step = platform.prefillStepTokens !== undefined ? ` --prefill-step-size ${platform.prefillStepTokens}` : '';
     const cacheSize = prefixRep && residentRep > 10 ? ` --prompt-cache-size ${residentRep}` : '';
     return [
-      `# ${platform.name} ${platform.sub}：以 mlx_lm 啟動 OpenAI 相容服務（模型需為 MLX 格式），再以相同參數量測`,
+      `# ${oneLine(platform.name)} ${oneLine(platform.sub)}：以 mlx_lm 啟動 OpenAI 相容服務（模型需為 MLX 格式），再以相同參數量測`,
       `# 請把 <MLX ${bits}-bit checkpoint of …> 換成位元數相同的 MLX 量化版本（mlx_lm.server 只能載入 MLX 格式；目錄中的 checkpoint 不是）`,
       `# mlx_lm.server 沒有量化、記憶體比例、上下文長度等啟動參數；本估算假設：${weights}、` +
         `KV cache 每元素 ${kvElem} bytes、可用記憶體 = 實體記憶體 × ${memUtil}、每個請求的上下文 ${context} token（輸入 ${workload.inputTokens} + 輸出 ${workload.outputTokens}）`,
@@ -1134,16 +1403,16 @@ export function verifyCommand(
     R > 1
       ? [
           onNode > 1
-            ? `# 完整部署（每個 node ${onNode} 個副本）：每個副本各自的 GPU 與 port，前面加負載平衡；` +
-              `或改用單一 endpoint：啟動指令加 --data-parallel-size ${onNode}（vLLM 內部負載平衡；同時請求上限以每個副本計）`
-            : `# 完整部署：每個 node 只放得下 1 個副本，每個 node 各自以同一行指令啟動，前面加負載平衡`,
-          ...Array.from({ length: onNode - 1 }, (_, i) => `#   副本 ${i + 2}：CUDA_VISIBLE_DEVICES=${gpus(i + 1)}、--port ${8001 + i}`),
+            ? `# 完整部署（每個 node ${onNode} 份模型）：每份模型各自的 GPU 與 port，前面加負載平衡；` +
+              `或改用單一 endpoint：啟動指令加 --data-parallel-size ${onNode}（vLLM 內部負載平衡；同時請求上限以每份模型計）`
+            : `# 完整部署：每個 node 只放得下 1 份模型，每個 node 各自以同一行指令啟動，前面加負載平衡`,
+          ...Array.from({ length: onNode - 1 }, (_, i) => `#   第 ${i + 2} 份：CUDA_VISIBLE_DEVICES=${gpus(i + 1)}、--port ${8001 + i}`),
         ]
       : [];
   const lines = [
-    `# ${platform.name} ${platform.sub}：每個副本 ${shape.tp} 張 GPU` +
+    `# ${oneLine(platform.name)} ${oneLine(platform.sub)}：每份模型 ${shape.tp} ${platform.unit === 'machine' ? '台' : '張 GPU'}` +
       (R > 1
-        ? `，共 ${R} 個副本。完整部署時每個 node 可放 ${perNode} 個副本，以 CUDA_VISIBLE_DEVICES 分配不同的 GPU、各用不同的 --port，前面加負載平衡`
+        ? `，共 ${R} 份。完整部署時每個 node 可放 ${perNode} 份模型，以 CUDA_VISIBLE_DEVICES 分配不同的 GPU、各用不同的 --port，前面加負載平衡`
         : ''),
     ...(note ? [`# ${note.value}`] : []),
     `# --gpu-memory-utilization ${memUtil} = 估算所用的記憶體可用比例（校正設定）；${lenNote}`,
@@ -1151,7 +1420,7 @@ export function verifyCommand(
       ? [
           `# --max-num-batched-tokens ${slidingMnbt} = 估算 sliding window 層 KV 所用的值：vLLM 每人穩態保留 min(roundUp(上下文, bs), window + bs − 1) 個 token` +
             '（整塊配置，window 外的整塊在每個 chunk 前釋放，Ruling R37）；' +
-            `進行中的 chunk（${platform.slidingInFlightTokens ?? slidingMnbt} token）每副本預留一次；啟動檢查以 1 人 cdiv(min(window − 1 + ${platform.slidingInFlightTokens ?? slidingMnbt}, max-model-len), bs) + 1 個 block 計`,
+            `進行中的 chunk（${platform.slidingInFlightTokens ?? slidingMnbt} token）每份模型預留一次；啟動檢查以 1 人 cdiv(min(window − 1 + ${platform.slidingInFlightTokens ?? slidingMnbt}, max-model-len), bs) + 1 個 block 計`,
           `# --async-scheduling = 估算所假設的排程方式：進行中的 token 數 = max_concurrent_batches（async scheduling、PP = 1：${platform.vllmDefaults?.maxConcurrentBatches ?? 2}）× max_num_batched_tokens，` +
             '釘住以免結果隨版本預設而變（國網部署是否開啟待確認，GitHub issue #13）',
         ]
@@ -1171,10 +1440,10 @@ export function verifyCommand(
     ...(seqs !== undefined
       ? [
           seqs < gRep
-            ? `# --max-num-seqs ${seqs}：每個副本同時生成 ${gRep} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；但 vLLM 要求 max_num_batched_tokens ≥ max_num_seqs` +
+            ? `# --max-num-seqs ${seqs}：每份模型同時生成 ${gRep} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；但 vLLM 要求 max_num_batched_tokens ≥ max_num_seqs` +
               `（v0.32.0 vllm/config/scheduler.py L328-L333），所以取上限 ${mnbt}。每步 token 上限本來就讓最多 ${queueing?.decodingMax ?? '不到上限'} 人同時解碼（排隊模型），` +
               '其餘在伺服器排隊，與估算相同'
-            : `# --max-num-seqs ${seqs}：每個副本同時生成 ${seqs} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；不加的話多出的請求會排隊，量不到估算的批次`,
+            : `# --max-num-seqs ${seqs}：每份模型同時生成 ${seqs} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；不加的話多出的請求會排隊，量不到估算的批次`,
         ]
       : []),
     ...notes,
@@ -1201,17 +1470,20 @@ export function verifyCommand(
  *   evaluated (final-review M17) and a note that it is expected to fail and why (review M-8).
  * Adds the benchmark margin, the pinned max_num_batched_tokens (final-review M9) and, when pinned, the max_num_seqs
  * default to `basis`.
+ *
+ * Internal: used by performance.ts; not re-exported from index.ts.
  */
-function verifyFor(
+export function verifyFor(
   bundle: Bundle,
   ctx: Ctx,
   quant: Quantization,
   qres: QuantResolution,
-  resolved: ReturnType<typeof resolvePlatform>,
+  resolved: ResolvedApiPlatform,
   basis: BasisCollector,
   solved: { ok: true; shape: Shape; queueing: Queueing | null } | { ok: false; why: Why; detail: string },
   n: number,
-  opts?: { maxTp?: number; where?: string },
+  /** `shape`: reproduce this chosen split when the target is missed (estimatePerformance); otherwise the largest legal TP × 1. */
+  opts?: { maxTp?: number; where?: string; shape?: Shape },
 ): { verifyCommand: string; verifyNote?: string } {
   const { platform } = resolved;
   if (qres.requiresRequantizedCheckpoint) return { verifyCommand: '', verifyNote: qres.quantNote! };
@@ -1223,23 +1495,27 @@ function verifyFor(
     // vLLM accepts no TP size for this model on this platform, so there is nothing to run (review M-10).
     return { verifyCommand: '', verifyNote: `${solved.detail}，沒有可執行的驗證指令` };
   }
+  if (!solved.ok && solved.why === 'scale') {
+    // More GPUs (machines) than the bound: no command is generated for a deployment beyond it (final review I2).
+    return { verifyCommand: '', verifyNote: `${solved.detail}，沒有產生驗證指令` };
+  }
   if (!solved.ok && solved.why === 'weights') {
     // No shape holds the weights, so there is nothing to run (finding 9).
     return { verifyCommand: '', verifyNote: `模型權重放不進${opts?.where ?? '單一 node'}，沒有可執行的驗證指令（跨 node 切分尚未支援）` };
   }
   const legal = legalTpOptions(platform.tpOptions, platform.gpusPerNode, ctx.model).filter((t) => t <= (opts?.maxTp ?? Infinity));
-  const shape = solved.ok ? solved.shape : legal.length > 0 ? { tp: legal[legal.length - 1]!, replicas: 1 } : null;
+  const shape = solved.ok ? solved.shape : opts?.shape ?? (legal.length > 0 ? { tp: legal[legal.length - 1]!, replicas: 1 } : null);
   if (!shape) return { verifyCommand: '' };
   let queue = solved.ok ? solved.queueing : null;
   let verifyNote: string | undefined;
   if (!solved.ok) {
     // Weights fit but the target is missed (mem / bw / compute / ttft): the command reproduces the scenario on the
-    // largest legal TP, one replica, and is expected to fail; say so and why (review M-8). Its queue at the n users
+    // largest legal TP, one replica (or the chosen split when the caller names one), and is expected to fail; say so and why (review M-8). Its queue at the n users
     // is evaluated too (Ruling R36), so the note and the command say the measured TTFT includes it (final-review M17).
     queue = checkShape(ctx, platform, shape, n, 'expected').queueing;
     addQueueingBasis(basis, bundle, resolved, true);
     verifyNote =
-      `預期不可行：${solved.detail}。以下驗證指令在最大 TP（${shape.tp}）、1 個副本上重現此情境，` +
+      `預期不可行：${solved.detail}。以下驗證指令在${opts?.shape ? `你選的切法（TP ${shape.tp}，${splitPhrase(shape.tp, shape.replicas, platform.unit === 'machine')}）` : `最大 TP（${shape.tp}）、1 份模型`}上重現此情境，` +
       '預期量測結果達不到目標或啟動失敗，可用來確認這個判斷' +
       (queue ? `；這個形狀在 ${n} 人時也會排隊（${queue.reason}）` : '');
   }
@@ -1285,12 +1561,14 @@ export type PlatformResult = {
    * budget (MLX).
    */
   queueing: Queueing | null;
+  /** Usage of one replica of the expected shape at `users` (shapeUsage; spec §8.3.3 detail panel); null when infeasible. */
+  usage: ShapeUsage | null;
   /** Benchmark instructions for the expected shape; '' when there is none to run (see verifyNote). */
   verifyCommand: string;
   /**
    * Why verifyCommand is empty: the scenario needs a checkpoint the catalog does not list
-   * (requiresRequantizedCheckpoint), no legal TP, the weights fit on no single-node shape, or the context exceeds the
-   * model's maxContext. Or, with a command, why it is expected to fail: the scenario is infeasible for memory /
+   * (requiresRequantizedCheckpoint), no legal TP, the weights fit on no single-node shape, the context exceeds the
+   * model's maxContext, or the deployment needs more GPUs than MAX_GPUS ('scale'). Or, with a command, why it is expected to fail: the scenario is infeasible for memory /
    * speed / TTFT (review M-8).
    */
   verifyNote?: string;
@@ -1328,8 +1606,7 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
   const common = basis.list();
 
   // One platform's result; `basis` here is that platform's own collector (review M-11).
-  const build = (id: string, basis: BasisCollector): Omit<PlatformResult, 'basis' | 'hasEstimate' | 'hasUser'> => {
-    const resolved = resolvePlatform(bundle, id, quant.computeDtype);
+  const build = (id: string, resolved: ResolvedApiPlatform, basis: BasisCollector): Omit<PlatformResult, 'basis' | 'hasEstimate' | 'hasUser'> => {
     const { platform } = resolved;
     basis.add(...resolved.basis);
     const ctx = ctxForPlatform(baseCtx, quant, resolved, basis);
@@ -1342,18 +1619,14 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
       maxConcurrent: expected.ok ? maxConcurrent(ctx, platform, expected.shape, 'expected') : 0,
       powerKw: null,
       queueing: expected.ok ? expected.check.queueing : null,
+      usage: expected.ok ? shapeUsage(ctx, platform, expected.shape, n, 'expected') : null,
       verifyCommand: '',
     };
     // The queueing model uses max_num_batched_tokens and Little's law on the expected shape (Ruling R36): list them.
     addQueueingBasis(basis, bundle, resolved, expected.ok);
     // Basis lists only values used (finding 7): TDP when power is computed (or reported unverified)
     // for a feasible result; link bandwidth / all-reduce latency when a chosen shape has tp > 1.
-    if (!expected.ok) res.powerNote = '沒有可行配置，未計算功耗';
-    else {
-      basis.add(resolved.tdpBasis);
-      if (platform.tdpW === null) res.powerNote = '功耗未查證';
-      else res.powerKw = (expected.gpus * platform.tdpW) / 1000;
-    }
+    Object.assign(res, powerFor(basis, resolved, expected.ok, expected.ok ? expected.gpus : 0));
     addCommBasis(basis, ctx, resolved.commBasis, [
       expected.ok ? expected.shape : null,
       conservative.ok ? conservative.shape : null,
@@ -1367,17 +1640,23 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
     if (v.verifyNote !== undefined) res.verifyNote = v.verifyNote;
     return res;
   };
-  const perPlatform: PlatformResult[] = Object.keys(bundle.platforms).map((id) => {
+  const result = (id: string, resolved: ResolvedApiPlatform): PlatformResult => {
     const own = new BasisCollector().add(...common);
-    const res = build(id, own);
+    const res = build(id, resolved, own);
     const list = own.list();
     basis.add(...list);
     return { ...res, basis: list, ...trustFlags(list) };
-  });
+  };
+  // Catalog platforms first, then the user's own (spec 2026-10-21 §5.3), through the same build.
+  const perPlatform: PlatformResult[] = [
+    ...Object.keys(bundle.platforms).map((id) => result(id, resolvePlatform(bundle, id, quant.computeDtype))),
+    ...(input.customPlatforms ?? []).map((cp, i) => result(`custom:${i}`, resolveCustomPlatform(bundle, cp, quant.computeDtype, `custom:${i}`))),
+  ];
 
   let best: { id: string; gpus: number } | null = null;
   for (const r of perPlatform) {
-    if (bundle.platforms[r.platform]!.group !== 'nchc' || !r.expected.ok) continue;
+    // Only NCHC catalog platforms compete; custom platforms (group self, not in the bundle) never do.
+    if (bundle.platforms[r.platform]?.group !== 'nchc' || !r.expected.ok) continue;
     if (!best || r.expected.gpus < best.gpus) best = { id: r.platform, gpus: r.expected.gpus };
   }
 
@@ -1421,7 +1700,9 @@ export type CapacityResult = QuantFields &
     conservative: { n: number; shape: Shape | null };
     /** Queue of the expected shape at its n users (Ruling R36); null when all decode, no shape, or MLX. */
     queueing: Queueing | null;
-    /** Why the expected capacity is 0 ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft'); null when n > 0. */
+    /** Usage of one replica of the expected shape at expected.n users (shapeUsage; spec §8.3.3); null when n = 0. */
+    usage: ShapeUsage | null;
+    /** Why the expected capacity is 0 ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft' | 'scale'); null when n > 0. */
     why: Why | null;
     /** Text of `why`. */
     detail?: string;
@@ -1493,6 +1774,7 @@ export function estimateCapacity(bundle: Bundle, raw: CapacityInput): CapacityRe
     expected,
     conservative,
     queueing,
+    usage: expected.shape && expected.n > 0 ? shapeUsage(ctx, platform, expected.shape, expected.n, 'expected') : null,
     why: why?.why ?? null,
     ...(why ? { detail: why.detail } : {}),
     ...profile,
@@ -1519,7 +1801,7 @@ export type FeasibleModel = QuantFields &
     gpus?: number;
     /**
      * Why not feasible within the GPUs given (final-review I3; the text moved to `detail`): the solver's reason
-     * ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft') when no deployment exists; when one exists but
+     * ('context' | 'tp' | 'weights' | 'mem' | 'bw' | 'compute' | 'ttft' | 'scale') when no deployment exists; when one exists but
      * needs more GPUs, the reason the best split of the GPUs given fails for `users`.
      */
     why?: Why;
@@ -1541,6 +1823,21 @@ export type FeasibleModel = QuantFields &
   };
 
 /**
+ * Quantization ids the UI offers for a catalog model: [nativeQuant.quant] for a natively quantized checkpoint, else
+ * every quantization without vllmServe.nativeOnly (bundle order), i.e. the formats vLLM can apply to an unquantized
+ * checkpoint. The rule findFeasibleModels evaluates when `quant` is omitted. Unknown model → CoreInputError 'unknown-id'.
+ */
+export function quantOptions(bundle: Bundle, modelId: string): string[] {
+  return quantOptionsFor(bundle, lookup(bundle.models, modelId, '模型'));
+}
+
+/** quantOptions for a model object (catalog or imported), by the same rule. */
+export function quantOptionsFor(bundle: Bundle, model: Model): string[] {
+  if (model.nativeQuant) return [model.nativeQuant.quant];
+  return Object.values(bundle.quantization).filter((q) => !q.vllmServe.nativeOnly).map((q) => q.id);
+}
+
+/**
  * Catalog search: which model × quantization pairs serve `users` (default 1) at the speed
  * target within `gpus` GPUs of `platform` (expected eta), over every catalog model (the catalog is checked against
  * `policy` at data:build, spec §2.2).
@@ -1555,13 +1852,12 @@ export function findFeasibleModels(bundle: Bundle, raw: FeasibleInput): Feasible
   const input = parseInput(FeasibleInputSchema, raw);
   const n = input.users ?? 1;
   if (input.quant !== undefined && input.quant !== 'native') lookup(bundle.quantization, input.quant, '量化');
-  const applicable = Object.values(bundle.quantization).filter((q) => !q.vllmServe.nativeOnly).map((q) => q.id);
   lookup(bundle.platforms, input.platform, '平台');
   const unitWord = bundle.platforms[input.platform]!.unit === 'machine' ? '台' : '張 GPU';
 
   const out: FeasibleModel[] = [];
   for (const m of Object.values(bundle.models)) {
-    const ids = input.quant !== undefined ? [input.quant] : m.nativeQuant ? [m.nativeQuant.quant] : applicable;
+    const ids = input.quant !== undefined ? [input.quant] : quantOptions(bundle, m.id);
     for (const id of ids) {
       const basis = new BasisCollector();
       basis.add(...resolveModel(bundle, m.id).basis);
@@ -1655,21 +1951,21 @@ export function explain(bundle: Bundle, raw: ExplainInput): { basis: BasisItem[]
       '未快取 token = 輸入 × (1 − 快取命中率)，分成 ceil(未快取 token ÷ chunk) 段（vLLM：chunk = max_num_batched_tokens − (D − 1)；MLX：prefill_step_size；Ruling R38）；段 FLOPs = 段 token × (2 × 線性層參數 + 段平均位置的注意力 FLOPs)，最後一段另加 2 × lm_head 參數；' +
       '段位元組 = 權重重讀一次（MoE：段 token 觸及的專家）+ 到段結尾的 KV；段 TP 通訊 = 2 × 層數 次 all-reduce，訊息 = 段 token × hidden × 2 bytes。負載下（D ≥ 2）vLLM 每段至少 t_step(D)（與 decode 同一步），MLX 每段另加一次其他人的 decode forward（最終審查 M6）。' +
       '線性層參數 = 啟用參數 − embedding／lm_head [R-LEC A2, A5, B1, B6, B7, B8, B9, F3]（通訊 spec §5.4）',
-    '每副本可服務人數 = floor((記憶體 × memUtil − 權重位元組 − 進行中 chunk 的預留) ÷ 每序列 KV 位元組(上下文 = 輸入 + 輸出))。KV 以整塊配置（Ruling R37）：vLLM 的 full／MLA 層每人 roundUp(上下文, bs) 個 token，sliding window 層穩態 min(roundUp(上下文, bs), window + bs − 1)（bs = block_size；MLA 依 backend）；' +
-      'MLX 的 KVCache 每次擴充 256 個 token：full 層 roundUp(上下文, 256)，sliding 層 min(roundUp(上下文, 256), window)。vLLM 另在每副本預留一次 min(max_concurrent_batches × max_num_batched_tokens, 上下文) 個 token 的 sliding 層 KV（進行中的 chunk），' +
+    '每份模型可服務人數 = floor((記憶體 × memUtil − 權重位元組 − 進行中 chunk 的預留) ÷ 每序列 KV 位元組(上下文 = 輸入 + 輸出))。KV 以整塊配置（Ruling R37）：vLLM 的 full／MLA 層每人 roundUp(上下文, bs) 個 token，sliding window 層穩態 min(roundUp(上下文, bs), window + bs − 1)（bs = block_size；MLA 依 backend）；' +
+      'MLX 的 KVCache 每次擴充 256 個 token：full 層 roundUp(上下文, 256)，sliding 層 min(roundUp(上下文, 256), window)。vLLM 另在每份模型預留一次 min(max_concurrent_batches × max_num_batched_tokens, 上下文) 個 token 的 sliding 層 KV（進行中的 chunk），' +
       '並在 1 人的上限（full 層 cdiv(上下文, bs) 個 block；sliding 層 cdiv(min(window − 1 + 進行中 token, 上下文), bs) + 1 個 block）放不下時拒絕啟動；MLX 沒有預留（spec §5.1）',
     'KV cache 每元素位元組：平台的推論引擎有固定值時用它（MLX = 2，fp16／bf16），否則用量化格式的值（Ruling R32）',
     '峰值算力一律採 dense 值，不用 with sparsity 標示值 [R-LEC C2]',
     ctx.kind === 'agent'
       ? '研究助理類：佔用記憶體的工作階段 = N，同時生成 = max(1, ceil(N × 同時生成比例))（spec §8.3.3）'
       : '對話類：同時生成 = 佔用記憶體 = N（spec §8.3.3）',
-    '配置：每副本 t ∈ 合法 TP（t ≤ 每 node 卡數、注意力頭可整除），GPU 總數 = 副本數 × t，取最少者（spec §10.2）',
+    '配置：每份模型 t ∈ 合法 TP（t ≤ 每 node 卡數、注意力頭可整除），GPU 總數 = 份數 × t，取最少者（spec §10.2）',
   ];
   if (ctx.includeComm !== false) {
     formulas.push('通訊時間 = 2 × 層數 × (all-reduce 延遲 + 2(p − 1)/p × 本步 token 數 × hidden × 2 bytes ÷ 單向 NVLink 頻寬)，p = TP；本步 token 數 = B + 預填干擾 token [R-LEC F3]（spec §5.4）');
   }
   formulas.push(
-    "排隊（vLLM）：每副本 B 個生成中的請求，D 人同時解碼時每步需要 D × (1 + 未快取 token ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 未快取 token))) 人同時解碼；B > D_max 時其餘 B − D_max 人排隊，Little's law：λ = D_max ÷ (輸出 × t_step(D_max))，W = (B − D_max) ÷ λ；TTFT = 預填時間 + W，每人速度 = 1 ÷ t_step(D_max)。封閉迴路、確定性流體近似，W 是下限；MLX 沒有這個上限（Ruling R36，spec §5.2；Little 1961；docs/research/vllm-tp-kv-precision.md §7.5）",
+    "排隊（vLLM）：每份模型 B 個生成中的請求，D 人同時解碼時每步需要 D × (1 + 未快取 token ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 未快取 token))) 人同時解碼；B > D_max 時其餘 B − D_max 人排隊，Little's law：λ = D_max ÷ (輸出 × t_step(D_max))，W = (B − D_max) ÷ λ；TTFT = 預填時間 + W，每人速度 = 1 ÷ t_step(D_max)。封閉迴路、確定性流體近似，W 是下限；MLX 沒有這個上限（Ruling R36，spec §5.2；Little 1961；docs/research/vllm-tp-kv-precision.md §7.5）",
     ...queued.map(({ platform, q }) => `${platform} 會排隊：${q.reason}`),
   );
   if (!capacity) formulas.push('峰值功耗 = GPU 數 × TDP（上限，不是實際耗電；TDP 未查證時不計算）[R-LEC D1]');
@@ -1747,7 +2043,7 @@ export function predictMeasurement(bundle: Bundle, raw: PredictInput): Measureme
   basis.add(...rm.basis);
   const qres = resolveQuant(bundle, rm.model, input.quant);
   const q = qres.quant;
-  const sizing = weightSizing(rm.model, qres, basis);
+  const sizing = weightSizing(rm.model, qres, basis, rm.pathPrefix);
   const resolved = resolvePlatform(bundle, input.platform, q.computeDtype);
   const { platform } = resolved;
   basis.add(...resolved.basis);

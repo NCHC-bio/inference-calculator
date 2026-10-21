@@ -96,6 +96,22 @@
 | 上線爆量：2 小時內新增 3,000 人 | 學校寄出公告信後 | Open WebUI #14945 [V] |
 | API / Agent 使用者主導負載，Agent 的並發可達 10–1000 倍 | — | GWDG [V]；arXiv 2606.20577 [U] |
 
+#### GWDG 數字的出處與推算（人數漏斗預設值用，`config/workloads.yaml` `funnel`）
+
+論文：Chat AI: A Seamless Slurm-Native Solution for HPC-Based Services，<https://arxiv.org/abs/2407.00110>（HTML 版 <https://arxiv.org/html/2407.00110>），以下皆為 §6.4 User Adoption（2026-10-21 重新核對）。
+
+| 用到的數字 | 原文 | 位置 |
+|---|---|---|
+| 註冊約 9,000 人 | "by June 2024 this number increased to 9 000"（前文："In the first three months, over 6 000 users were registered in the service"） | §6.4 |
+| 平日活躍 400–500 人 | "On average, about 400 to 500 users actively use Chat AI on a typical work day" | §6.4 |
+| 累計訊息逾 35 萬則 | "In total, Chat AI has received and responded to more than 350 000 messages as of 30.07.2024." | §6.4 |
+| 服務起點 2024-02-22 | "Since its initial release on February 22nd, 2024 to users of Academic Cloud" | §6.4 |
+| 資料區間 | 圖 5 標題："Total inference requests per day from February 22nd until July 30th 2024." | Figure 5 |
+
+- 日活躍比例：400–500 ÷ 9,000 = 4.4–5.6%，取 5%（註冊數是 2024 年 6 月，活躍數是「平均」，時間點不完全相同）。
+- 每位活躍者每日則數（**本專案推算，論文沒有報告**）：2024-02-22 至 2024-07-30 約 159–160 天（日曆計算）；假設只在平日使用而取約 113 個工作日（5/7，**此為假設**，論文沒有給工作日數）；350,000 ÷ 113 ÷ 450 ≈ 6.9，取整 7。限制：論文沒說「訊息」是否含 API 流量（API 使用者另計，見上）、活躍人數是平均值不是逐日值。因此 7 在設定檔標為 `estimate`。
+- 尖峰一小時佔比不是 GWDG 的數字，來源是上表的 API 規劃工具（[U]，secondary）：表中寫 10–20%，本節結論寫 15–20%；取 20%（兩個區間的上限，偏保守）。該頁憑證過期，2026-10-21 無法重新開啟，數字沿用本檔記錄。
+
 **結論**：「同時」其實有好幾層意思，從外到內依序是：註冊 → 每日活躍 → 在線 → 正在生成。
 
 - 聊天服務的已發表比例落在總人數的 4%–20%。從「在線」縮到「正在生成」還會再小一截。

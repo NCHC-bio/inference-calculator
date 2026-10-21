@@ -128,6 +128,10 @@ export function decodeStep(
   prefillPassSec: number;
   /** MLX: share of steps that run a prompt-chunk pass (0 when fused or without prefill). */
   prefillPassProb: number;
+  /** FLOPs of the step (expected value; computeSec = flop / (flopsPerSec × etaCompute)). */
+  flop: number;
+  /** Bytes read by the step (expected value; bwSec = bytes / (memBwBytesPerSec × etaBw)). */
+  bytes: number;
 } {
   const includeComm = opts?.includeComm ?? true;
   const kvElem = opts?.kvBytesPerElem ?? 1;
@@ -154,13 +158,15 @@ export function decodeStep(
     typeof weights === 'number' ? weightsReadBytes(m, weights, tokens) : weightsReadBytesSplit(m, weights, tokens);
   const weightRead = routedTokensMixture(B, prefillTokens, chunk).reduce((sum, c) => sum + c.prob * readAt(c.tokens), 0);
 
-  const bwSec = (weightRead + B * kvBytesPerSequence(m, ctxDecode, kvElem, r.tp)) / (r.memBwBytesPerSec * r.etaBw);
+  const bytes = weightRead + B * kvBytesPerSequence(m, ctxDecode, kvElem, r.tp);
+  const bwSec = bytes / (r.memBwBytesPerSec * r.etaBw);
   const decodeFlop = B * (2 * (lin + lm) + attentionFlop(m, ctxDecode, 'decode'));
   // The other users' prefill: (B − 1) × newTok / out tokens per step, and (B − 1) / out of a prompt finishes per step.
   const prefillFlop =
     prefillTokens * (2 * lin + attentionFlop(m, w.inputTokens - newTok / 2)) +
     (others / w.outputTokens) * 2 * lm;
-  const computeSec = (decodeFlop + prefillFlop) / (r.flopsPerSec * r.etaCompute);
+  const flop = decodeFlop + prefillFlop;
+  const computeSec = flop / (r.flopsPerSec * r.etaCompute);
   // Row-parallel partial sums are reduced for every token of the step, prefill chunk included [R-LEC F3]
   // (review L2): 2 all-reduces per layer (Megatron-style TP, spec §5.4), message = step tokens × hidden × 2 bytes.
   const commSec =
@@ -177,7 +183,7 @@ export function decodeStep(
   const stepSec = Math.max(bwSec, computeSec) + commSec + fixedSec;
   return {
     bwSec, computeSec, commSec, fixedSec, stepSec, tokensPerSecPerUser: 1 / stepSec, prefillTokens, stepTokens,
-    decodeFwdSec: stepSec, prefillPassSec: 0, prefillPassProb: 0,
+    decodeFwdSec: stepSec, prefillPassSec: 0, prefillPassProb: 0, flop, bytes,
   };
 }
 
@@ -215,7 +221,8 @@ function separatePrefillStep(
   const fixed = r.tFixedSec ?? 0;
   const comm = (tokens: number) =>
     includeComm && r.tp > 1 ? 2 * m.layers * allReduceSec(r.tp, tokens * m.hidden * 2, r.allreduceLatencySec, r.linkBwBytesPerSecPerDir) : 0;
-  const decBw = (readAt(B) + B * kvBytesPerSequence(m, ctxDecode, kvElem, r.tp)) / bw;
+  const decBytes = readAt(B) + B * kvBytesPerSequence(m, ctxDecode, kvElem, r.tp);
+  const decBw = decBytes / bw;
   const decCompute = decodeFlop / peak;
   const decComm = comm(B);
   const decodeFwdSec = Math.max(decBw, decCompute) + decComm + fixed;
@@ -225,13 +232,14 @@ function separatePrefillStep(
     return {
       bwSec: decBw, computeSec: decCompute, commSec: decComm, fixedSec: fixed, stepSec: decodeFwdSec,
       tokensPerSecPerUser: 1 / decodeFwdSec, prefillTokens: 0, stepTokens: B,
-      decodeFwdSec, prefillPassSec: 0, prefillPassProb: 0,
+      decodeFwdSec, prefillPassSec: 0, prefillPassProb: 0, flop: decodeFlop, bytes: decBytes,
     };
   }
   const p = Math.min(1, prefillTokens / chunk);
   const passTokens = prefillTokens / p;
   // The prompts in the pass: passTokens ÷ chunk prompts' KV, each at its average prompt position.
-  const passBw = (readAt(passTokens) + (passTokens / chunk) * kvBytesPerSequence(m, w.inputTokens - newTok / 2, kvElem, r.tp)) / bw;
+  const passBytes = readAt(passTokens) + (passTokens / chunk) * kvBytesPerSequence(m, w.inputTokens - newTok / 2, kvElem, r.tp);
+  const passBw = passBytes / bw;
   const passCompute = prefillFlop / p / peak;
   const passComm = comm(passTokens);
   const prefillPassSec = Math.max(passBw, passCompute) + passComm + fixed;
@@ -248,6 +256,9 @@ function separatePrefillStep(
     decodeFwdSec,
     prefillPassSec,
     prefillPassProb: p,
+    // Expected per step, weighted like bwSec / computeSec: decode forward + p × pass (the pass's FLOPs are prefillFlop / p).
+    flop: decodeFlop + prefillFlop,
+    bytes: decBytes + p * passBytes,
   };
 }
 

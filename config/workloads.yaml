@@ -63,7 +63,7 @@ concurrency:
   agentRule: { value: '研究助理類：「同時最多 N 人」視為 N 個工作階段同時開著、上下文保留在記憶體；其中同時在生成的比例取 TraceLab 的生成時間比例 3.3%（推估）', status: derived, formula: 'max(1, ceil(N × agentGeneratingShare))', inputs: [tracelab], verified: 2026-10-20 }
   # Ruling R36 (spec §5.2): prefill queueing behind vLLM max_num_batched_tokens. Little's law is exact for any stable
   # system; applying it to a closed, deterministic fluid loop without bursts is the assumption, so this is an estimate.
-  queueRule: { value: "排隊（vLLM）：每副本 B 個生成中的請求，每個解碼 輸出 個 token 後立刻送出下一個請求，需要 新輸入 = 輸入 × (1 − 快取命中率) 個未快取 prefill token。D 人同時解碼時每步需要 D × (1 + 新輸入 ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 新輸入))) 人同時解碼，其餘 B − D_max 人排隊。Little's law：完成率 λ = D_max ÷ (輸出 × t_step)，排隊時間 W = (B − D_max) ÷ λ，加進首字時間；每步時間與每人速度以 D_max 人解碼計", status: estimate, basis: "Little's law（L = λW）對任何穩態系統成立；把系統當成封閉迴路、確定性的流體近似（每人輪流解碼與等預填、沒有突發與抖動）是本計算機的假設，所以 W 是實際平均等待的下限，P95／P99 會更長（尾端餘裕留待 Plan 5）。每步 token 上限與 waiting queue 依 vLLM v0.32.0 scheduler", evidence: [little-1961, vllm-v032-scheduler, vllm-v032-arg-utils], verified: 2026-10-20 }
+  queueRule: { value: "排隊（vLLM）：每份模型 B 個生成中的請求，每個解碼 輸出 個 token 後立刻送出下一個請求，需要 新輸入 = 輸入 × (1 − 快取命中率) 個未快取 prefill token。D 人同時解碼時每步需要 D × (1 + 新輸入 ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 新輸入))) 人同時解碼，其餘 B − D_max 人排隊。Little's law：完成率 λ = D_max ÷ (輸出 × t_step)，排隊時間 W = (B − D_max) ÷ λ，加進首字時間；每步時間與每人速度以 D_max 人解碼計", status: estimate, basis: "Little's law（L = λW）對任何穩態系統成立；把系統當成封閉迴路、確定性的流體近似（每人輪流解碼與等預填、沒有突發與抖動）是本計算機的假設，所以 W 是實際平均等待的下限，P95／P99 會更長（尾端餘裕留待 Plan 5）。每步 token 上限與 waiting queue 依 vLLM v0.32.0 scheduler", evidence: [little-1961, vllm-v032-scheduler, vllm-v032-arg-utils], verified: 2026-10-20 }
 
 # Verify-command (vllm bench serve) rules shared by every result.
 # vLLM v0.32.0 (re-verified 2026-10-20): the bench client decodes random token ids to a string and re-encodes it,
@@ -77,3 +77,16 @@ concurrency:
 # is never clamped; it only lengthens --max-model-len (vLLM sizes the KV pool from --gpu-memory-utilization).
 benchmark:
   maxModelLenMarginTokens: { value: 256, unit: tokens, status: estimate, basis: '量測到的重新斷詞誤差最大 187 token（只有變短，未見變長；以 v0.10.0 的流程量測，v0.32.0 的 bench 會重試讓長度相符，漂移只會更小），取同量級向上取整為 256 作為變長方向的保險：v0.32.0 遇到 prompt + max_tokens 超過 max_model_len 時會把 max_tokens 截短，量到的輸出就不是指定長度；不影響記憶體估算', evidence: [bench-retokenize-drift, vllm-bench-random-dataset, vllm-serving-validate-input], verified: 2026-10-20 }
+
+# 人數漏斗（spec 2026-10-21 §5.5、§6.1）：只知道註冊總人數時，換算尖峰同時人數。
+# λ = 總人數 × dailyActiveShare × requestsPerActivePerDay × peakHourShare ÷ 3600；同時數 = λ × 服務時間。
+# 數值取自 docs/research/user-questions.md §3；GWDG 為學術 HPC 聊天服務（只有平日使用），套用到其他機構是外推。
+funnel:
+  # 論文 §6.4 報告註冊約 9,000 人、平日活躍約 400–500 人；比例由本專案相除（約 4.4–5.6%），取 5%，所以是 estimate。
+  # 原文引句見 docs/research/user-questions.md §3「GWDG 數字的出處與推算」。
+  dailyActiveShare: { value: 0.05, status: estimate, basis: '本專案由 GWDG 論文 §6.4 的兩個數字相除，論文未直接報告比例：平日活躍 400–500 人 ÷ 註冊約 9,000 人 ≈ 4.4–5.6%，取 5%。限制：註冊數是 2024 年 6 月的數字，活躍數是平均值，時間點不完全相同。引句與計算見 docs/research/user-questions.md §3「GWDG 數字的出處與推算」', evidence: [gwdg-chat-ai], verified: 2026-10-21 }
+  # 論文沒有報告每人每日則數，此為本專案推算（約 113 個工作日是假設，論文未給），所以是 estimate；算式與限制見同一節。
+  requestsPerActivePerDay: { value: 7, status: estimate, basis: '本專案由 GWDG 論文 §6.4 的數字推算，論文未直接報告：350,000 則累計訊息（至 2024-07-30）÷ 約 113 個工作日（2024-02-22 至 07-30 約 159 天，假設平日使用占 5/7；工作日數論文未給）÷ 約 450 位平日活躍者 ≈ 6.9，取整 7。限制：訊息可能含 API 流量，活躍人數是平均值。引句與計算見 docs/research/user-questions.md §3「GWDG 數字的出處與推算」', evidence: [gwdg-chat-ai], verified: 2026-10-21 }
+  # 規劃工具頁（secondary，不能當 measured）寫最忙一小時佔每日流量 10–20%（docs/research/user-questions.md §3 表）；
+  # 同檔結論寫 15–20%。取 0.2 = 兩個區間的上限，偏保守。GWDG 沒有尖峰小時佔比的資料，所以不列為證據。
+  peakHourShare: { value: 0.2, status: estimate, basis: '已發表的區間：規劃工具頁 10–20%（secondary，docs/research/user-questions.md §3 表）、同檔結論 15–20%；取兩者的上限 20%，使尖峰偏保守（同時人數偏多）。沒有學術機構聊天服務的實測尖峰小時佔比', evidence: [rate-limit-planner], verified: 2026-10-21 }

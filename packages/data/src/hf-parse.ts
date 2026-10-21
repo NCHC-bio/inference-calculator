@@ -481,7 +481,7 @@ export function parseHfConfig(
   }
 
   if (safetensorsTotal === null) missing.push('safetensors.total');
-  if (!opts.origin) missing.push('origin (--developer, --country)');
+  if (!opts.origin) missing.push('origin (developer, country)');
 
   if (missing.length > 0) return { missing, notes };
 
