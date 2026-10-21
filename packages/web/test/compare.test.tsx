@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { t, type MsgKey } from '../src/i18n';
 import { getBundle } from '../src/bundle';
+import { withQuant } from '../src/components/Workbench';
 import { shown } from './helpers';
 
 const zh = (k: MsgKey, v?: Record<string, string | number>) => t('zh-TW', k, v);
@@ -37,7 +38,7 @@ describe('comparison table', { timeout: 20000 }, () => {
     }
     const p = getBundle().platforms[H200]!;
     expect(dataRows()[0]!.textContent).toContain(`${p.name} ${p.sub}`);
-    expect(dataRows()[0]!.textContent).toMatch(/（.+）/);
+    expect(dataRows()[0]!.textContent).not.toMatch(/FP8（FP8）/);
     await shown(zh('pin.added'));
   });
 
@@ -93,5 +94,27 @@ describe('footer honesty', () => {
     render(<App />);
     await userEvent.click(within(document.querySelector('footer')!).getByText(zh('footer.accuracy')));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  });
+});
+
+describe('model label', () => {
+  it('skips the quant suffix when the name already contains it as a token', () => {
+    expect(withQuant('Llama-3.3-70B-Instruct-FP8', 'FP8')).toBe('Llama-3.3-70B-Instruct-FP8');
+    expect(withQuant('gpt-oss-20b', 'MXFP4')).toBe('gpt-oss-20b（MXFP4）');
+    expect(withQuant('Model-FP8', 'FP')).toBe('Model-FP8（FP）');
+  });
+});
+
+describe('closed comparison', () => {
+  it('is inert with zero height and clipped; Tab never lands on 清除', { timeout: 20000 }, async () => {
+    render(<App />);
+    const reveal = screen.getByTestId('compare').closest('.reveal')!;
+    expect(reveal).toHaveAttribute('inert');
+    expect(reveal.querySelector(':scope > div')!).toBeInTheDocument();
+    const clear = screen.getByText(zh('compare.clear'), { selector: 'button *, button' });
+    for (let i = 0; i < 15; i++) {
+      await userEvent.tab();
+      expect(clear.closest('button')).not.toHaveFocus();
+    }
   });
 });

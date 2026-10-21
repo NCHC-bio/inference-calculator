@@ -53,7 +53,13 @@ function Heading({ children }: { children: ReactNode }): JSX.Element {
 function modelLabel(b: Bundle, s: CalcState, perf: PerformanceResult): string {
   const name = s.customModel === null ? b.models[s.model]!.name : resolveModel(b, queryOf(b, s).model).model.name;
   const q = b.quantization[perf.quant]?.name;
-  return q ? `${name}（${q}）` : name;
+  return q ? withQuant(name, q) : name;
+}
+
+/** 「模型（量化）」, without the suffix when the name already carries the quant as a token (display only). */
+export function withQuant(name: string, quant: string): string {
+  const esc = quant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`, 'i').test(name) ? name : `${name}（${quant}）`;
 }
 
 /** Peak power, or 「功耗未查證」 with core's note (plus the bundle TDP record's reason) on hover. */

@@ -21,7 +21,7 @@ export function CompareTable(): JSX.Element {
   const rows = shown.current;
   const num = (v: number | null, d = 0) => (v === null ? tr('status.unverified') : fmt(lang, v, d));
   return (
-    <div className={'reveal' + (pins.length > 0 ? ' on' : '')} aria-hidden={pins.length === 0}>
+    <div className={'reveal' + (pins.length > 0 ? ' on' : '')} inert={pins.length === 0} aria-hidden={pins.length === 0}>
       <div>
         <Card
           data-testid="compare"
