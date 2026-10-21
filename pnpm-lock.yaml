@@ -223,6 +223,9 @@ importers:
       '@nchc/core':
         specifier: workspace:*
         version: link:../core
+      '@nchc/data':
+        specifier: workspace:*
+        version: link:../data
       '@nchc/schema':
         specifier: workspace:*
         version: link:../schema

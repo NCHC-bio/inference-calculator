@@ -10,5 +10,10 @@
     "resolveJsonModule": true
   },
   "include": ["src", "test", "vite.config.ts", "vitest.config.ts"],
-  "references": [{ "path": "../schema" }, { "path": "../core/tsconfig.src.json" }, { "path": "./e2e" }]
+  "references": [
+    { "path": "../schema" },
+    { "path": "../core/tsconfig.src.json" },
+    { "path": "../data/tsconfig.hf.json" },
+    { "path": "./e2e" }
+  ]
 }

@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm -w data:build && vite",
-    "build": "pnpm -w data:build && vite build",
+    "dev": "pnpm -w data:build && pnpm -w calibrate && vite",
+    "build": "pnpm -w data:build && pnpm -w calibrate && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.4",
     "@nchc/core": "workspace:*",
+    "@nchc/data": "workspace:*",
     "@nchc/schema": "workspace:*",
     "antd": "6.6.5",
     "d3-scale": "4.0.2",

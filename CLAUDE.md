@@ -15,16 +15,16 @@ pnpm workspace (pnpm 12.9.1 via `corepack enable`), Node 24, TypeScript 7, Vites
 ```bash
 pnpm install
 pnpm data:build      # validate config/ → packages/data/dist/bundle.json (fails on any provenance/schema/policy error)
-pnpm test            # runs data:build, then vitest across all packages
-pnpm typecheck       # data:build, then tsc -b in every package (the web imports the generated bundle.json)
+pnpm test            # runs data:build and calibrate, then vitest across all packages
+pnpm typecheck       # data:build and calibrate, then tsc -b in every package (the web imports the generated bundle.json and accuracy.json)
 pnpm calibrate       # compare predictions with published measurements → packages/data/dist/accuracy.json (out-of-tolerance only WARNs)
-pnpm web:dev         # Vite dev server (builds the bundle first)
-pnpm web:build       # static site → packages/web/dist/
+pnpm web:dev         # Vite dev server (builds the bundle and accuracy.json first)
+pnpm web:build       # static site → packages/web/dist/ (builds the bundle and accuracy.json first)
 pnpm web:e2e         # Playwright, desktop + mobile (Pixel 7) projects; builds and serves fresh on :4173
 pnpm data:import <owner/repo> --developer <name> --country <ISO2>   # add a model from Hugging Face
 ```
 
-Single test: `pnpm vitest run packages/core/test/solve.test.ts` or `pnpm vitest run -t "<test name>"`. Vitest has two projects: `node` (core/data/schema) and `web` (jsdom, `packages/web/vitest.config.ts`); select one with `--project node|web`. Tests import `bundle.json`, so run `pnpm data:build` first whenever `config/` changed (plain `pnpm test` does this for you).
+Single test: `pnpm vitest run packages/core/test/solve.test.ts` or `pnpm vitest run -t "<test name>"`. Vitest has two projects: `node` (core/data/schema) and `web` (jsdom, `packages/web/vitest.config.ts`); select one with `--project node|web`. Tests import `bundle.json` and `accuracy.json`, so run `pnpm data:build` and `pnpm calibrate` first whenever `config/` changed (plain `pnpm test` does this for you).
 
 CI (`.github/workflows/ci.yml`) runs: `typecheck` → `data:build` → `test` → `calibrate`.
 
