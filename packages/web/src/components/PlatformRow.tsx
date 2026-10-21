@@ -10,7 +10,6 @@ import { CapacityBar } from './CapacityBar';
 import { CountControl } from './CountControl';
 import { Explain } from './Explain';
 import { Isotype } from './Isotype';
-import { RowDetail } from './RowDetail';
 import { WHY } from './why';
 
 const fmt = (lang: string, n: number, digits = 0) =>
@@ -161,25 +160,5 @@ export function RowExtra({ r, info, users, onSuggest, onSet, onEdit, onDelete }:
         <div>{r.adjusted && <SpeedLine r={r} unit={info.unit} />}</div>
       </div>
     </div>
-  );
-}
-
-/** Expanded content for now: the detail at the row's count (Task 5 replaces it with the workbench). */
-export function RowBody({ r, info, demoText, tdpConflict }: { r: OkRow; info: RowInfo; demoText: string; tdpConflict: string | null }): JSX.Element {
-  const tr = useT();
-  const { perf } = r;
-  if (!perf.usage) {
-    return <Typography.Text type="secondary">{perf.why ? tr(WHY[perf.why]) : perf.detail}</Typography.Text>;
-  }
-  // Core's note says power is unverified; the bundle's TDP record says why (its `conflict`), when it has one.
-  const note = perf.powerNote === undefined ? undefined : tdpConflict ? tr('detail.powerNote', { note: perf.powerNote, why: tdpConflict }) : perf.powerNote;
-  return (
-    <RowDetail
-      usage={perf.usage}
-      unit={info.unit}
-      demoText={demoText}
-      power={{ kw: perf.powerKw, ...(note !== undefined ? { note } : {}) }}
-      queueing={perf.queueing}
-    />
   );
 }

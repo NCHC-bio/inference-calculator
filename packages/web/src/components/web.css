@@ -105,3 +105,57 @@
     margin-inline-start: 0;
   }
 }
+
+/* A term with a hover / tap / focus explanation. */
+.help-text {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+/*
+ * Workbench (design §4.5, demo v8 `.wb`): one view, no tabs. Top line; row 1 = 體驗 | 原因; row 2 = the two charts;
+ * footer = 更多圖表 Collapse with 驗證指令 on the same line. Two columns on wide screens, stacked at ≤ 760 px.
+ */
+.wb {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 4px 8px;
+}
+.wb-top {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.wb-row-1,
+.wb-row-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px 28px;
+  align-items: start;
+}
+.wb-row-1 > *,
+.wb-row-2 > * {
+  min-width: 0;
+}
+.wb-h {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.wb-chart {
+  min-height: 190px;
+}
+.wb-foot .ant-collapse-header {
+  padding-inline: 0;
+  align-items: center;
+}
+@media (max-width: 760px) {
+  .wb-row-1,
+  .wb-row-2 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

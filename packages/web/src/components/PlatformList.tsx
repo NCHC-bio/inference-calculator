@@ -4,10 +4,10 @@ import { useRef, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useDeferredState, useMain } from '../compute/useResults';
 import { useT } from '../i18n';
-import { workloadId } from '../state/state';
 import { useCalc } from '../state/store';
 import { BestMarker } from './BestMarker';
-import { CustomActions, RowBody, RowExtra, RowName, rowInfo, WhyTag } from './PlatformRow';
+import { CustomActions, RowExtra, RowName, rowInfo, WhyTag } from './PlatformRow';
+import { Workbench } from './Workbench';
 
 type Item = NonNullable<CollapseProps['items']>[number];
 
@@ -25,7 +25,6 @@ export function PlatformList(): JSX.Element | null {
   const wrap = useRef<HTMLDivElement>(null);
   if (view.kind !== 'main') return null;
   const b = getBundle();
-  const demoText = b.workloads[workloadId(s.workload)]!.demoText;
   const best = view.result.best;
 
   const items: Item[] = [];
@@ -59,7 +58,6 @@ export function PlatformList(): JSX.Element | null {
       items.push({ key: r.row, ...attrs, showArrow: false, collapsible: 'disabled', label: <RowName info={info} />, extra });
       continue;
     }
-    const tdp = info.hardware === null ? undefined : b.hardware[info.hardware]?.tdpW;
     items.push({
       key: r.row,
       ...attrs,
@@ -76,7 +74,7 @@ export function PlatformList(): JSX.Element | null {
           onDelete={onDelete}
         />
       ),
-      children: <RowBody r={r} info={info} demoText={demoText} tdpConflict={tdp?.value === null && tdp.conflict ? tdp.conflict : null} />,
+      children: <Workbench row={r} />,
     });
   }
   const open = view.rows.find((r) => r.row === current.openRow && r.kind === 'ok')?.row;

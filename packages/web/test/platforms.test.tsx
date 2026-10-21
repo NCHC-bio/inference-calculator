@@ -55,7 +55,7 @@ describe('PlatformList', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await userEvent.click(within(row).getByText(b.platforms[best]!.name));
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await waitFor(() => expect(within(row).getByTestId('row-detail')).toBeInTheDocument());
+    await waitFor(() => expect(within(row).getByTestId('workbench')).toBeInTheDocument());
   });
 
   it('infeasible rows cannot expand and show the reason', async () => {

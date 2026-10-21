@@ -2,7 +2,7 @@ import type { ShapeUsage } from '@nchc/core';
 import { scaleLinear } from 'd3-scale';
 import { select } from 'd3-selection';
 import 'd3-transition';
-import { theme } from 'antd';
+import { theme, Typography } from 'antd';
 import { useEffect, useRef, type JSX } from 'react';
 import { useLang, useT } from '../i18n';
 import { transitionMs } from '../motion';
@@ -119,19 +119,31 @@ export function MemoryBar({ memory }: { memory: Memory }): JSX.Element {
     perUserKv: gb(lang, memory.perUserKvBytes),
     reserve: gb(lang, memory.reserveBytes),
   });
+  const caption = tr('memory.caption', {
+    weights: gb(lang, memory.weightsBytes),
+    perUserKv: gb(lang, memory.perUserKvBytes),
+    n: new Intl.NumberFormat(lang).format(memory.residentPerReplica),
+    // The reserve is named only when there is one.
+    reserve: memory.reserveBytes > 0 ? tr('memory.caption.reserve', { gb: gb(lang, memory.reserveBytes) }) : '',
+  });
   return (
-    <Explain content={<div style={{ maxWidth: 300 }}>{tip}</div>}>
-      <div data-testid="memory-bar" tabIndex={0} role="img" aria-label={tr('memory.label')} style={{ cursor: 'help', margin: '8px 0 4px' }}>
-        <svg
-          ref={ref}
-          aria-hidden="true"
-          width="100%"
-          height={H}
-          viewBox={`0 0 ${W} ${H}`}
-          preserveAspectRatio="none"
-          style={{ display: 'block', borderRadius: token.borderRadiusXS, overflow: 'hidden' }}
-        />
-      </div>
-    </Explain>
+    <div>
+      <Explain content={<div style={{ maxWidth: 300 }}>{tip}</div>}>
+        <div data-testid="memory-bar" tabIndex={0} role="img" aria-label={tr('memory.label')} style={{ cursor: 'help', margin: '6px 0 4px' }}>
+          <svg
+            ref={ref}
+            aria-hidden="true"
+            width="100%"
+            height={H}
+            viewBox={`0 0 ${W} ${H}`}
+            preserveAspectRatio="none"
+            style={{ display: 'block', borderRadius: token.borderRadiusXS, overflow: 'hidden' }}
+          />
+        </div>
+      </Explain>
+      <Typography.Text type="secondary" data-testid="memory-caption" style={{ fontSize: 11 }}>
+        {caption}
+      </Typography.Text>
+    </div>
   );
 }

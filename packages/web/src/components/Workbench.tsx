@@ -1,0 +1,289 @@
+import { CodeOutlined, PushpinOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { resolveModel, type PerformanceResult } from '@nchc/core';
+import type { Bundle } from '@nchc/schema';
+import { Button, Collapse, Flex, Typography } from 'antd';
+import { useRef, useState, type JSX, type ReactNode } from 'react';
+import { getBundle } from '../bundle';
+import { speedTarget } from '../compute/actions';
+import type { BenchView, OkRow } from '../compute/compute';
+import { queryOf } from '../compute/query';
+import { useBench, useDeferredState } from '../compute/useResults';
+import { useLang, useT } from '../i18n';
+import { useTween } from '../motion/useTween';
+import { workloadId, type Action, type CalcState } from '../state/state';
+import { useCalc } from '../state/store';
+import { ActionChips } from './ActionChips';
+import { Explain } from './Explain';
+import { MemoryBar } from './MemoryBar';
+import { rowInfo } from './PlatformRow';
+import { SplitSelect, SplitText } from './SplitSelect';
+import { TypingDemo } from './TypingDemo';
+import { UsageBars } from './UsageBars';
+import { WHY } from './why';
+
+const fmtIn = (lang: string, n: number, d = 0) => new Intl.NumberFormat(lang, { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
+const small = { fontSize: 12 } as const;
+
+/** A number that tweens to `v` (design §3.6: numbers tween). */
+function TNum({ v, d = 0, testId }: { v: number; d?: number; testId?: string }): JSX.Element {
+  const lang = useLang();
+  const x = useTween(v);
+  return <b data-testid={testId}>{fmtIn(lang, x, d)}</b>;
+}
+
+/** Renders a translated sentence with `children` in place of its `{v}` (keeps the tweened number inside one sentence). */
+function Slot({ text, children }: { text: string; children: ReactNode }): JSX.Element {
+  const [before, after] = text.split('{v}');
+  return (
+    <>
+      {before}
+      {children}
+      {after}
+    </>
+  );
+}
+
+function Heading({ children }: { children: ReactNode }): JSX.Element {
+  return <div className="wb-h">{children}</div>;
+}
+
+/** The current model and quant as one label (for a comparison pin). */
+function modelLabel(b: Bundle, s: CalcState, perf: PerformanceResult): string {
+  const name = s.customModel === null ? b.models[s.model]!.name : resolveModel(b, queryOf(b, s).model).model.name;
+  const q = b.quantization[perf.quant]?.name;
+  return q ? `${name} ${q}` : name;
+}
+
+/** Peak power, or 「功耗未查證」 with core's note (plus the bundle TDP record's reason) on hover. */
+function PowerLine({ perf, tdpConflict }: { perf: PerformanceResult; tdpConflict: string | null }): JSX.Element {
+  const tr = useT();
+  const kw = useTween(perf.powerKw ?? 0);
+  const lang = useLang();
+  const style = { ...small, display: 'block', marginTop: 8 } as const;
+  if (perf.powerKw !== null) {
+    return (
+      <Typography.Text type="secondary" style={style}>
+        <ThunderboltOutlined /> {tr('detail.power', { kw: fmtIn(lang, kw, 1) })}
+      </Typography.Text>
+    );
+  }
+  const note = perf.powerNote === undefined ? undefined : tdpConflict ? tr('detail.powerNote', { note: perf.powerNote, why: tdpConflict }) : perf.powerNote;
+  return (
+    <Typography.Text type="secondary" style={style}>
+      <ThunderboltOutlined />{' '}
+      {note ? (
+        <Explain content={<div style={{ maxWidth: 300 }}>{note}</div>}>
+          <span tabIndex={0} className="help-text">
+            {tr('detail.powerUnknown')}
+          </span>
+        </Explain>
+      ) : (
+        tr('detail.powerUnknown')
+      )}
+    </Typography.Text>
+  );
+}
+
+/** Footer: 「更多圖表（Roofline，專家用）」 Collapse (left) and 「驗證指令」 (right, in the item's `extra`, never toggles it). */
+function Foot({ onVerify }: { onVerify: () => void }): JSX.Element {
+  const tr = useT();
+  const [open, setOpen] = useState<string[]>([]);
+  return (
+    <div className="wb-foot">
+      <Collapse
+        ghost
+        size="small"
+        activeKey={open}
+        onChange={(k) => setOpen(k)}
+        items={[
+          {
+            key: 'roofline',
+            collapsible: 'header',
+            label: (
+              <Typography.Text type="secondary" style={small}>
+                {tr('wb.more')}
+              </Typography.Text>
+            ),
+            extra: (
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0, height: 'auto' }}
+                icon={<CodeOutlined />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onVerify();
+                }}
+              >
+                {tr('wb.verify')}
+              </Button>
+            ),
+            // Task 6 draws the Roofline here.
+            children: <div data-testid="chart-roofline" className="wb-chart" />,
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
+type Props = { row: OkRow; bench: BenchView; s: CalcState; dispatch: (a: Action) => void };
+
+/** The workbench body for a bench that has usage (the split fits and serves at least one user). */
+function Body({ row, bench, s, dispatch }: Props): JSX.Element {
+  const tr = useT();
+  const lang = useLang();
+  const b = getBundle();
+  const { perf } = bench;
+  const usage = perf.usage!;
+  const shape = perf.shape ?? usage.shape;
+  const info = rowInfo(b, s, row.row);
+  const unitText = tr(info.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
+  const target = speedTarget(b, s);
+  const demoText = b.workloads[workloadId(s.workload)]!.demoText;
+  const tdp = info.hardware === null ? undefined : b.hardware[info.hardware]?.tdpW;
+  const tdpConflict = tdp?.value === null && tdp.conflict ? tdp.conflict : null;
+
+  const pin = () =>
+    dispatch({
+      type: 'pin',
+      pin: {
+        platform: info.name,
+        count: `${fmtIn(lang, row.count)} ${unitText}`,
+        model: modelLabel(b, s, perf),
+        users: s.users,
+        tps: usage.tokPerSecPerUser,
+        ttft: usage.ttftSec,
+        max: perf.maxConcurrent,
+        kw: perf.powerKw,
+      },
+    });
+  const pickSplit = (tp: number) => {
+    if (tp === perf.recommendedTp) {
+      dispatch({ type: 'override', row: row.row, value: row.count === row.suggested ? null : { gpus: row.count } });
+    } else dispatch({ type: 'override', row: row.row, value: { gpus: row.count, tp } });
+  };
+
+  return (
+    <div className="wb" data-testid="workbench">
+      <div className="wb-top">
+        <Typography.Text type="secondary" style={small}>
+          {tr('wb.summary', { n: fmtIn(lang, row.count), unit: unitText, name: info.name, users: fmtIn(lang, s.users) })}
+          <SplitText tp={shape.tp} replicas={shape.replicas} unit={info.unit} />
+        </Typography.Text>
+        <Button size="small" icon={<PushpinOutlined />} onClick={pin}>
+          {tr('wb.pin')}
+        </Button>
+      </div>
+
+      <div className="wb-row-1">
+        <section data-area="exp">
+          <Heading>{tr('wb.exp')}</Heading>
+          <TypingDemo text={demoText} tokPerSec={usage.tokPerSecPerUser} ttftSec={usage.ttftSec} reset={row.row} />
+          <Flex gap={16} wrap="wrap" style={{ marginTop: 10 }}>
+            <span>
+              <Slot text={tr('wb.tps')}>
+                <TNum v={usage.tokPerSecPerUser} testId="metric-tps" />
+              </Slot>
+              <Typography.Text type="secondary">{tr('wb.tps.target', { v: fmtIn(lang, target.min) })}</Typography.Text>
+            </span>
+            <span>
+              <Slot text={tr('wb.ttft')}>
+                <TNum v={usage.ttftSec} d={1} testId="metric-ttft" />
+              </Slot>
+              <Typography.Text type="secondary">{tr('wb.ttft.limit', { v: new Intl.NumberFormat(lang).format(target.ttft) })}</Typography.Text>
+            </span>
+            <span>
+              <Slot text={tr('wb.max')}>
+                <TNum v={perf.maxConcurrent} testId="metric-max" />
+              </Slot>
+            </span>
+          </Flex>
+          <ActionChips actions={bench.actions} ok={perf.ok} onApply={(a) => a.apply.forEach(dispatch)} />
+        </section>
+        <section data-area="why">
+          <Heading>{tr('wb.why')}</Heading>
+          <UsageBars share={usage.share} />
+          <div style={{ marginTop: 10 }}>
+            <Typography.Text type="secondary" style={small}>
+              {tr('wb.memory')}
+            </Typography.Text>
+            <MemoryBar memory={usage.memory} />
+          </div>
+          <SplitSelect perf={perf} unit={info.unit} onPick={pickSplit} />
+          <PowerLine perf={perf} tdpConflict={tdpConflict} />
+          {perf.queueing && (
+            <Typography.Text type="secondary" style={{ ...small, display: 'block', marginTop: 4 }}>
+              <Explain content={<div style={{ maxWidth: 320 }}>{perf.queueing.reason}</div>}>
+                <span tabIndex={0} className="help-text">
+                  {tr('detail.queue', { sec: fmtIn(lang, perf.queueing.waitSec, 1) })}
+                </span>
+              </Explain>
+            </Typography.Text>
+          )}
+        </section>
+      </div>
+
+      <div className="wb-row-2">
+        <section data-area="cards">
+          <Heading>
+            {tr(info.unit === 'machine' ? 'wb.chart.cards.machine' : 'wb.chart.cards.gpu')}{' '}
+            <Typography.Text type="secondary" style={{ ...small, fontWeight: 400 }}>
+              {tr(info.unit === 'machine' ? 'wb.chart.cards.hint.machine' : 'wb.chart.cards.hint.gpu')}
+            </Typography.Text>
+          </Heading>
+          {/* Task 6: SpeedChart over bench.sweep. */}
+          <div data-testid="chart-cards" className="wb-chart" />
+        </section>
+        <section data-area="users">
+          <Heading>
+            {tr('wb.chart.users')}{' '}
+            <Typography.Text type="secondary" style={{ ...small, fontWeight: 400 }}>
+              {tr('wb.chart.users.hint', { n: fmtIn(lang, row.count), unit: unitText })}
+            </Typography.Text>
+          </Heading>
+          {/* Task 6: SpeedChart over bench.userCurve. */}
+          <div data-testid="chart-users" className="wb-chart" />
+        </section>
+      </div>
+
+      <Foot onVerify={() => dispatch({ type: 'dialog', id: 'verify' })} />
+    </div>
+  );
+}
+
+/**
+ * 試算區（design §4 item 5, demo v8 `Workbench`）: one view, no tabs. Top line (count, users, split in plain words) and
+ * 加入比較; row 1 體驗 | 原因; row 2 the two charts; footer 更多圖表 + 驗證指令. When the split does not fit or serves
+ * nobody (no usage): only the reason and the suggested actions.
+ *
+ * Bench data is computed only while this row is open; a closed row keeps its last bench so the close animation still
+ * has content.
+ */
+export function Workbench({ row }: { row: OkRow }): JSX.Element | null {
+  const tr = useT();
+  const [, dispatch] = useCalc();
+  const s = useDeferredState();
+  const fresh = useBench(s.openRow === row.row ? row.row : null);
+  const last = useRef<BenchView | null>(null);
+  if (fresh) last.current = fresh;
+  const bench = fresh ?? last.current;
+  if (!bench) return null;
+  const { perf } = bench;
+  if (!perf.usage) {
+    return (
+      <div className="wb fade-in" data-testid="workbench">
+        <div>
+          {perf.why && (
+            <Typography.Text type="danger" strong style={{ display: 'block' }}>
+              {tr(WHY[perf.why])}
+            </Typography.Text>
+          )}
+          {perf.detail && <Typography.Text type="secondary">{perf.detail}</Typography.Text>}
+        </div>
+        <ActionChips actions={bench.actions} ok={perf.ok} onApply={(a) => a.apply.forEach(dispatch)} />
+      </div>
+    );
+  }
+  return <Body row={row} bench={bench} s={s} dispatch={dispatch} />;
+}

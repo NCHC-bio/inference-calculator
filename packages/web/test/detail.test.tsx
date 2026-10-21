@@ -1,14 +1,9 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ShapeUsage } from '@nchc/core';
 import { describe, expect, it } from 'vitest';
-import { App } from '../src/App';
-import { getBundle } from '../src/bundle';
-import { computeMain, type MainView } from '../src/compute/compute';
 import { MemoryBar } from '../src/components/MemoryBar';
-import { RowDetail } from '../src/components/RowDetail';
 import { UsageBars } from '../src/components/UsageBars';
-import { defaultState } from '../src/state/state';
 import { StoreProvider } from '../src/state/store';
 import { renderStore, shown } from './helpers';
 import { setMedia } from './setup';
@@ -21,15 +16,6 @@ const mem = (resident: number): ShapeUsage['memory'] => ({
   reserveBytes: 1e9,
   perUserKvBytes: 0.5e9,
   residentPerReplica: resident,
-});
-const usage = (over: Partial<ShapeUsage> = {}): ShapeUsage => ({
-  shape: { tp: 4, replicas: 3 },
-  memory: mem(6),
-  share: { mem: 0.3, bw: 0.8, compute: 0.1, ttft: 0.5 },
-  tokPerSecPerUser: 20,
-  ttftSec: 1.2,
-  roofline: { peakTflopsPerGpu: 100, memBwTBsPerGpu: 1, intensityFlopPerByte: 10, achievedTflopsPerGpu: 5 },
-  ...over,
 });
 const kvCells = (c: HTMLElement) => c.querySelectorAll('[data-seg="kv"]').length;
 
@@ -93,65 +79,12 @@ describe('MemoryBar', () => {
     await userEvent.click(screen.getByTestId('memory-bar'));
     await shown('模型 4.0 GB；每人上下文 0.5 GB；保留 1.0 GB');
   });
-});
-
-describe('RowDetail', () => {
-  it('GB200 null TDP → 功耗未查證 with the note (Review Focus 4)', async () => {
-    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result.perPlatform.find((p) => p.platform === 'nano4-gb200')!;
-    expect(r.expected.ok).toBe(true);
-    expect(r.powerKw).toBeNull();
-    expect(r.powerNote).toBeTruthy();
-    renderStore(<RowDetail usage={r.usage!} unit="gpu" power={{ kw: r.powerKw, note: r.powerNote }} demoText="x" />);
-    expect(screen.getByText('功耗未查證')).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/NaN/);
-    await userEvent.click(screen.getByText('功耗未查證'));
-    await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
-    expect(screen.getByRole('tooltip')).toHaveTextContent(r.powerNote!);
+  it('caption names each colour with its size and the user count', () => {
+    renderStore(<MemoryBar memory={mem(6)} />);
+    expect(screen.getByTestId('memory-caption')).toHaveTextContent('紫：模型 4.0 GB；藍：每人上下文 0.5 GB × 6 人；黃：保留 1.0 GB；灰：剩餘');
   });
-  it('in the list, the GB200 power popover adds the bundle TDP record’s reason', async () => {
-    const b = getBundle();
-    const why = b.hardware[b.platforms['nano4-gb200']!.hardware]!.tdpW.conflict!;
-    render(<App />);
-    const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.row === 'nano4-gb200')!;
-    await userEvent.click(within(row).getByTestId('row-name'));
-    const detail = await within(row).findByTestId('row-detail');
-    await userEvent.click(within(detail).getByText('功耗未查證'));
-    await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
-    expect(screen.getByRole('tooltip')).toHaveTextContent(`功耗未查證：${why}`);
-  });
-  it('GPU: shape and peak power with one decimal', () => {
-    renderStore(<RowDetail usage={usage()} unit="gpu" power={{ kw: 12.345 }} demoText="x" />);
-    expect(screen.getByText('每副本 4 張 GPU × 3 個副本')).toBeInTheDocument();
-    expect(screen.getByText('峰值功耗約 12.3 kW')).toBeInTheDocument();
-  });
-  it('Mac: machine count; no power prop → no power line', () => {
-    renderStore(<RowDetail usage={usage({ shape: { tp: 1, replicas: 2 } })} unit="machine" demoText="x" />);
-    expect(screen.getByText('2 台')).toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/功耗/);
-  });
-  it('queueing: one sentence, reason in the popover', async () => {
-    const q = { tokensPerStep: 1, budget: 1, decodingMax: 1, waiting: 1, waitSec: 2.25, reason: '排隊原因' };
-    renderStore(<RowDetail usage={usage()} unit="gpu" demoText="x" queueing={q} />);
-    const s = screen.getByText('尖峰時部分請求需排隊約 2.3 秒，已計入首字時間');
-    await userEvent.click(s);
-    await shown('排隊原因');
-  });
-  it('no queueing → no queue sentence', () => {
-    renderStore(<RowDetail usage={usage()} unit="gpu" demoText="x" queueing={null} />);
-    expect(document.body.textContent).not.toMatch(/排隊/);
-  });
-  it('opens inside the row with core data', async () => {
-    const b = getBundle(); const s = defaultState(b); const res = (computeMain(b, s) as MainView & { kind: 'main' }).result;
-    const p = res.perPlatform.find((x) => x.platform === res.best)!;
-    render(<App />);
-    const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.row === res.best)!;
-    expect(within(row).queryByTestId('row-detail')).toBeNull();
-    await userEvent.click(within(row).getByTestId('row-name'));
-    const detail = await within(row).findByTestId('row-detail');
-    expect(detail).toBeInTheDocument();
-    expect(within(detail).getAllByTestId('usage-bar')).toHaveLength(4);
-    expect(within(detail).getAllByTestId('memory-bar')).toHaveLength(1);
-    expect(detail.textContent).toContain(`每副本 ${p.usage!.shape.tp} 張 GPU × ${p.usage!.shape.replicas} 個副本`);
-    expect(detail.textContent).not.toMatch(/NaN/);
+  it('caption leaves out an empty reserve', () => {
+    renderStore(<MemoryBar memory={{ ...mem(2), reserveBytes: 0 }} />);
+    expect(screen.getByTestId('memory-caption')).toHaveTextContent(/^紫：模型 4\.0 GB；藍：每人上下文 0\.5 GB × 2 人；灰：剩餘$/);
   });
 });

@@ -35,6 +35,37 @@ describe('TypingDemo', () => {
     expect(typed()).toBe('');
     advance(1250); expect(typed()).toBe('甲');
   });
+  it('continues from current progress when speed changes', () => {
+    const text = '一'.repeat(60);
+    const el = (tps: number) => (
+      <StoreProvider>
+        <TypingDemo text={text} tokPerSec={tps} ttftSec={0} />
+      </StoreProvider>
+    );
+    const { rerender } = render(el(10));
+    advance(1000); expect(typed().length).toBeGreaterThanOrEqual(9); expect(typed().length).toBeLessThanOrEqual(11);
+    rerender(el(40));
+    advance(500); expect(typed().length).toBeGreaterThanOrEqual(28); expect(typed().length).toBeLessThanOrEqual(31);
+  });
+  it('restarts when the row changes, not when the speed does', () => {
+    const el = (reset: string, tps: number) => (
+      <StoreProvider>
+        <TypingDemo text="一二三四五六七八" tokPerSec={tps} ttftSec={0} reset={reset} />
+      </StoreProvider>
+    );
+    const { rerender } = render(el('a', 4));
+    advance(1000); expect(typed()).toBe('一二三四');
+    rerender(el('a', 8)); expect(typed()).toBe('一二三四');
+    rerender(el('b', 8)); expect(typed()).toBe('');
+  });
+  it('waiting for the first word shows a spinning hourglass, no emoji', () => {
+    renderStore(<TypingDemo text="一二三" tokPerSec={4} ttftSec={2} />);
+    advance(100);
+    const w = screen.getByTestId('waiting');
+    expect(w.querySelector('[aria-label="hourglass"]')).not.toBeNull();
+    expect(w.querySelector('.anticon-spin')).not.toBeNull();
+    expect(w.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
+  });
   it('clears its timers on unmount', () => {
     const { unmount } = renderStore(<TypingDemo text="一二三" tokPerSec={4} ttftSec={1} />);
     unmount();

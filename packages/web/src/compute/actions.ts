@@ -23,7 +23,7 @@ function currentParamsB(b: Bundle, s: CalcState): number {
 }
 
 /** The current speed target's figures (preset or custom). */
-function speedTarget(b: Bundle, s: CalcState): { min: number; ttft: number } {
+export function speedTarget(b: Bundle, s: CalcState): { min: number; ttft: number } {
   if (typeof s.speed !== 'string') return { min: s.speed.minTokPerSec, ttft: s.speed.maxTtftSec };
   const p = b.speedPresets[s.speed]!;
   return { min: p.minTokensPerSec.value, ttft: p.maxTtftSec.value };
