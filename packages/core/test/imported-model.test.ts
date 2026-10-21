@@ -56,6 +56,20 @@ describe('imported model', () => {
     expectInvalid(() => estimateRequirements(bundle, query(imported((m) => { m.layers = 25; }))));
   });
 
+  it('an official value citing a secondary source is rejected', () => {
+    expectInvalid(() => estimateRequirements(bundle, query(imported(undefined, { ...source(), kind: 'secondary' }))));
+  });
+
+  it('nativeQuant with an unknown quantization or no nativeNote is rejected', () => {
+    expectInvalid(() => estimateRequirements(bundle, query(imported((m) => {
+      (m.nativeQuant as { quant: string }).quant = 'no-such-quant';
+    }))));
+    const noNote = Object.values(bundle.quantization).find((q) => !q.vllmServe.nativeNote)!;
+    expectInvalid(() => estimateRequirements(bundle, query(imported((m) => {
+      (m.nativeQuant as { quant: string }).quant = noNote.id;
+    }))));
+  });
+
   it('quantOptionsFor equals quantOptions for catalog models', () => {
     for (const m of Object.values(bundle.models)) expect(quantOptionsFor(bundle, m)).toEqual(quantOptions(bundle, m.id));
   });
