@@ -4,7 +4,7 @@ import {
   CustomHardwareSchema, MetaSchema, ModelSchema, PlatformSchema, PolicySchema, QuantizationSchema, SourceSchema, SpeedPresetSchema,
   WorkloadSchema, SkippedCalibrationPointSchema, CalibrationGapSchema, type Bundle, type CalibrationPoint, type Hardware, type Model, type Platform, type Quantization,
 } from '@nchc/schema';
-import { excludedOrgOf, layerShapeIssues, legalTpOptions, mlaLayoutIssues, moeParamsIssue } from '@nchc/core';
+import { excludedOrgOf, layerShapeIssues, legalTpOptions, mlaLayoutIssues, moeParamsIssue, nativeQuantIssue, secondarySourceIssue } from '@nchc/core';
 import { CONFIG_FILES, type ConfigSection, type RawConfig, type RawDoc } from './load';
 
 export interface ValidationIssue {
@@ -345,11 +345,11 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
   for (const m of collections.models) {
     const nq = (m.value as unknown as Model).nativeQuant;
     if (!nq) continue;
-    const q = quantItems.get(nq.quant);
-    if (!q) err(m.file, joinPath('models', m.id, 'nativeQuant', 'quant'), `unknown quantization id '${nq.quant}'`);
-    else if (!(q.value as unknown as Quantization).vllmServe.nativeNote) {
-      err(q.file, joinPath('quantization', q.id, 'vllmServe', 'nativeNote'),
-        `required: model '${m.id}' is natively '${q.id}', and its verify command needs the native-checkpoint note`);
+    const issue = nativeQuantIssue(nq.quant, (id) => quantItems.get(id)?.value as unknown as Quantization | undefined);
+    if (issue?.code === 'unknown-quant') err(m.file, joinPath('models', m.id, 'nativeQuant', 'quant'), issue.message);
+    else if (issue) {
+      err(quantItems.get(issue.quant)!.file, joinPath('quantization', issue.quant, 'vllmServe', 'nativeNote'),
+        `required: model '${m.id}' is natively '${issue.quant}': ${issue.message}`);
     }
   }
 
@@ -369,11 +369,11 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     if (typeof node.source === 'string' && !has.sources.has(node.source)) {
       err(file, joinPath(path, 'source'), `unknown source id '${node.source}'`);
     }
-    if ((node.status === 'official' || node.status === 'measured') && typeof node.source === 'string'
-      && sourceKind.get(node.source) === 'secondary') {
-      err(file, joinPath(path, 'source'),
-        `${node.status} value cites source '${node.source}' of kind secondary (official / measured need a primary source; use unverified)`);
-    }
+    const srcId = node.source;
+    const secondary = typeof srcId === 'string'
+      ? secondarySourceIssue(node.status as string | undefined, srcId, sourceKind.get(srcId) as string | undefined)
+      : undefined;
+    if (secondary) err(file, joinPath(path, 'source'), secondary);
     for (const key of ['evidence', 'inputs', 'sources'] as const) {
       const list = node[key];
       if (Array.isArray(list)) {

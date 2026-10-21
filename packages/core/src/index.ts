@@ -45,7 +45,7 @@ export {
 } from './api';
 /** Model math the data package reuses for config validation (Ruling R31c: one formula, no copies). */
 /** Excluded-org owner lookup used by the config validator on the catalog (spec §2.2); not applied to user input. */
-export { excludedOrgOf } from './policy';
+export { excludedOrgOf, secondarySourceIssue, nativeQuantIssue, type NativeQuantIssue } from './policy';
 export { expertParamsTotalB, activeParamsB, moeParamsIssue, mlaLayoutIssues, layerShapeIssues } from './model-math';
 export type { ResolvedPlatform, Shape, Why, EtaMode, Ctx } from './solve';
 /** vLLM's TP legality rule, shared with the config validator for calibration points (Ruling R41). */

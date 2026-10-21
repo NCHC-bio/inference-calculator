@@ -39,6 +39,7 @@ import {
 import { concurrencyFor } from './concurrency';
 import { CoreInputError, parseInput } from './errors';
 import { embeddingParams, expertParamsTotalB, hasSlidingLayers, inputEmbeddingBytes, layerShapeIssues, mlaLayoutIssues, moeParamsIssue } from './model-math';
+import { nativeQuantIssue, secondarySourceIssue } from './policy';
 import type { Replica, WorkloadIn } from './timing';
 
 export type { BasisItem } from './basis';
@@ -777,17 +778,14 @@ function resolveImported(
     for (const id of f.sources ?? []) mustBe(`${path}.sources`, id);
     for (const id of f.inputs ?? []) mustBe(`${path}.inputs`, id, true);
   }
-  // Mirrors packages/data/src/validate.ts (secondary-source rule, spec §2.1): data depends on core, so core cannot import it.
+  // The same two rules the config validator applies (policy.ts holds the single copy).
   for (const [path, f] of fields) {
-    if ((f.status === 'official' || f.status === 'measured') && f.source !== undefined && source.kind === 'secondary') {
-      issues.push(`${path}: ${f.status} value cites source '${source.id}' of kind secondary (official / measured need a primary source; use unverified)`);
-    }
+    const secondary = f.source !== undefined ? secondarySourceIssue(f.status, source.id, source.kind) : undefined;
+    if (secondary) issues.push(`${path}: ${secondary}`);
   }
-  // Mirrors validate.ts (nativeQuant): the quantization must exist and carry the native-checkpoint note for the verify command.
   if (m.nativeQuant) {
-    const q = bundle.quantization[m.nativeQuant.quant];
-    if (!q) issues.push(`nativeQuant.quant: unknown quantization id '${m.nativeQuant.quant}'`);
-    else if (!q.vllmServe.nativeNote) issues.push(`nativeQuant.quant: quantization '${q.id}' has no vllmServe.nativeNote`);
+    const nq = nativeQuantIssue(m.nativeQuant.quant, (id) => bundle.quantization[id]);
+    if (nq) issues.push(`nativeQuant.quant: ${nq.message}`);
   }
   if (issues.length > 0) throw new CoreInputError('invalid-input', `匯入的模型不合法：${issues.join('；')}`);
 
