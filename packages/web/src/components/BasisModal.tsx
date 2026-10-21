@@ -8,6 +8,9 @@ import { useMain } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
 import { workloadId, type BasisFilter } from '../state/state';
 import { sourcesOf } from './citeText';
+import { isWeak, uniqueByPath } from './weak';
+
+export { isWeak, uniqueByPath } from './weak';
 import { useCalc } from '../state/store';
 
 /** The one status → antd preset colour mapping (answer-line tags use it too). */
@@ -25,11 +28,6 @@ export function StatusTag({ status }: { status: CoreStatus }): JSX.Element {
   return <Tag color={STATUS_COLOR[status]}>{tr(`status.${status}`)}</Tag>;
 }
 
-/** First item per path, in core's order. */
-export function uniqueByPath(items: BasisItem[]): BasisItem[] {
-  const seen = new Set<string>();
-  return items.filter((x) => (seen.has(x.path) ? false : (seen.add(x.path), true)));
-}
 
 const JSON_MAX = 120;
 
@@ -99,7 +97,6 @@ function ConcurrencyReading({ workload, tr }: { workload: string; tr: TFn }) {
   );
 }
 
-export const isWeak = (x: BasisItem): boolean => x.status === 'estimate' || x.status === 'unverified';
 
 /** Every basis item of the result (or only the estimated and unverified ones), with values and sources (design §3.3). */
 export function BasisModal(): JSX.Element {

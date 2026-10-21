@@ -3,6 +3,7 @@ import type { Bundle, Source } from '@nchc/schema';
 import type { TFn } from '../i18n/t';
 import type { CalcState, CustomModel } from '../state/state';
 import { fmt } from './answerText';
+import { topEstimates, uniqueByPath } from './weak';
 
 // React-free: the citation text and the source lookup are plain functions of bundle, state and result.
 
@@ -69,8 +70,15 @@ export function citeText(b: Bundle, s: CalcState, result: RequirementResult, tr:
     });
   }
   const sources = sourcesOf(b, s.customModel);
-  const items = result.basis.slice(0, CITE_ITEMS).map((x, i) =>
+  // Spec §2.1: a citation says when it rests on estimates. The weak items lead, in the 推估 popover's order (best
+  // platform's first); the count is the popover's 查看全部 N.
+  const weak = topEstimates(result.basis, Infinity, row?.basis);
+  const listed = uniqueByPath([...weak, ...result.basis]).slice(0, CITE_ITEMS);
+  const items = listed.map((x, i) =>
     tr('cite.item', { i: i + 1, text: x.text, status: tr(`status.${x.status}`), source: sourceTitles(x, sources) || tr('cite.noSource') }),
   );
-  return [head, '', tr('cite.assumptions'), ...items].join('\n');
+  const trust = result.hasEstimate && weak.length > 0 ? [tr('cite.estimates', { n: n(weak.length) })] : [];
+  // The custom-model warning (spec §2.2) travels with the text.
+  const warnings = result.warnings.map((w) => w.text);
+  return [head, ...trust, ...warnings, '', tr('cite.assumptions'), ...items].join('\n');
 }

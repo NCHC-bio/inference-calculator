@@ -71,6 +71,7 @@ const zhTW = {
   'cite.cons': '保守估計 {gpus} {unit}',
   'cite.consNone': '保守估計下不可行',
   'cite.none': '目前設定下國網機台不可行（{model}（{quant}），「{workload}」，同時 {users} 名使用者）。',
+  'cite.estimates': '此結果含 {n} 項推估／未查證的數值，詳見計算依據',
   'cite.assumptions': '主要假設與來源：',
   'cite.item': '[{i}] {text}（{status}；{source}）',
   'cite.noSource': '—',

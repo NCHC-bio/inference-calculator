@@ -70,6 +70,7 @@ const en = {
   'cite.cons': 'conservative estimate {gpus} {unit}',
   'cite.consNone': 'not feasible under the conservative estimate',
   'cite.none': 'No NCHC platform is feasible with the current settings ({model} ({quant}), "{workload}", {users} concurrent users).',
+  'cite.estimates': 'This result uses {n} estimated or unverified values; see the calculation basis.',
   'cite.assumptions': 'Main assumptions and sources:',
   'cite.item': '[{i}] {text} ({status}; {source})',
   'cite.noSource': '—',

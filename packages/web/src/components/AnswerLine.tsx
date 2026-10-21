@@ -7,27 +7,18 @@ import { useMain } from '../compute/useResults';
 import { useLang, useT, type TFn } from '../i18n';
 import { useTween } from '../motion/useTween';
 import { useCalc } from '../state/store';
-import { isWeak, STATUS_COLOR, StatusTag, uniqueByPath } from './BasisModal';
+import { STATUS_COLOR, StatusTag } from './BasisModal';
+import { isWeak, topEstimates, uniqueByPath } from './weak';
 import { bestCounts, needAnswerParts } from './answerText';
 import { Explain } from './Explain';
 
 export { needAnswerText } from './answerText';
+export { topEstimates } from './weak';
 
 /** How many estimates the 推估 popover lists (design §3.3). */
 export const ESTIMATE_EXCERPT = 3;
 /** Fixed popover width (design §3.3); longer lines are truncated. */
 const EXCERPT_WIDTH = 300;
-
-/**
- * The first `n` estimated / unverified items in basis order; items the best platform's result uses (`best`, its own
- * basis) come first, since they shape the answer most (design §3.3).
- */
-export function topEstimates(basis: BasisItem[], n: number, best?: BasisItem[]): BasisItem[] {
-  const weak = uniqueByPath(basis.filter(isWeak));
-  if (!best) return weak.slice(0, n);
-  const inBest = new Set(best.map((x) => x.path));
-  return [...weak.filter((x) => inBest.has(x.path)), ...weak.filter((x) => !inBest.has(x.path))].slice(0, n);
-}
 
 function EstimateExcerpt({ items, total, tr, onAll }: { items: BasisItem[]; total: number; tr: TFn; onAll: () => void }) {
   return (

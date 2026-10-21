@@ -6,7 +6,9 @@ import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { BasisModal } from '../src/components/BasisModal';
 import { computeMain, type MainView } from '../src/compute/compute';
-import { tZh } from '../src/i18n';
+import { t, tZh } from '../src/i18n';
+import { topEstimates, uniqueByPath } from '../src/components/weak';
+import { CUSTOM_MODEL_WARNING, type BasisItem } from '@nchc/core';
 import { citeText } from '../src/components/citeText';
 import { defaultState, workloadId, type Action } from '../src/state/state';
 import { StoreProvider, useCalc } from '../src/state/store';
@@ -84,6 +86,36 @@ describe('BasisModal', () => {
 });
 
 describe('CiteModal', () => {
+  const weakOf = (r: { basis: BasisItem[] }) => uniqueByPath(r.basis.filter((x) => x.status === 'estimate' || x.status === 'unverified'));
+
+  it('says the result rests on estimates, with the 推估 popover count, and lists them first', () => {
+    const b = getBundle(); const s = defaultState(b);
+    const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;
+    expect(r.hasEstimate).toBe(true);
+    const n = weakOf(r).length;
+    expect(n).toBeGreaterThan(0);
+    const text = citeText(b, s, r, tZh);
+    expect(text).toContain(`此結果含 ${n} 項推估／未查證的數值，詳見計算依據`);
+    const lines = text.split('\n').filter((l) => /^\[\d+\] /.test(l));
+    expect(lines).toHaveLength(6);
+    const first = lines.slice(0, Math.min(n, 6));
+    for (const l of first) expect(l).toMatch(/（(推估|未查證)；/);
+    // Deduplicated by path: no line repeats.
+    expect(new Set(lines.map((l) => l.replace(/^\[\d+\] /, ''))).size).toBe(lines.length);
+    const en = citeText(b, { ...s, lang: 'en' }, r, (k, v) => t('en', k, v));
+    expect(en).toContain(`This result uses ${n} estimated or unverified values; see the calculation basis.`);
+  });
+
+  it('a manual model carries the custom-model warning', () => {
+    const b = getBundle();
+    // Test fixture architecture, not a catalog value.
+    const manual = { name: 'My 8B', totalParamsB: 8, layers: 32, heads: 32, kvHeads: 8, headDim: 128, hidden: 4096 };
+    const s = { ...defaultState(b), model: 'custom', customModel: { kind: 'manual' as const, value: manual } };
+    const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;
+    expect(r.warnings.map((w) => w.text)).toEqual([CUSTOM_MODEL_WARNING.text]);
+    expect(citeText(b, s, r, tZh)).toContain(CUSTOM_MODEL_WARNING.text);
+  });
+
   it('cite modal text', async () => {
     const b = getBundle(); const s = defaultState(b);
     const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;
@@ -101,7 +133,10 @@ describe('CiteModal', () => {
       `${plat.name}（${plat.sub}）${best.expected.gpus} 張`,
       `保守估計 ${best.conservative.gpus} 張`,
     ]) expect(text).toContain(want);
-    r.basis.slice(0, 6).forEach((x, i) => {
+    // Weak (推估／未查證) items first in the 推估 popover's order, then the rest; one line per path.
+    const bestBasis = r.perPlatform.find((p) => p.platform === r.best)!.basis;
+    const listed = uniqueByPath([...topEstimates(r.basis, Infinity, bestBasis), ...r.basis]);
+    listed.slice(0, 6).forEach((x, i) => {
       const src = x.sourceIds.filter((id) => Object.hasOwn(b.sources, id)).map((id) => b.sources[id]!.title).join('、') || '—';
       expect(text).toContain(`[${i + 1}] ${x.text}（${tZh(`status.${x.status}`)}；${src}）`);
     });
