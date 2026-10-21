@@ -33,10 +33,12 @@ export function SplitSelect({ perf, unit, onPick }: { perf: PerformanceResult; u
   const tr = useT();
   const lang = useLang();
   const f = (n: number, d: number) => new Intl.NumberFormat(lang, { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
-  // Ruling W8: a split that cannot hold the model or one user is disabled and says 「放不下」 instead of a speed.
+  // Ruling W8: a split that cannot hold the model, its context or one user's memory is disabled and says 「放不下」.
   const options = perf.splits.map((e) => {
     const split = splitText(e.shape.tp, e.shape.replicas, unit, tr);
-    const noFit = !e.ok && e.maxConcurrent === 0;
+    // Only memory failures mean 放不下; a split too slow (ttft / bw / compute) keeps its numbers. The split shown is never
+    // disabled, so the Select's value always renders as a normal option.
+    const noFit = e.shape.tp !== perf.shape?.tp && (e.why === 'weights' || e.why === 'context' || (e.why === 'mem' && e.maxConcurrent === 0));
     const label = noFit
       ? tr('wb.split.noFit', { split })
       : tr('wb.split.option', { split, tps: f(e.tokPerSecPerUser, 0), ttft: f(e.ttftSec, 1), max: f(e.maxConcurrent, 0) });

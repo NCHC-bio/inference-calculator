@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/App';
@@ -127,8 +127,9 @@ describe('Workbench', () => {
   it('split select disables a split that cannot hold the model (Ruling W8)', async () => {
     const search = '?m=mistral-medium-3.5-128b';
     const r = okRow(search, H200);
-    const bad = r.perf.splits.find((x) => !x.ok && x.maxConcurrent === 0)!;
+    const bad = r.perf.splits.find((x) => x.why === 'weights')!;
     expect(bad).toBeDefined();
+    expect(bad.why).toBe('weights');
     const wb = await openBench(search);
     await userEvent.click(within(within(wb).getByTestId('split-select')).getByRole('combobox'));
     const opts = await waitFor(() => {
@@ -142,6 +143,42 @@ describe('Workbench', () => {
     expect(o.textContent).not.toMatch(/字\/秒/);
     await userEvent.click(o);
     expect(latest!.overrides[H200]).toBeUndefined();
+  });
+
+  it('a split that is only too slow stays selectable with its numbers (Ruling W8)', async () => {
+    // Custom speed 60 字/秒, 1 user: TP 1 and 2 fit in memory but miss the speed (why 'bw', maxConcurrent 0).
+    const search = '?n=1&m=llama-3.3-70b-instruct-fp8&q=fp8&x=eyJzcCI6eyJtaW5Ub2tQZXJTZWMiOjYwLCJtYXhUdGZ0U2VjIjo1fX0';
+    const r = okRow(search, H200);
+    const slow = r.perf.splits.find((x) => !x.ok && x.maxConcurrent === 0 && x.why !== 'weights' && x.why !== 'context' && x.why !== 'mem')!;
+    expect(slow).toBeDefined();
+    const wb = await openBench(search);
+    await userEvent.click(within(within(wb).getByTestId('split-select')).getByRole('combobox'));
+    const opts = await waitFor(() => {
+      const o = [...document.querySelectorAll<HTMLElement>('.ant-select-item-option')];
+      expect(o).toHaveLength(r.perf.splits.length);
+      return o;
+    });
+    const o = opts[r.perf.splits.indexOf(slow)]!;
+    expect(o).not.toHaveClass('ant-select-item-option-disabled');
+    expect(o.textContent).not.toContain('放不下');
+    expect(o.textContent).toContain(`${fmt(slow.tokPerSecPerUser)} 字/秒`);
+    await userEvent.click(o);
+    expect(latest!.overrides[H200]).toEqual({ gpus: r.count, tp: slow.shape.tp });
+  });
+
+  it('the selected split is never a disabled option', async () => {
+    for (const search of ['', '?m=mistral-medium-3.5-128b', '?n=200&o=nano4-h200:16', '?m=mistral-medium-3.5-128b&o=nano4-h200:8:2']) {
+      const wb = await openBench(search);
+      await userEvent.click(within(within(wb).getByTestId('split-select')).getByRole('combobox'));
+      const sel = await waitFor(() => {
+        const x = document.querySelector<HTMLElement>('.ant-select-item-option-selected');
+        expect(x).not.toBeNull();
+        return x!;
+      });
+      expect(sel).not.toHaveClass('ant-select-item-option-disabled');
+      expect(sel.textContent).not.toContain('放不下');
+      cleanup();
+    }
   });
 
   it('Mac row: 台 in the summary and the split', async () => {
