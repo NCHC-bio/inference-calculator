@@ -251,6 +251,13 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
       }
       if (!validCustomModel(a.value)) return s;
       const quant = keepQuant(quantChoices(b, CUSTOM_MODEL_ID, a.value), s.quant);
+      // Filling in `imported` for the same pending repo@sha (the URL refetch, Ruling W1) is hydration, not an input
+      // change: a shared link keeps its card counts unless the precision had to change.
+      const c = s.customModel;
+      const hydrate =
+        c?.kind === 'hf' && !c.imported && a.value.kind === 'hf' && a.value.imported !== undefined &&
+        a.value.repo === c.repo && a.value.sha === c.sha && quant === s.quant;
+      if (hydrate) return { ...s, model: CUSTOM_MODEL_ID, customModel: a.value, quant };
       return input(s, { model: CUSTOM_MODEL_ID, customModel: a.value, quant });
     }
     case 'quant':

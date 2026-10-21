@@ -1,4 +1,4 @@
-import { CUSTOM_MODEL_WARNING, peakConcurrentFromTotal } from '@nchc/core';
+import { CUSTOM_MODEL_WARNING, peakConcurrentFromTotal, quantOptions } from '@nchc/core';
 import type { Model, Source } from '@nchc/schema';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -17,7 +17,7 @@ import { AccuracyDrawer } from '../src/components/drawers/AccuracyDrawer';
 import { formatCommand, splitVerify } from '../src/components/drawers/CodeBlock';
 import { FunnelDrawer } from '../src/components/drawers/FunnelDrawer';
 import { HardwareDrawer } from '../src/components/drawers/HardwareDrawer';
-import { HfImportDrawer } from '../src/components/drawers/HfImportDrawer';
+import { HfImportDrawer, HfRefetch } from '../src/components/drawers/HfImportDrawer';
 import { ManualModelDrawer } from '../src/components/drawers/ManualModelDrawer';
 import { SpeedDrawer } from '../src/components/drawers/SpeedDrawer';
 import { VerifyDrawer } from '../src/components/drawers/VerifyDrawer';
@@ -450,6 +450,35 @@ describe('HF refetch on load (Ruling W1)', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('test-org/test-model', expect.objectContaining({ revision: 'abc1234def', origin: { developer: 'Test Org', country: 'US' } })));
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
     expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent('test-org/test-model');
+  });
+
+  it('a shared link keeps its card counts through the refetch (hydration, not an input change)', async () => {
+    const { model, source } = importedFixture();
+    fetchMock.mockResolvedValue({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] });
+    // As a sharer's link carries it: the imported model's precision (q=) and a card count (o=).
+    const shared: CalcState = {
+      ...defaultState(b),
+      model: 'custom',
+      quant: quantOptions(b, 'gpt-oss-20b')[0]!,
+      customModel: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', origin: { developer: 'Test Org', country: 'US' } },
+      overrides: { 'nano4-h200': { gpus: 8 } },
+    };
+    history.replaceState(null, '', '/?' + encodeUrl(shared));
+    render(
+      <StoreProvider>
+        <AntApp>
+          <HfRefetch />
+          <Probe />
+        </AntApp>
+      </StoreProvider>,
+    );
+    expect(state().overrides).toEqual({ 'nano4-h200': { gpus: 8 } });
+    await waitFor(() => expect(state().customModel).toMatchObject({ kind: 'hf', imported: { model, source } }));
+    expect(state().overrides).toEqual({ 'nano4-h200': { gpus: 8 } });
+    await waitFor(() => expect(location.search).toContain('o=nano4-h200%3A8'));
+    // A real input change afterwards still clears them.
+    act(() => send({ type: 'users', value: 77 }));
+    expect(state().overrides).toEqual({});
   });
 
   it('a failed refetch shows an error and falls back to the default model', async () => {
