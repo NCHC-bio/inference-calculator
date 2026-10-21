@@ -681,6 +681,12 @@ export const CUSTOM_MODEL_WARNING: ResultWarning = Object.freeze({
 });
 
 /**
+ * A resolved model. `pathPrefix` is the basis path root of its values: `models` for the catalog and overrides, `imported` for a
+ * model imported from Hugging Face, so an imported model's paths cannot be mistaken for a catalog entry's.
+ */
+export type ResolvedModel = { model: Model; basis: BasisItem[]; warnings: ResultWarning[]; pathPrefix: 'models' | 'imported' };
+
+/**
  * Resolve a catalog model id, or turn a user override into a Model. Override values are
  * all status 'user'. An override is not origin-checked (spec §2.2); it always yields
  * CUSTOM_MODEL_WARNING, a catalog model none.
@@ -688,7 +694,7 @@ export const CUSTOM_MODEL_WARNING: ResultWarning = Object.freeze({
 export function resolveModel(
   bundle: Bundle,
   idOrOverride: string | ModelOverride | ImportedModelInput,
-): { model: Model; basis: BasisItem[]; warnings: ResultWarning[] } {
+): ResolvedModel {
   if (typeof idOrOverride === 'string') {
     const m = lookup(bundle.models, idOrOverride, '模型');
     const arch = {
@@ -713,7 +719,7 @@ export function resolveModel(
         text: `${m.name} 架構（層數、注意力頭、MoE 等，取自模型 config.json）`,
       },
     ];
-    return { model: m, basis, warnings: [] };
+    return { model: m, basis, warnings: [], pathPrefix: 'models' };
   }
 
   if ('imported' in idOrOverride) return resolveImported(bundle, idOrOverride);
@@ -745,7 +751,7 @@ export function resolveModel(
     source: 'user',
     verified: bundle.meta.dataVersion,
   } as unknown as Model;
-  return { model, basis, warnings: [CUSTOM_MODEL_WARNING] };
+  return { model, basis, warnings: [CUSTOM_MODEL_WARNING], pathPrefix: 'models' };
 }
 
 /**
@@ -756,7 +762,7 @@ export function resolveModel(
 function resolveImported(
   bundle: Bundle,
   input: ImportedModelInput,
-): { model: Model; basis: BasisItem[]; warnings: ResultWarning[] } {
+): ResolvedModel {
   const { model: m, source } = parseInput(ImportedModelSchema, input).imported;
   const issues: string[] = [];
   for (const i of layerShapeIssues(m)) issues.push(`${i.path.join('.')}: ${i.message}`);
@@ -797,16 +803,16 @@ function resolveImported(
     ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
   };
   const basis: BasisItem[] = [
-    fromSourced(`models.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
+    fromSourced(`imported.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
     {
-      path: `models.${m.id}.architecture`,
+      path: `imported.${m.id}.architecture`,
       status: 'official',
       value: arch,
       sourceIds: [m.source],
       text: `${m.name} 架構（層數、注意力頭、MoE 等，取自匯入的 config.json；${source.title}）`,
     },
   ];
-  return { model: m as Model, basis, warnings: [CUSTOM_MODEL_WARNING] };
+  return { model: m as Model, basis, warnings: [CUSTOM_MODEL_WARNING], pathPrefix: 'imported' };
 }
 
 /**
@@ -890,13 +896,18 @@ export function resolveQuant(bundle: Bundle, model: Model, requested: string): Q
  *   them 16-bit) and every other parameter at `bytesPerParam` [R-LEC B3, C1]; expert = expert parameters ×
  *   bytesPerParam. Without vocabSize (user override) every parameter is at bytesPerParam.
  */
-function weightSizing(model: Model, res: QuantResolution, basis: BasisCollector): Pick<Ctx, 'bytesPerParam' | 'weights'> {
+function weightSizing(
+  model: Model,
+  res: QuantResolution,
+  basis: BasisCollector,
+  pathPrefix: ResolvedModel['pathPrefix'] = 'models',
+): Pick<Ctx, 'bytesPerParam' | 'weights'> {
   const q = res.quant;
   const nq = model.nativeQuant;
   const bpp = q.bytesPerParam.value;
   const expertParams = model.moe ? expertParamsTotalB(model) * 1e9 : 0;
   basis.add(fromSourced(`quantization.${q.id}.bytesPerParam`, `${q.name} 每參數位元組`, q.bytesPerParam, 'B3, C1'));
-  const mp = `models.${model.id}`;
+  const mp = `${pathPrefix}.${model.id}`;
   // The separate input-embedding table is read only by the rows a step looks up (Ruling R39); it stays 16-bit under
   // every format vLLM serves (embeddingBytesPerParam), native checkpoints included. Tied / no vocabSize → 0.
   const embBppItem = fromSourced(`quantization.${q.id}.embeddingBytesPerParam`, `${q.name} embedding／lm_head 每參數位元組`, q.embeddingBytesPerParam, 'B3');
@@ -1047,11 +1058,12 @@ function prepareCommon(
     includeComm?: boolean | undefined;
   },
   basis: BasisCollector,
+  pathPrefix: ResolvedModel['pathPrefix'] = 'models',
 ): { ctx: Ctx; quant: Quantization; res: QuantResolution } {
   assertModelMath(model);
   const res = resolveQuant(bundle, model, input.quant);
   const q = res.quant;
-  const sizing = weightSizing(model, res, basis);
+  const sizing = weightSizing(model, res, basis, pathPrefix);
 
   const { kind, workload, speed } = resolveWorkloadSpeed(bundle, input.workload, input.speed, basis);
 
@@ -1084,7 +1096,7 @@ export function prepare(bundle: Bundle, input: z.infer<typeof QueryInputSchema>)
   const basis = new BasisCollector();
   const rm = resolveModel(bundle, input.model);
   basis.add(...rm.basis);
-  const { ctx, quant, res } = prepareCommon(bundle, rm.model, input, basis);
+  const { ctx, quant, res } = prepareCommon(bundle, rm.model, input, basis, rm.pathPrefix);
   return { ctx, quant, res, basis, warnings: rm.warnings };
 }
 
@@ -2031,7 +2043,7 @@ export function predictMeasurement(bundle: Bundle, raw: PredictInput): Measureme
   basis.add(...rm.basis);
   const qres = resolveQuant(bundle, rm.model, input.quant);
   const q = qres.quant;
-  const sizing = weightSizing(rm.model, qres, basis);
+  const sizing = weightSizing(rm.model, qres, basis, rm.pathPrefix);
   const resolved = resolvePlatform(bundle, input.platform, q.computeDtype);
   const { platform } = resolved;
   basis.add(...resolved.basis);

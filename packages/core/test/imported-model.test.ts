@@ -73,4 +73,12 @@ describe('imported model', () => {
   it('quantOptionsFor equals quantOptions for catalog models', () => {
     for (const m of Object.values(bundle.models)) expect(quantOptionsFor(bundle, m)).toEqual(quantOptions(bundle, m.id));
   });
+
+  it('basis paths of an imported model start with imported., never models.', () => {
+    const r = estimateRequirements(bundle, query(imported((m) => { m.id = 'hf:acme/x@abc'; })));
+    const mine = r.basis.filter((b) => b.path.includes('hf:acme/x@abc'));
+    expect(mine.length).toBeGreaterThan(0);
+    for (const b of mine) expect(b.path, b.path).toMatch(/^imported./);
+    expect(r.basis.some((b) => b.path.startsWith('models.hf:acme'))).toBe(false);
+  });
 });
