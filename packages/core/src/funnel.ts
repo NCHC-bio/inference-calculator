@@ -10,7 +10,7 @@ import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } fro
 import { CoreInputError, parseInput } from './errors';
 
 const FunnelInputSchema = z.strictObject({
-  total: z.number().min(1).max(1e9),
+  total: z.number().int().min(1).max(1e9),
   dailyActiveShare: z.number().gt(0).max(1).optional(),
   requestsPerActivePerDay: z.number().gt(0).max(1e6).optional(),
   peakHourShare: z.number().gt(0).max(1).optional(),
@@ -63,7 +63,7 @@ export function peakConcurrentFromTotal(bundle: Bundle, raw: FunnelInput): Funne
 
   const arrivalPerSec = (input.total * d * r * p) / 3600;
   const serviceSec = speed.maxTtftSec + workload.outputTokens / speed.minTokPerSec;
-  const users = Math.max(1, Math.ceil(arrivalPerSec * serviceSec));
+  const users = Math.max(1, Math.ceil(arrivalPerSec * serviceSec - 1e-9));
 
   // Designer judgement (spec §5.5): the real service time depends on the result, so the speed target's upper bound is
   // used to avoid a circular dependency; the result errs on the high side.

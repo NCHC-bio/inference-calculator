@@ -178,7 +178,7 @@ describe('parseHfConfig', () => {
   it('missing safetensors total and origin are reported, never guessed', () => {
     const r = parseHfConfig('microsoft/phi-4', SHA, fixture('phi-4'), null);
     expect(r.missing).toContain('safetensors.total');
-    expect(r.missing).toContain('origin (--developer, --country)');
+    expect(r.missing).toContain('origin (developer, country)');
     expect(r.model).toBeUndefined();
   });
 

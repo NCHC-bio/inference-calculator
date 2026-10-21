@@ -54,6 +54,19 @@ describe('peakConcurrentFromTotal (spec 2026-10-21 §5.5)', () => {
     expect(peakConcurrentFromTotal(bundle, { total: 1, workload: 'chat', speed: 'smooth' }).users).toBe(1);
   });
 
+  it('total must be an integer', () => {
+    expect(() => peakConcurrentFromTotal(bundle, { total: 1.5, workload: 'chat', speed: 'smooth' })).toThrow(CoreInputError);
+  });
+
+  it('an exactly-integer product is not rounded up by float error', () => {
+    // 4500 × 0.07 × 50 × 0.8 ÷ 3600 × (1 + 129 ÷ 129) = 7 exactly; the float product is 7.000000000000002.
+    const r = peakConcurrentFromTotal(bundle, {
+      total: 4500, dailyActiveShare: 0.07, requestsPerActivePerDay: 50, peakHourShare: 0.8,
+      workload: 'chat', speed: { minTokPerSec: 129, maxTtftSec: 1 },
+    });
+    expect(r.users).toBe(7);
+  });
+
   it('agent workloads are refused', () => {
     try {
       peakConcurrentFromTotal(bundle, { total: 100, workload: 'assist', speed: 'smooth' });

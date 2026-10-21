@@ -1218,7 +1218,7 @@ export function verifyCommand(
   if (!legal.includes(shape.tp)) {
     throw new CoreInputError(
       'invalid-input',
-      `tp ${shape.tp} 不是 ${platform.id} 上這個模型的合法 TP（可用：${legal.join('／') || '無'}；需在平台的 tpOptions 內、≤ 每 node 卡數，且注意力頭與 KV 頭可整除）`,
+      `tp ${shape.tp} 不是 ${platform.id === 'custom' ? platform.name : platform.id} 上這個模型的合法 TP（可用：${legal.join('／') || '無'}；需在平台的 tpOptions 內、≤ 每 node 卡數，且注意力頭與 KV 頭可整除）`,
     );
   }
   const { quant } = opts;
@@ -1447,7 +1447,8 @@ export function verifyFor(
   basis: BasisCollector,
   solved: { ok: true; shape: Shape; queueing: Queueing | null } | { ok: false; why: Why; detail: string },
   n: number,
-  opts?: { maxTp?: number; where?: string },
+  /** `shape`: reproduce this chosen split when the target is missed (estimatePerformance); otherwise the largest legal TP × 1. */
+  opts?: { maxTp?: number; where?: string; shape?: Shape },
 ): { verifyCommand: string; verifyNote?: string } {
   const { platform } = resolved;
   if (qres.requiresRequantizedCheckpoint) return { verifyCommand: '', verifyNote: qres.quantNote! };
@@ -1468,18 +1469,18 @@ export function verifyFor(
     return { verifyCommand: '', verifyNote: `模型權重放不進${opts?.where ?? '單一 node'}，沒有可執行的驗證指令（跨 node 切分尚未支援）` };
   }
   const legal = legalTpOptions(platform.tpOptions, platform.gpusPerNode, ctx.model).filter((t) => t <= (opts?.maxTp ?? Infinity));
-  const shape = solved.ok ? solved.shape : legal.length > 0 ? { tp: legal[legal.length - 1]!, replicas: 1 } : null;
+  const shape = solved.ok ? solved.shape : opts?.shape ?? (legal.length > 0 ? { tp: legal[legal.length - 1]!, replicas: 1 } : null);
   if (!shape) return { verifyCommand: '' };
   let queue = solved.ok ? solved.queueing : null;
   let verifyNote: string | undefined;
   if (!solved.ok) {
     // Weights fit but the target is missed (mem / bw / compute / ttft): the command reproduces the scenario on the
-    // largest legal TP, one replica, and is expected to fail; say so and why (review M-8). Its queue at the n users
+    // largest legal TP, one replica (or the chosen split when the caller names one), and is expected to fail; say so and why (review M-8). Its queue at the n users
     // is evaluated too (Ruling R36), so the note and the command say the measured TTFT includes it (final-review M17).
     queue = checkShape(ctx, platform, shape, n, 'expected').queueing;
     addQueueingBasis(basis, bundle, resolved, true);
     verifyNote =
-      `預期不可行：${solved.detail}。以下驗證指令在最大 TP（${shape.tp}）、1 個副本上重現此情境，` +
+      `預期不可行：${solved.detail}。以下驗證指令在${opts?.shape ? `你選的 TP ${shape.tp} × ${shape.replicas} 個副本` : `最大 TP（${shape.tp}）、1 個副本`}上重現此情境，` +
       '預期量測結果達不到目標或啟動失敗，可用來確認這個判斷' +
       (queue ? `；這個形狀在 ${n} 人時也會排隊（${queue.reason}）` : '');
   }

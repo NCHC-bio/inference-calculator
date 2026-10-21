@@ -57,7 +57,6 @@ export type { Replica, WorkloadIn } from './timing';
 export {
   estimatePerformance,
   estimatePerformanceSweep,
-  pickSplit,
   PerformanceInputSchema,
   PERFORMANCE_CURVE_POINTS,
   type PerformanceInput,

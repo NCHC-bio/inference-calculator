@@ -240,6 +240,19 @@ describe('validateConfig', () => {
     expect(validateConfig(loadFixture('no-nvlink')).bundle).toBeUndefined();
   });
 
+  it('a vllm custom-hardware template platform must have vllmDefaults', () => {
+    const raw = loadFixture('good');
+    const pl = raw.docs.platforms!;
+    const data = structuredClone(pl.data) as { platforms?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+    const list = (Array.isArray(data) ? data : data.platforms)!;
+    delete list.find((p) => p.id === 'fx-node')!.vllmDefaults;
+    const e = errors2({ ...raw, docs: { ...raw.docs, platforms: { ...pl, data } } });
+    expect(e).toContainEqual(expect.objectContaining({
+      path: 'customHardware.templates.vllm.platform',
+      message: expect.stringContaining('vllmDefaults'),
+    }));
+  });
+
   it('custom-hardware template must exist and match its engine', () => {
     const raw = loadFixture('good');
     const ch = raw.docs.customHardware!;

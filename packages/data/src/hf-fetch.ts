@@ -23,8 +23,8 @@ export type HfFetchDeps = {
   fetch: (url: string, init?: { headers?: Record<string, string> }) => Promise<HfFetchResponse>;
   token?: string;
   revision?: string;
-  /** Publisher origin recorded on the model (CLI: required flags; website: absent for a custom model). */
-  origin?: Origin;
+  /** Publisher origin recorded on the model: required (CLI: --developer/--country; website: asked from the user). */
+  origin: Origin;
   /** ISO date written to `verified` / `accessed`; defaults to today. */
   today?: string;
   /**
@@ -40,7 +40,7 @@ export type HfFetchResult =
     /** Model card `base_model` repos (empty when none). */
     cardBases: string[];
   }
-  | { ok: false; status: 'denied' | 'not-found' | 'unparsable' | 'network'; message: string; missing?: string[] };
+  | { ok: false; status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network'; message: string; missing?: string[] };
 
 /** Model-card `base_model` as a list of repos: a string, a list of strings, or absent. */
 export function cardBaseModels(v: unknown): string[] {
@@ -66,10 +66,10 @@ class Stop extends Error {
 
 export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfFetchResult> {
   if (!HF_REPO_RE.test(repo)) {
-    return { ok: false, status: 'not-found', message: `'${repo}' is not a Hugging Face repo id owner/name` };
+    return { ok: false, status: 'invalid', message: `'${repo}' is not a Hugging Face repo id owner/name` };
   }
   if (deps.revision && !/^[\w.-]+$/.test(deps.revision)) {
-    return { ok: false, status: 'not-found', message: `revision '${deps.revision}' is not a commit or branch name` };
+    return { ok: false, status: 'invalid', message: `revision '${deps.revision}' is not a commit or branch name` };
   }
   const init = deps.token ? { headers: { Authorization: `Bearer ${deps.token}` } } : undefined;
   // Only huggingface.co ever sees the token.
@@ -163,7 +163,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     const today = deps.today ?? new Date().toISOString().slice(0, 10);
     const license = api.cardData?.license_name ?? api.cardData?.license;
     const { model, missing, notes } = parseHfConfig(repo, sha, config, api.safetensors?.total ?? null, {
-      ...(deps.origin ? { origin: deps.origin } : {}),
+      origin: deps.origin,
       ...(resolved?.base ? { base: resolved.base } : {}),
       license, verified: today,
       ...(ckptBytes !== undefined ? { checkpointWeightBytes: ckptBytes } : {}),

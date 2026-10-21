@@ -268,6 +268,10 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
         err(chDoc.file, path,
           `template platform '${t.platform}' runs engine '${profEngine}' (calibration profile '${plat.calibration}'), not '${engine}'`);
       }
+      if (engine === 'vllm' && profEngine === 'vllm' && plat.vllmDefaults === undefined) {
+        err(chDoc.file, path,
+          `template platform '${t.platform}' has no vllmDefaults; a custom vLLM platform borrows them (maxNumSeqs, maxNumBatchedTokens)`);
+      }
     }
   }
   const modelById = new Map(collections.models.map((m) => [m.id, m]));

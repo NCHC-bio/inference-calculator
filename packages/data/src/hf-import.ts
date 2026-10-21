@@ -157,9 +157,9 @@ export async function runImport(argv: string[], deps: ImportDeps): Promise<numbe
     },
   });
   if (!r.ok) {
-    // denied → 3; unparsable (missing fields, base-flag contradiction) → 2; everything else → 1.
+    // denied → 3; unparsable (missing fields, base-flag contradiction) or invalid (repo id / revision) → 2; everything else → 1.
     deps.log(r.status === 'denied' || r.status === 'unparsable' ? r.message : `error: ${r.message}`);
-    return r.status === 'denied' ? 3 : r.status === 'unparsable' ? 2 : 1;
+    return r.status === 'denied' ? 3 : r.status === 'unparsable' || r.status === 'invalid' ? 2 : 1;
   }
   const { model, notes, sha, source: entry } = r;
 

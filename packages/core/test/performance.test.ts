@@ -3,6 +3,7 @@ import type { Bundle } from '@nchc/schema';
 import { CONFIG_DIR, loadConfig, validateConfig } from '../../data/src/index';
 import { CoreInputError, estimateRequirements, quantOptions, resolvePlatform, resolveModel, type RequirementInput } from '../src/api';
 import { estimatePerformance, estimatePerformanceSweep, PERFORMANCE_CURVE_POINTS } from '../src/performance';
+import { resolveCustomPlatform, verifyCommand } from '../src/api';
 import { legalTpOptions } from '../src/solve';
 
 function realBundle(): Bundle {
@@ -229,6 +230,58 @@ describe('estimatePerformanceSweep', () => {
         expect(e).toBeInstanceOf(CoreInputError);
         expect((e as CoreInputError).code).toBe('invalid-input');
       }
+    }
+  });
+});
+
+describe('final-review fixes', () => {
+  it('a failing chosen split: the verify command reproduces that split, not the largest TP', () => {
+    const q: RequirementInput = { ...defaults, workload: 'chat', users: 2000 };
+    const p = estimatePerformance(bundle, { ...q, platform: 'nano4-h200', gpus: 8, tp: 2 });
+    expect(p.ok).toBe(false);
+    expect(p.shape).toEqual({ tp: 2, replicas: 4 });
+    expect(['mem', 'bw', 'compute', 'ttft']).toContain(p.why);
+    expect(p.verifyCommand).toContain('--tensor-parallel-size 2 ');
+    expect(p.verifyCommand).not.toContain('--tensor-parallel-size 8');
+    expect(p.verifyNote).toContain('TP 2');
+    expect(p.verifyNote).not.toContain('最大 TP');
+  });
+
+  it('a failing split of a capacity-style recommendation keeps its shape too', () => {
+    const q: RequirementInput = { ...defaults, workload: 'chat', users: 2000 };
+    const p = estimatePerformance(bundle, { ...q, platform: 'nano4-h200', gpus: 8 });
+    if (!p.ok && p.shape && ['mem', 'bw', 'compute', 'ttft'].includes(p.why!)) {
+      expect(p.verifyCommand).toContain(`--tensor-parallel-size ${p.shape.tp} `);
+    }
+  });
+
+  it('power counts the GPUs the chosen shape uses, and says idle ones are not counted', () => {
+    const tdp = bundle.hardware[bundle.platforms['nano4-h200']!.hardware]!.tdpW.value!;
+    const p = estimatePerformance(bundle, { ...defaults, platform: 'nano4-h200', gpus: 7, tp: 2 });
+    expect(p.ok).toBe(true);
+    expect(p.shape).toEqual({ tp: 2, replicas: 3 });
+    expect(p.powerKw).toBeCloseTo((6 * tdp) / 1000, 10);
+    expect(p.powerNote).toContain('閒置');
+    const full = estimatePerformance(bundle, { ...defaults, platform: 'nano4-h200', gpus: 8, tp: 2 });
+    expect(full.powerKw).toBeCloseTo((8 * tdp) / 1000, 10);
+    expect(full.powerNote).toBeUndefined();
+  });
+
+  it('a custom platform is named by its display name in a TP error, not the id "custom"', () => {
+    const quant = bundle.quantization[defaults.quant]!;
+    const { platform } = resolveCustomPlatform(bundle, {
+      name: 'My H200', unit: 'gpu', gpusPerNode: 8, memGB: 141, memBwTBs: 4.8, tflops: 900, tdpW: 700, nvlinkBidirGBs: 900, engine: 'vllm',
+    }, quant.computeDtype);
+    const { model } = resolveModel(bundle, defaults.model);
+    try {
+      verifyCommand(platform, { tp: 3, replicas: 1 }, model, { inputTokens: 1000, outputTokens: 100 } as never, 1, {
+        quant, kvBytesPerElem: quant.kvBytesPerElem.value, kind: 'chat', agentShare: 0.1, maxModelLenMarginTokens: 1,
+      } as never);
+      expect.unreachable();
+    } catch (e) {
+      expect(e).toBeInstanceOf(CoreInputError);
+      expect((e as CoreInputError).message).toContain('My H200');
+      expect((e as CoreInputError).message).not.toContain('custom');
     }
   });
 });

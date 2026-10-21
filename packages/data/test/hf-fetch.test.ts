@@ -50,6 +50,13 @@ describe('fetchHfModel', () => {
     expect(r).toMatchObject({ ok: false, status: 'not-found' });
   });
 
+  it('malformed repo id or revision → invalid (never reaches the network)', async () => {
+    const f = fake();
+    expect(await fetchHfModel('not a repo', { fetch: f.fn, origin: ORIGIN })).toMatchObject({ ok: false, status: 'invalid', message: expect.stringContaining('owner/name') });
+    expect(await fetchHfModel('openai/gpt-oss-120b', { fetch: f.fn, origin: ORIGIN, revision: 'a/../b' })).toMatchObject({ ok: false, status: 'invalid' });
+    expect(f.calls.length).toBe(0);
+  });
+
   it('fetch throws → network', async () => {
     const r = await fetchHfModel('openai/gpt-oss-120b', { fetch: async () => { throw new Error('offline'); }, origin: ORIGIN });
     expect(r).toMatchObject({ ok: false, status: 'network' });

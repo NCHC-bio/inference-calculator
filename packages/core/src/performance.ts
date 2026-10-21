@@ -106,7 +106,7 @@ function evaluateSplits(ctx: Ctx, platform: ResolvedPlatform, tps: number[], gpu
  * Best split: most users served, then the smaller t; when nobody is served, the one that gets furthest for one user
  * (singleUserWhy's order), then the faster, then the smaller t. Null for an empty list.
  */
-export function pickSplit<T extends EvaluatedSplit>(splits: T[]): T | null {
+function pickSplit<T extends EvaluatedSplit>(splits: T[]): T | null {
   const anyServed = splits.some((e) => e.maxConcurrent > 0);
   const ranked = [...splits].sort((a, b) =>
     anyServed
@@ -202,7 +202,14 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
   addQueueingBasis(basis, bundle, resolved, shape !== null);
   addCommBasis(basis, ctx, resolved.commBasis, [shape]);
 
-  const { powerKw, powerNote } = powerFor(basis, resolved, why === null, gpus);
+  // Ruling R7: power counts the GPUs the chosen shape uses; the rest of `gpus` idle and are not counted.
+  const used = shape ? shape.tp * shape.replicas : gpus;
+  const powered = powerFor(basis, resolved, why === null, used);
+  const { powerKw } = powered;
+  const idle = gpus - used;
+  const powerNote = why === null && idle > 0
+    ? `${powered.powerNote ? `${powered.powerNote}；` : ''}功耗只計算使用中的 ${used} ${unit}，閒置的 ${idle} ${unit}不計入`
+    : powered.powerNote;
 
   const v = withWarnings(
     verifyFor(
@@ -214,7 +221,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
       basis,
       why ? { ok: false, ...why } : { ok: true, shape: shape!, queueing },
       users,
-      { maxTp: gpus, where: `${gpus} ${unit}` },
+      { maxTp: gpus, where: `${gpus} ${unit}`, ...(shape ? { shape } : {}) },
     ),
     warnings,
   );
