@@ -34,6 +34,7 @@ import {
   type ResolvedPlatform,
   type Shape,
   type Why,
+  splitPhrase,
 } from './solve';
 import { concurrencyFor } from './concurrency';
 import { CoreInputError, parseInput } from './errors';
@@ -1278,7 +1279,7 @@ export function verifyCommand(
     ...(R > 1
       ? [
           `# 共 ${R} 份，每份模型分到 ${gRep} 個同時生成的請求（${g} ÷ ${R}，無條件進位），所以 --max-concurrency ${gRep}：` +
-            `只需啟動並量測其中一份模型，其餘相同；總吞吐約為單一份模型 × ${R}`,
+            `只需啟動並量測其中一份模型，其餘相同；總吞吐約為一份模型的 ${R} 倍`,
         ]
       : []),
     ...(prefixRep
@@ -1375,7 +1376,7 @@ export function verifyCommand(
         ]
       : [];
   const lines = [
-    `# ${platform.name} ${platform.sub}：每份模型 ${shape.tp} 張 GPU` +
+    `# ${platform.name} ${platform.sub}：每份模型 ${shape.tp} ${platform.unit === 'machine' ? '台' : '張 GPU'}` +
       (R > 1
         ? `，共 ${R} 份。完整部署時每個 node 可放 ${perNode} 份模型，以 CUDA_VISIBLE_DEVICES 分配不同的 GPU、各用不同的 --port，前面加負載平衡`
         : ''),
@@ -1480,7 +1481,7 @@ export function verifyFor(
     queue = checkShape(ctx, platform, shape, n, 'expected').queueing;
     addQueueingBasis(basis, bundle, resolved, true);
     verifyNote =
-      `預期不可行：${solved.detail}。以下驗證指令在${opts?.shape ? `你選的切法（TP ${shape.tp}，${shape.tp === 1 ? `每張卡各跑一份模型，共 ${shape.replicas} 份` : `每 ${shape.tp} 張卡合跑一份模型，共 ${shape.replicas} 份`}）` : `最大 TP（${shape.tp}）、1 份模型`}上重現此情境，` +
+      `預期不可行：${solved.detail}。以下驗證指令在${opts?.shape ? `你選的切法（TP ${shape.tp}，${splitPhrase(shape.tp, shape.replicas, platform.unit === 'machine')}）` : `最大 TP（${shape.tp}）、1 份模型`}上重現此情境，` +
       '預期量測結果達不到目標或啟動失敗，可用來確認這個判斷' +
       (queue ? `；這個形狀在 ${n} 人時也會排隊（${queue.reason}）` : '');
   }

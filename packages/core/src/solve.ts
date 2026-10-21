@@ -705,3 +705,9 @@ export function shapeProfile(
   });
   return { memoryOnlyMax, bottleneck, speedCurve: { shape, points } };
 }
+
+/** Plain-language split (design §3.7): one model spans `tp` cards, `replicas` copies; machine platforms are counted per machine. */
+export function splitPhrase(tp: number, replicas: number, machine: boolean): string {
+  if (machine) return `每台各跑一份模型，共 ${replicas} 份`;
+  return tp === 1 ? `每張卡各跑一份模型，共 ${replicas} 份` : `每 ${tp} 張卡合跑一份模型，共 ${replicas} 份`;
+}

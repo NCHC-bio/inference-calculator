@@ -43,6 +43,7 @@ import {
   type ShapeUsage,
   type Queueing,
   type Why,
+  splitPhrase,
 } from './solve';
 import type { SpeedCurve } from './api';
 
@@ -126,7 +127,7 @@ function judgeShape(ctx: Ctx, platform: ResolvedPlatform, shape: Shape | null, g
     why =
       check.why === 'context' || check.why === 'weights'
         ? chosenWhy(ctx, platform, shape, check.why, gpus, unit)
-        : { why: check.why, detail: failDetail(check, ctx.speed, users, shape) };
+        : { why: check.why, detail: failDetail(check, ctx.speed, users, shape, platform.unit === 'machine') };
   }
   const oneUserFits = shape ? checkShape(ctx, platform, shape, 1, 'expected').capacityPerReplica >= 1 : false;
   const hasUsage = shape !== null && check !== null && check.why !== 'context' && check.why !== 'weights' && oneUserFits;
@@ -259,8 +260,9 @@ function failDetail(
   speed: { minTokPerSec: number; maxTtftSec: number },
   users: number,
   shape: Shape,
+  machine: boolean,
 ): string {
-  const where = shape.tp === 1 ? `每張卡各跑一份模型，共 ${shape.replicas} 份` : `每 ${shape.tp} 張卡合跑一份模型，共 ${shape.replicas} 份`;
+  const where = splitPhrase(shape.tp, shape.replicas, machine);
   if (c.why === 'mem') return `${where}，記憶體最多放得下 ${c.capacityPerReplica * shape.replicas} 人的上下文，${users} 人超過了`;
   if (c.why === 'ttft') return `${where}，在 ${users} 人時首字約 ${c.ttftSec.toFixed(1)} 秒，超過要求的 ${speed.maxTtftSec} 秒`;
   return `${where}，在 ${users} 人時每人每秒約 ${c.tokPerSecPerUser.toFixed(1)} token，低於要求的 ${speed.minTokPerSec}`;

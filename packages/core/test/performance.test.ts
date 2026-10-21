@@ -166,6 +166,22 @@ describe('estimatePerformance', () => {
     expect(p.shape).toEqual({ tp: 1, replicas: 3 });
   });
 
+  it('a failing Mac split speaks per machine, not per card', () => {
+    const p = estimatePerformance(bundle, {
+      ...defaults,
+      model: 'gpt-oss-20b',
+      quant: nativeQuant('gpt-oss-20b'),
+      platform: 'mac-studio-m5u-512',
+      gpus: 3,
+      users: 100000,
+    });
+    expect(p.ok).toBe(false);
+    expect(p.detail).toContain('每台各跑一份模型，共 3 份');
+    expect(p.detail).not.toContain('每張卡');
+    expect(p.verifyNote).toContain('每台各跑一份模型');
+    expect(p.verifyNote).not.toContain('每張卡');
+  });
+
   it('the schema bound on gpus holds and the largest scale does not throw', () => {
     try {
       estimatePerformance(bundle, { ...defaults, platform: 'nano4-h200', gpus: 100001 });
