@@ -159,3 +159,13 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.chart-note {
+  position: absolute;
+  max-width: 240px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  white-space: normal;
+  transition: opacity var(--motion-dur) var(--motion-ease);
+}

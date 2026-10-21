@@ -16,7 +16,9 @@ import { ActionChips } from './ActionChips';
 import { Explain } from './Explain';
 import { MemoryBar } from './MemoryBar';
 import { rowInfo } from './PlatformRow';
-import { SplitSelect, SplitText } from './SplitSelect';
+import { Roofline } from './Roofline';
+import { SpeedChart, speedZones, type ChartZone } from './SpeedChart';
+import { SplitSelect, SplitText, splitText } from './SplitSelect';
 import { TypingDemo } from './TypingDemo';
 import { UsageBars } from './UsageBars';
 import { WHY } from './why';
@@ -100,8 +102,67 @@ export function QueueLine({ queueing }: { queueing: Queueing | null }): JSX.Elem
   );
 }
 
+type ChartCtx = { row: OkRow; bench: BenchView; s: CalcState; unit: 'gpu' | 'machine'; unitText: string; zones: ChartZone[]; target: { y: number; label: string } | null };
+
+/** 「卡數 → 每人速度」 over core's sweep (best split per count); a click sets the count (the suggestion clears the override). */
+function CardsChart({ row, bench, s, unit, unitText, zones, target, dispatch }: ChartCtx & { dispatch: (a: Action) => void }): JSX.Element {
+  const tr = useT();
+  const lang = useLang();
+  const usage = bench.perf.usage!;
+  const note = (x: number) => {
+    const p = bench.sweep.find((q) => q.gpus === x);
+    const n = fmtIn(lang, x);
+    if (!p || !p.shape || p.tokPerSecPerUser === null) return tr('chart.note.noFit', { n, unit: unitText });
+    const why = p.why ? tr('chart.note.why', { why: tr(WHY[p.why]) }) : '';
+    return tr('chart.note.cards', { n, unit: unitText, split: splitText(p.shape.tp, p.shape.replicas, unit, tr), tps: fmtIn(lang, p.tokPerSecPerUser) }) + why;
+  };
+  return (
+    <SpeedChart
+      points={bench.sweep.map((p) => ({ x: p.gpus, y: p.tokPerSecPerUser, miss: !p.ok }))}
+      xTitle={tr(unit === 'machine' ? 'chart.x.cards.machine' : 'chart.x.cards.gpu', { users: fmtIn(lang, s.users) })}
+      yTitle={tr('chart.y')}
+      zones={zones}
+      target={target}
+      marks={[
+        { key: 'suggested', x: row.suggested, label: tr('chart.mark.suggested'), tone: 'muted', dashed: true },
+        { key: 'current', x: row.count, y: usage.tokPerSecPerUser, label: tr('chart.mark.current'), tone: 'primary' },
+      ]}
+      onPick={(gpus) => dispatch({ type: 'override', row: row.row, value: gpus === row.suggested ? null : { gpus } })}
+      pointNote={note}
+    />
+  );
+}
+
+/** 「人數 → 每人速度」 over core's speedCurve (1 … max(maxConcurrent, users)); points past the limit carry `why` (dashed). */
+function UsersChart({ row, bench, s, unitText, zones, target }: ChartCtx): JSX.Element | null {
+  const tr = useT();
+  const lang = useLang();
+  const { perf, userCurve } = bench;
+  if (!userCurve) return null;
+  const note = (x: number) => {
+    const p = userCurve.points.find((q) => q.users === x);
+    if (!p) return '';
+    const why = p.why ? tr('chart.note.why', { why: tr(WHY[p.why]) }) : '';
+    return tr('chart.note.users', { n: fmtIn(lang, x), tps: fmtIn(lang, p.tokPerSecPerUser), ttft: fmtIn(lang, p.ttftSec, 1) }) + why;
+  };
+  return (
+    <SpeedChart
+      points={userCurve.points.map((p) => ({ x: p.users, y: p.tokPerSecPerUser, miss: p.why !== null }))}
+      xTitle={tr('chart.x.users', { n: fmtIn(lang, row.count), unit: unitText })}
+      yTitle={tr('chart.y')}
+      zones={zones}
+      target={target}
+      marks={[
+        { key: 'current', x: s.users, y: perf.usage!.tokPerSecPerUser, label: tr('chart.mark.current'), tone: 'primary' },
+        ...(perf.maxConcurrent > 0 ? [{ key: 'max', x: perf.maxConcurrent, label: tr('chart.mark.max'), tone: 'error' as const, dashed: true }] : []),
+      ]}
+      pointNote={note}
+    />
+  );
+}
+
 /** Footer:「更多圖表（Roofline，專家用）」 Collapse (left) and 「驗證指令」 (right, in the item's `extra`, never toggles it). */
-function Foot({ onVerify }: { onVerify: () => void }): JSX.Element {
+function Foot({ onVerify, roofline }: { onVerify: () => void; roofline: ReactNode }): JSX.Element {
   const tr = useT();
   const [open, setOpen] = useState<string[]>([]);
   return (
@@ -134,8 +195,11 @@ function Foot({ onVerify }: { onVerify: () => void }): JSX.Element {
                 {tr('wb.verify')}
               </Button>
             ),
-            // Task 6 draws the Roofline here.
-            children: <div data-testid="chart-roofline" className="wb-chart" />,
+            children: (
+              <div data-testid="chart-roofline" className="wb-chart">
+                {roofline}
+              </div>
+            ),
           },
         ]}
       />
@@ -159,6 +223,10 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const demoText = b.workloads[workloadId(s.workload)]!.demoText;
   const tdp = info.hardware === null ? undefined : b.hardware[info.hardware]?.tdpW;
   const tdpConflict = tdp?.value === null && tdp.conflict ? tdp.conflict : null;
+  const zones = speedZones(b, tr);
+  // A custom speed target that is not a zone boundary gets its own line.
+  const chartTarget = typeof s.speed !== 'string' && !zones.some((z) => z.lo === target.min) ? { y: target.min, label: `${tr('chart.mark.target')} ${fmtIn(lang, target.min)}` } : null;
+  const chart: ChartCtx = { row, bench, s, unit: info.unit, unitText, zones, target: chartTarget };
 
   const pin = () =>
     dispatch({
@@ -240,8 +308,9 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
               {tr(info.unit === 'machine' ? 'wb.chart.cards.hint.machine' : 'wb.chart.cards.hint.gpu')}
             </Typography.Text>
           </Heading>
-          {/* Task 6: SpeedChart over bench.sweep. */}
-          <div data-testid="chart-cards" className="wb-chart" />
+          <div data-testid="chart-cards" className="wb-chart">
+            <CardsChart {...chart} dispatch={dispatch} />
+          </div>
         </section>
         <section data-area="users">
           <Heading>
@@ -250,12 +319,13 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
               {tr('wb.chart.users.hint', { n: fmtIn(lang, row.count), unit: unitText })}
             </Typography.Text>
           </Heading>
-          {/* Task 6: SpeedChart over bench.userCurve. */}
-          <div data-testid="chart-users" className="wb-chart" />
+          <div data-testid="chart-users" className="wb-chart">
+            <UsersChart {...chart} />
+          </div>
         </section>
       </div>
 
-      <Foot onVerify={() => dispatch({ type: 'dialog', id: 'verify' })} />
+      <Foot onVerify={() => dispatch({ type: 'dialog', id: 'verify' })} roofline={<Roofline roofline={usage.roofline} unit={info.unit} />} />
     </div>
   );
 }
