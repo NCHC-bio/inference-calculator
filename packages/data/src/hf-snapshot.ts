@@ -122,7 +122,11 @@ export async function snapshotRepo(
 export function replayFetch(s: Snapshot): HfFetchDeps['fetch'] {
   return async (url) => {
     const path = url.startsWith(HF) ? url.slice(HF.length) : url;
-    const r = s.responses[path];
+    // The unpinned model API (a GGUF repo's base model is read at its current commit) answers with the snapshot's commit.
+    // The unpinned model API (a GGUF repo's base model, a quantized repo's base parameter count) answers with the
+    // snapshot's commit.
+    const unpinned = [`/api/models/${s.repo}?expand[]=safetensors&expand[]=sha&expand[]=cardData&expand[]=siblings`, `/api/models/${s.repo}?expand[]=safetensors`];
+    const r = s.responses[unpinned.includes(path) ? modelApiPath(s.repo, s.sha) : path];
     if (!r) throw new Error(`not in snapshot ${s.repo}@${s.sha.slice(0, 7)}: ${path}`);
     const text = typeof r.body === 'string' ? r.body : JSON.stringify(r.body);
     const res: HfFetchResponse = {

@@ -742,7 +742,7 @@ export function resolveModel(
       ...(m.moe ? { moe: m.moe } : {}),
       ...(m.layerGroups ? { layerGroups: m.layerGroups } : {}),
       ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
-      ...(m.indexer ? { indexer: m.indexer } : {}),
+      ...(m.extraCache ? { extraCache: m.extraCache } : {}),
     };
     const basis: BasisItem[] = [
       fromSourced(`models.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
@@ -837,7 +837,7 @@ function resolveImported(
     ...(m.moe ? { moe: m.moe } : {}),
     ...(m.layerGroups ? { layerGroups: m.layerGroups } : {}),
     ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
-    ...(m.indexer ? { indexer: m.indexer } : {}),
+    ...(m.extraCache ? { extraCache: m.extraCache } : {}),
   };
   const basis: BasisItem[] = [
     fromSourced(`imported.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
@@ -966,7 +966,22 @@ function weightSizing(
   const emb = inputEmbedding > 0 ? { inputEmbedding } : {};
   if (res.native && nq) {
     const resident = nq.checkpointWeightBytes.value;
-    const expert = expertParams * bpp;
+    let expert = expertParams * bpp;
+    // native-other (an unmodelled format) has only a stand-in bytes per parameter: when it would put the experts at or
+    // above the checkpoint, its own bytes are split in proportion to the parameters instead (an estimate, listed).
+    if (q.id === 'native-other' && !(expert + inputEmbedding < resident)) {
+      const total = model.totalParamsB.value * 1e9;
+      expert = ((resident - inputEmbedding) * expertParams) / total;
+      basis.add({
+        path: `${mp}.nativeQuant.expertBytesProportional`,
+        status: 'estimate',
+        value: expert,
+        sourceIds: [nq.checkpointWeightBytes.source ?? model.source],
+        text:
+          `${model.name} 專家權重位元組：未建模格式的每參數位元組會超過 checkpoint 大小，改依參數比例拆分 checkpoint；` +
+          `推估依據：(checkpoint − 輸入 embedding) × 專家參數 ÷ 總參數 = (${resident} − ${inputEmbedding}) × ${expertParams} ÷ ${total} = ${expert.toFixed(0)}`,
+      });
+    }
     basis.add(
       fromSourced(
         `${mp}.nativeQuant.checkpointWeightBytes`,

@@ -27,6 +27,13 @@ export interface ParseOptions {
    * importer read them: they decide tie_word_embeddings when config.json omits it (final-review M21).
    */
   weightNames?: string[];
+  /**
+   * The model card's base model and its safetensors parameter count, when the importer read it: a packed quantized
+   * checkpoint (4-bit values stored two per byte) reports its element count, not its parameter count.
+   */
+  baseParams?: { repo: string; total: number };
+  /** Estimates the caller already made (a GGUF repo read through its base model), added to Model.estimates. */
+  estimates?: Array<{ feature: EstimatedFeature; detail: string }>;
 }
 
 /**
@@ -44,25 +51,21 @@ export const TIE_DEFAULTS: Readonly<Record<string, { tied: boolean; ref: string 
 const hasLmHead = (names: string[]): boolean => names.some((n) => /(^|\.)lm_head\.weight$/.test(n));
 
 /**
- * Architecture features the calculator recognises in a config but does not model yet (issue #17). The parser fails
- * closed on each of them rather than sizing the model as if the feature were absent; the website names them in the
- * user's language and offers to report the model.
+ * Structures a model may have that the calculator has not modelled precisely yet: each is estimated conservatively
+ * from the standard config fields and listed in Model.estimates (CLAUDE.md "Goal for imported models"); the website
+ * names them in the user's language and offers a request to model them precisely.
  */
-export const UNSUPPORTED_FEATURES = [
-  'linear-attention', 'short-conv', 'dense-and-moe', 'moe-layout', 'heterogeneous-blocks', 'compressed-attention',
-  'cross-layer-kv', 'sparse-indexer', 'lookup-tables', 'memory-layers', 'recurrent-depth', 'nested-config',
-  'native-quant', 'unknown-layer-type',
+export const ESTIMATED_FEATURES = [
+  'linear-attention', 'short-conv', 'moe-layout', 'heterogeneous-blocks', 'compressed-attention', 'cross-layer-kv',
+  'sparse-indexer', 'lookup-tables', 'memory-layers', 'recurrent-depth', 'native-quant', 'unknown-layer-type',
+  'sliding-window', 'gguf',
 ] as const;
-export type UnsupportedFeature = (typeof UNSUPPORTED_FEATURES)[number];
-/** One unmodelled feature: what was found (`detail`) and the `missing` lines it accounts for. */
-export type Unsupported = { feature: UnsupportedFeature; detail: string; fields: string[] };
+export type EstimatedFeature = (typeof ESTIMATED_FEATURES)[number];
 
 export interface ParseResult {
   model?: Model;
   /** Human-readable names of every field that could not be read, each listed once. Empty when `model` is set. */
   missing: string[];
-  /** The recognised but unmodelled features among `missing`, one entry per feature (details joined). */
-  unsupported: Unsupported[];
   /**
    * Implicit defaults the parser applied (a convention, not a value read from config.json), e.g. kvHeads =
    * heads when num_key_value_heads is absent. The importer prints them and writes them into the YAML header
@@ -168,48 +171,63 @@ export const modelSlug = (repo: string): string => (repo.split('/').pop() ?? rep
 /** Source id for a pinned HF commit, e.g. `hf:openai/gpt-oss-120b@b5c939d`. */
 export const hfSourceId = (repo: string, sha: string): string => `hf:${repo}@${sha.slice(0, 7)}`;
 
-/** Per-layer cache kind; `none` = layer keeps no per-sequence cache (MLP / MoE blocks). */
-type LayerKind = 'full' | 'sliding' | 'mamba' | 'none';
+/** Per-layer cache kind; `none` = no per-sequence cache (MLP / MoE blocks); `linear` / `conv` = a fixed state. */
+type LayerKind = 'full' | 'sliding' | 'mamba' | 'linear' | 'conv' | 'none';
 
 /**
- * Field-name mapping for per-layer types, taken from the real configs in test/fixtures/hf:
- * - `layer_types` (gpt-oss, Gemma 4, Muse Glimmer): `full_attention` → full, `sliding_attention` → sliding.
+ * Per-layer type names, from the real configs in test/fixtures/hf:
+ * - `layer_types` (gpt-oss, Gemma 4, Qwen3.5 / 3.8, LFM2, DeepSeek V4 style): `full_attention` → full,
+ *   `sliding_attention` → sliding; `linear_attention` → linear (Gated DeltaNet / KDA), `conv` → conv (LFM2 short
+ *   convolution), the compressed / sparse attention types → full (estimated), `mlp` → none (a layer without attention).
  * - `layers_block_type` (Nemotron 3 / 3.5, NemotronH): `attention` → full, `mamba` → mamba, `moe` / `mlp` → none.
  * - `hybrid_override_pattern` (older NemotronH string form): `*` → full, `M` → mamba, `-` / `E` → none.
  * - `local_layer_ids` (Inkling): listed indices → sliding, every other layer index → full.
- * Anything else is reported as missing; it is never mapped by guess.
+ * Any other type is sized as full attention and recorded as an estimate (the conservative choice).
  */
-const LAYER_TYPES: Record<string, LayerKind> = { full_attention: 'full', sliding_attention: 'sliding' };
+const LAYER_TYPES: Record<string, LayerKind> = {
+  full_attention: 'full', sliding_attention: 'sliding', linear_attention: 'linear', conv: 'conv', mlp: 'none',
+  compressed_sparse_attention: 'full', heavily_compressed_attention: 'full', deepseek_sparse_attention: 'full',
+};
+/** Layer types sized as full attention although they keep less (compressed / sparse): an estimate. */
+const FULL_ESTIMATE_TYPES: Record<string, EstimatedFeature> = {
+  compressed_sparse_attention: 'compressed-attention',
+  heavily_compressed_attention: 'compressed-attention',
+  deepseek_sparse_attention: 'sparse-indexer',
+};
 const BLOCK_TYPES: Record<string, LayerKind> = { attention: 'full', mamba: 'mamba', moe: 'none', mlp: 'none' };
 const PATTERN_CHARS: Record<string, LayerKind> = { '*': 'full', M: 'mamba', '-': 'none', E: 'none' };
-/** `mamba_ssm_cache_dtype` (NemotronH) → bytes per SSM-state element. */
+/** HF state dtype names → bytes per element (NemotronH `mamba_ssm_cache_dtype`, Qwen3.5 `mamba_ssm_dtype`). */
 const SSM_DTYPE_BYTES: Record<string, number> = { float32: 4, bfloat16: 2, float16: 2 };
 
 /**
- * Layer types that are recognised but not modelled (issue #17), by the feature they belong to; any other unknown type
- * is `unknown-layer-type`. Each needs its own per-sequence state or cache math before it can be accepted.
+ * Expert-MLP activations known to be gated (gate / up / down = 3 matrices, core's default): SwiGLU (`silu`, `swish`)
+ * and GeGLU (`gelu*`, Gemma). Any other activation is estimated with 2 matrices: fewer expert parameters leave more
+ * parameters active per token (the conservative side for speed).
  */
-const UNMODELLED_LAYER_TYPES: Record<string, UnsupportedFeature> = {
-  linear_attention: 'linear-attention', // Gated DeltaNet (Qwen3.5 / 3.8), KDA (GLM-5.3-Flash)
-  conv: 'short-conv', // LFM2 short convolution
-  compressed_sparse_attention: 'compressed-attention', // DeepSeek V4 CSA
-  heavily_compressed_attention: 'compressed-attention', // DeepSeek V4 HCA
-  deepseek_sparse_attention: 'sparse-indexer', // DSA with its indexer key cache
-  mlp: 'recurrent-depth', // a bare MLP layer in layer_types (Nemotron Labs Dory)
-};
+const GATED_ACTS = new Set(['silu', 'swish', 'gelu', 'gelu_pytorch_tanh', 'gelu_new']);
+
+type Estimate = (feature: EstimatedFeature, detail: string) => void;
 
 /** Returns per-layer kinds, or undefined when the config has no per-layer type field. */
-function layerKinds(t: Obj, layers: number | undefined, fail: Fail): LayerKind[] | undefined {
-  const mapList = (field: string, list: unknown[], table: Record<string, LayerKind>): LayerKind[] =>
-    list.map((x) => {
-      const k = typeof x === 'string' ? table[x] : undefined;
-      if (k === undefined) {
-        const n = list.filter((y) => y === x).length;
-        const feature = (typeof x === 'string' && Object.hasOwn(UNMODELLED_LAYER_TYPES, x) && UNMODELLED_LAYER_TYPES[x]) || 'unknown-layer-type';
-        fail(`${field}: unknown type ${JSON.stringify(x)}`, feature, `${field} "${String(x)}" on ${n} of ${list.length} layers`);
-      }
-      return k ?? 'none';
+function layerKinds(t: Obj, layers: number | undefined, missing: string[], estimate: Estimate): LayerKind[] | undefined {
+  const mapList = (field: string, list: unknown[], table: Record<string, LayerKind>): LayerKind[] => {
+    const unknown = new Map<string, number>();
+    const kinds = list.map((x): LayerKind => {
+      const k = typeof x === 'string' && Object.hasOwn(table, x) ? table[x]! : undefined;
+      if (k === undefined) unknown.set(String(x), (unknown.get(String(x)) ?? 0) + 1);
+      return k ?? 'full';
     });
+    for (const [x, n] of unknown) {
+      estimate('unknown-layer-type', `${field} "${x}" on ${n} of ${list.length} layers: sized as full attention`);
+    }
+    if (field === 'layer_types') {
+      for (const [type, feature] of Object.entries(FULL_ESTIMATE_TYPES)) {
+        const n = list.filter((y) => y === type).length;
+        if (n > 0) estimate(feature, `layer_types "${type}" on ${n} of ${list.length} layers: sized as full attention`);
+      }
+    }
+    return kinds;
+  };
   if (Array.isArray(t.layer_types)) return mapList('layer_types', t.layer_types, LAYER_TYPES);
   if (Array.isArray(t.layers_block_type)) return mapList('layers_block_type', t.layers_block_type, BLOCK_TYPES);
   if (typeof t.hybrid_override_pattern === 'string') {
@@ -220,7 +238,7 @@ function layerKinds(t: Obj, layers: number | undefined, fail: Fail): LayerKind[]
     const local = new Set(t.local_layer_ids);
     for (const i of local) {
       if (typeof i !== 'number' || !Number.isInteger(i) || i < 0 || i >= layers) {
-        fail(`local_layer_ids: invalid layer index ${JSON.stringify(i)}`);
+        missing.push(`local_layer_ids: invalid layer index ${JSON.stringify(i)}`);
       }
     }
     return Array.from({ length: layers }, (_, i): LayerKind => (local.has(i) ? 'sliding' : 'full'));
@@ -229,134 +247,55 @@ function layerKinds(t: Obj, layers: number | undefined, fail: Fail): LayerKind[]
 }
 
 /**
- * Expert-MLP activations known to be gated (gate / up / down = 3 matrices, as core's expert
- * formula assumes): SwiGLU (`silu`, `swish`) and GeGLU (`gelu*`, Gemma).
+ * MoE layers among `layers` (spec §5.1 counts experts per MoE layer), read from the config's own layout keys (exact):
+ * `mlp_layer_types` (routed-expert entries), `layers_block_type` / `hybrid_override_pattern` MoE blocks,
+ * `first_k_dense_replace` / `num_dense_layers` (the first k layers dense; DeepSeek, GLM, LFM2) with `moe_layer_freq`
+ * (every freq-th layer after them), `mlp_only_layers` (listed layers dense), `decoder_sparse_step` (Qwen2-MoE: layer i
+ * sparse when (i + 1) % step == 0), `dense_mlp_idx` (listed dense layers). Undefined = every layer.
  */
-const GATED_ACTS = new Set(['silu', 'swish', 'gelu', 'gelu_pytorch_tanh', 'gelu_new']);
-
-/**
- * Fail closed on MoE layouts core's expert formula does not model (Ruling R31a). Core counts routed
- * experts as experts × 3 × hidden × expertFfnDim × layers (spec §5.1), so it is only right when every
- * layer carries the same gated routed-expert MLP of width hidden → expertFfnDim → hidden. Reported as
- * missing (no model) instead:
- * - `moe_latent_size`: experts work in a smaller latent dimension, not `hidden` (Nemotron 3 / 3.5).
- * - a non-gated or unknown expert activation (`mlp_hidden_act` / `hidden_act` / `hidden_activation`,
- *   e.g. `relu2` = 2 matrices, Nemotron).
- * - dense MLP layers mixed with MoE layers: `dense_mlp_idx` (Inkling), `first_k_dense_replace` > 0,
- *   `moe_layer_freq` ≠ 1, non-empty `mlp_only_layers`, `decoder_sparse_step` > 1.
- * - `shared_expert_sink` (Inkling; semantics not documented in the config).
- * - MoE blocks on only a subset of the per-layer block list (`layers_block_type` / `hybrid_override_pattern`):
- *   the list length is then a block count, not the number of MoE layers.
- * Shared experts alone (`n_shared_experts`, e.g. Mistral Small 4 with `first_k_dense_replace: 0`) are
- * accepted: they are always active, so they belong to the non-routed remainder (total − routed experts)
- * that core already treats as always read and always computed.
- */
-function unsupportedMoe(t: Obj, kinds: LayerKind[] | undefined, layers: number | undefined, fail: Fail): void {
-  const latent = num(t, 'moe_latent_size');
-  if (latent !== undefined) fail(`moe_latent_size ${latent} (latent MoE projection not supported)`, 'moe-layout', `latent MoE (moe_latent_size ${latent})`);
-
-  const actKey = ['mlp_hidden_act', 'hidden_act', 'hidden_activation'].find((k) => t[k] !== undefined && t[k] !== null);
-  if (actKey !== undefined) {
-    const act = t[actKey];
-    if (typeof act !== 'string' || !GATED_ACTS.has(act)) {
-      fail(`${actKey} ${JSON.stringify(act)} (non-gated or unknown expert activation not supported)`, 'moe-layout', `expert activation ${JSON.stringify(act)}`);
-    }
-  }
-  // Two expert widths (Hunyuan hy_v3: expert_hidden_dim and moe_intermediate_size): which one the routed experts use is
-  // not stated, so neither is taken.
-  const expertHidden = num(t, 'expert_hidden_dim');
-  const moeInter = num(t, 'moe_intermediate_size');
-  if (expertHidden !== undefined && moeInter !== undefined && expertHidden !== moeInter) {
-    fail(`expert_hidden_dim ${expertHidden} and moe_intermediate_size ${moeInter} disagree (ambiguous expert width)`, 'moe-layout',
-      `two expert widths (expert_hidden_dim ${expertHidden}, moe_intermediate_size ${moeInter})`);
-  }
-
-  const dense = (key: string, what: string) =>
-    fail(`${key} ${what} (dense MLP layers mixed with MoE not supported)`, 'dense-and-moe', `${key} ${what}`);
-  if (t.dense_mlp_idx !== undefined && t.dense_mlp_idx !== null) dense('dense_mlp_idx', JSON.stringify(t.dense_mlp_idx));
-  const firstDense = num(t, 'first_k_dense_replace');
-  if (firstDense !== undefined && firstDense > 0) dense('first_k_dense_replace', String(firstDense));
-  // LFM2-MoE: the first num_dense_layers layers have a dense MLP (issue #17 C).
-  const denseLayers = num(t, 'num_dense_layers');
-  if (denseLayers !== undefined && denseLayers > 0) dense('num_dense_layers', String(denseLayers));
-  // Per-layer MLP kinds (GLM-5.3, Hunyuan hy_v3, MemT): anything but a routed-expert layer mixes dense with MoE.
+function moeLayerCount(t: Obj, layers: number): number | undefined {
   if (Array.isArray(t.mlp_layer_types)) {
-    const other = [...new Set(t.mlp_layer_types.filter((x) => x !== 'sparse' && x !== 'moe'))];
-    if (other.length > 0) {
-      const counts = other.map((x) => `${JSON.stringify(x)} × ${(t.mlp_layer_types as unknown[]).filter((y) => y === x).length}`);
-      dense('mlp_layer_types', counts.join(', '));
-    }
+    return t.mlp_layer_types.filter((x) => x === 'sparse' || x === 'moe' || x === 'hash_moe').length;
   }
-  const subset = (key: string, what: string) =>
-    fail(`${key} ${what} (MoE on a subset of layers not supported)`, 'dense-and-moe', `${key} ${what}`);
-  const freq = num(t, 'moe_layer_freq');
-  if (freq !== undefined && freq !== 1) subset('moe_layer_freq', String(freq));
-  if (Array.isArray(t.mlp_only_layers) && t.mlp_only_layers.length > 0) {
-    fail('mlp_only_layers (dense MLP layers mixed with MoE not supported)', 'dense-and-moe', `mlp_only_layers × ${t.mlp_only_layers.length}`);
-  }
-  const sparseStep = num(t, 'decoder_sparse_step');
-  if (sparseStep !== undefined && sparseStep > 1) subset('decoder_sparse_step', String(sparseStep));
-  if (t.shared_expert_sink !== undefined && t.shared_expert_sink !== null && t.shared_expert_sink !== false) {
-    fail('shared_expert_sink (not supported)', 'moe-layout', 'shared_expert_sink');
-  }
-
   const blocks: unknown[] | undefined = Array.isArray(t.layers_block_type)
     ? t.layers_block_type
     : typeof t.hybrid_override_pattern === 'string' ? [...t.hybrid_override_pattern] : undefined;
-  if (blocks && kinds && layers !== undefined) {
-    const moeBlocks = blocks.filter((b) => b === 'moe' || b === 'E').length;
-    if (moeBlocks !== layers) {
-      fail(`MoE on ${moeBlocks} of ${layers} per-layer blocks (MoE on a subset of blocks not supported)`, 'dense-and-moe',
-        `MoE on ${moeBlocks} of ${layers} blocks`);
-    }
+  if (blocks) return blocks.filter((b) => b === 'moe' || b === 'E').length;
+  const firstDense = num(t, 'first_k_dense_replace') ?? num(t, 'num_dense_layers') ?? 0;
+  const freq = num(t, 'moe_layer_freq') ?? 1;
+  const step = num(t, 'decoder_sparse_step') ?? 1;
+  const only = new Set(Array.isArray(t.mlp_only_layers) ? t.mlp_only_layers : []);
+  const denseIdx = new Set(Array.isArray(t.dense_mlp_idx) ? t.dense_mlp_idx : typeof t.dense_mlp_idx === 'number' ? [t.dense_mlp_idx] : []);
+  let n = 0;
+  for (let i = 0; i < layers; i++) {
+    if (i < firstDense || only.has(i) || denseIdx.has(i)) continue;
+    if ((i - firstDense) % freq !== 0) continue;
+    if ((i + 1) % step !== 0) continue;
+    n++;
   }
+  return n === layers ? undefined : n;
 }
-
-/**
- * Config keys of structures the calculator recognises but does not model (issue #17): each changes the KV / state
- * memory, the weights a decode step reads, or the layer layout, so a model carrying one is refused instead of being
- * sized as if it were absent (the DeepSeek V4.1 import that read only sliding_window 128 was silently wrong).
- * A key whose value is null, false, 0 or an empty list counts as absent.
- */
-const UNMODELLED_KEYS: Array<{ keys: string[]; feature: UnsupportedFeature; what: string }> = [
-  { keys: ['compress_ratios', 'compress_rates'], feature: 'compressed-attention', what: 'compressed KV attention (DeepSeek V4 style)' },
-  { keys: ['kv_source_layer_ids'], feature: 'cross-layer-kv', what: 'KV shared across layers' },
-  {
-    keys: ['index_n_heads', 'index_topk', 'index_source_layer_ids', 'indexer_n_heads', 'indexer_budget'],
-    feature: 'sparse-indexer', what: 'sparse-attention indexer with its own key cache (DSA style)',
-  },
-  {
-    keys: ['engram_layer_ids', 'engram_num_embeddings', 'ngram_vocab_size_base', 'ple_layer_ids'],
-    feature: 'lookup-tables', what: 'embedding lookup tables beside the vocabulary (engram / n-gram / per-layer embeddings), read by row',
-  },
-  { keys: ['memt'], feature: 'memory-layers', what: 'memory layers (MemT)' },
-  { keys: ['n_recurrent_loops', 'n_recurrent_layers'], feature: 'recurrent-depth', what: 'layers run more than once per token' },
-  { keys: ['backbone_configs'], feature: 'nested-config', what: 'nested backbone configs' },
-  { keys: ['block_configs'], feature: 'heterogeneous-blocks', what: 'blocks with their own expert counts and widths' },
-  {
-    keys: ['linear_attn_config', 'kda_lower_bound', 'use_kda_lora', 'num_kv_heads_for_linear_attn'],
-    feature: 'linear-attention', what: 'linear-attention layers (KDA)',
-  },
-];
 
 const present = (v: unknown): boolean =>
   v !== undefined && v !== null && v !== false && v !== 0 && !(Array.isArray(v) && v.length === 0);
 
-function unmodelledStructure(t: Obj, fail: Fail): void {
-  for (const { keys, feature, what } of UNMODELLED_KEYS) {
-    const found = keys.filter((k) => present(t[k]));
-    if (found.length > 0) fail(`${found.join(', ')} (${what}: not supported)`, feature, `${what}: ${found.join(', ')}`);
+/** The text-model config: `text_config` / `llm_config` (multimodal) or a nested `backbone_configs` (MemT). */
+function textConfig(config: Obj): Obj {
+  if (isObj(config.text_config)) return config.text_config;
+  if (isObj(config.llm_config)) return config.llm_config;
+  if (isObj(config.backbone_configs)) {
+    const b = config.backbone_configs;
+    return isObj(b.text_config) ? { ...b.text_config, ...(config.memt !== undefined ? { memt: config.memt } : {}) } : b;
   }
+  return config;
 }
 
-/** Records one problem: the `missing` line and, for a recognised but unmodelled feature, the feature and its detail. */
-type Fail = (missing: string, feature?: UnsupportedFeature, detail?: string) => void;
-
 /**
- * Parse a Hugging Face `config.json` into a Model (spec §5; plan Task 5 rules).
- * Multimodal configs are read from `text_config` (Gemma 4, Mistral 3.x, Muse Glimmer, Inkling)
- * or `llm_config` (Nemotron 3.5 VL). Any field that cannot be read is listed in `missing`
- * and no model is returned; nothing is guessed.
+ * Parse a Hugging Face `config.json` into a Model (spec §5; CLAUDE.md "Goal for imported models").
+ * Standard fields are read exactly. A structure the calculator has not modelled precisely is estimated from the
+ * standard fields on the conservative side (more memory, slower) and listed in `model.estimates`; the model is never
+ * refused for it. Only fields no estimate can do without (hidden size, heads, layers, vocabulary, the parameter count,
+ * the publisher origin) are reported as `missing`, and a missing one is an importer bug.
  */
 export function parseHfConfig(
   repo: string,
@@ -366,30 +305,13 @@ export function parseHfConfig(
   opts: ParseOptions = {},
 ): ParseResult {
   const missing: string[] = [];
-  if (!isObj(config)) return { missing: ['config.json is not a JSON object'], unsupported: [], notes: [] };
+  if (!isObj(config)) return { missing: ['config.json is not a JSON object'], notes: [] };
   const notes: string[] = [];
-  const unsupported: Unsupported[] = [];
-  const fail: Fail = (m, feature, detail) => {
-    missing.push(m);
-    if (feature) unsupported.push({ feature, detail: detail ?? m, fields: [m] });
+  const estimates: Array<{ feature: EstimatedFeature; detail: string }> = [];
+  const estimate: Estimate = (feature, detail) => {
+    if (!estimates.some((e) => e.feature === feature && e.detail === detail)) estimates.push({ feature, detail });
   };
-  /** Each problem once, and one entry per feature with its distinct details joined (issue #17: no repeated lines). */
-  const result = (model?: Model): ParseResult => {
-    const byFeature = new Map<UnsupportedFeature, { details: string[]; fields: string[] }>();
-    for (const u of unsupported) {
-      const e = byFeature.get(u.feature) ?? { details: [], fields: [] };
-      if (!e.details.includes(u.detail)) e.details.push(u.detail);
-      for (const f of u.fields) if (!e.fields.includes(f)) e.fields.push(f);
-      byFeature.set(u.feature, e);
-    }
-    return {
-      ...(model ? { model } : {}),
-      missing: [...new Set(missing)],
-      unsupported: [...byFeature].map(([feature, e]) => ({ feature, detail: e.details.join('; '), fields: e.fields })),
-      notes,
-    };
-  };
-  const t: Obj = isObj(config.text_config) ? config.text_config : isObj(config.llm_config) ? config.llm_config : config;
+  const t = textConfig(config);
 
   const hidden = num(t, 'hidden_size');
   if (hidden === undefined) missing.push('hidden_size');
@@ -401,7 +323,8 @@ export function parseHfConfig(
     notes.push(`num_key_value_heads absent: kvHeads = num_attention_heads (${heads}), the Hugging Face convention for multi-head attention`);
   }
 
-  let headDim = num(t, 'head_dim');
+  // head_dim 0 (a config that leaves it unset) counts as absent.
+  let headDim = num(t, 'head_dim') || undefined;
   if (headDim === undefined && hidden !== undefined && heads !== undefined) {
     if (Number.isInteger(hidden / heads)) {
       headDim = hidden / heads;
@@ -411,25 +334,18 @@ export function parseHfConfig(
 
   // NemotronH configs omit num_hidden_layers; the per-layer block list is the layer count.
   const declaredLayers = num(t, 'num_hidden_layers');
-  unmodelledStructure(t, fail);
-  const kinds = layerKinds(t, declaredLayers, fail);
+  let kinds = layerKinds(t, declaredLayers, missing, estimate);
   const layers = declaredLayers ?? kinds?.length;
   if (layers === undefined) missing.push('num_hidden_layers');
   else if (kinds && kinds.length !== layers) {
     missing.push(`per-layer types list ${kinds.length} layers but num_hidden_layers is ${layers}`);
   }
 
-  // Gemma 4 small models can share KV across layers; KV accounting for that is not modelled.
-  const shared = num(t, 'num_kv_shared_layers');
-  if (shared !== undefined && shared > 0) {
-    fail('num_kv_shared_layers > 0 (KV sharing not supported)', 'cross-layer-kv', `KV shared across layers: num_kv_shared_layers ${shared}`);
-  }
-
-  // MLA (latent KV): kv_lora_rank + qk_rope_head_dim; the prefill (MHA) path also needs qk_nope_head_dim and
-  // v_head_dim (Ruling R40). DeepSeek-style keys; Mistral's params.json uses the same names.
+  // MLA (latent KV): kv_lora_rank + qk_rope_head_dim (0 allowed: no rope part); the prefill (MHA) path also needs
+  // qk_nope_head_dim and v_head_dim (Ruling R40). DeepSeek-style keys; Mistral's params.json uses the same names.
   const kvLoraRank = num(t, 'kv_lora_rank');
   let mla: Model['mla'];
-  if (kvLoraRank !== undefined) {
+  if (kvLoraRank !== undefined && kvLoraRank > 0) {
     const qkRopeHeadDim = num(t, 'qk_rope_head_dim');
     const qkNopeHeadDim = num(t, 'qk_nope_head_dim');
     const vHeadDim = num(t, 'v_head_dim');
@@ -441,22 +357,49 @@ export function parseHfConfig(
     }
   }
 
-  // MoE. Expert count: num_experts (Gemma 4) / num_local_experts (gpt-oss) / n_routed_experts (Nemotron, Mistral 4,
-  // Inkling). Top-k: num_experts_per_tok / top_k_experts (Gemma 4). Expert FFN: moe_intermediate_size, else
-  // intermediate_size (gpt-oss and Inkling keep the expert width there).
-  const experts = firstNum(t, ['num_experts', 'num_local_experts', 'n_routed_experts']);
+  // MoE. Expert count: n_routed_experts / num_experts / num_local_experts. Top-k: num_experts_per_tok / top_k_experts.
+  // Expert FFN: moe_intermediate_size, else intermediate_size (gpt-oss and Inkling keep the expert width there).
   let moe: Model['moe'];
-  if (experts !== undefined) {
-    const topK = firstNum(t, ['num_experts_per_tok', 'top_k_experts']);
-    const expertFfnDim = firstNum(t, ['moe_intermediate_size', 'intermediate_size']);
+  const blockConfigs = Array.isArray(t.block_configs) ? t.block_configs.filter(isObj) : undefined;
+  const moeBlocks = blockConfigs?.filter((b) => b.block_type === 'moe');
+  const experts = firstNum(t, ['n_routed_experts', 'num_experts', 'num_local_experts']);
+  if (moeBlocks && moeBlocks.length > 0) {
+    moe = heterogeneousMoe(moeBlocks, missing, estimate);
+  } else if (experts !== undefined) {
+    const topK = firstNum(t, ['num_experts_per_tok', 'top_k_experts', 'moe_topk']);
+    let expertFfnDim = firstNum(t, ['moe_intermediate_size', 'intermediate_size']);
     if (topK === undefined) missing.push('num_experts_per_tok');
     if (expertFfnDim === undefined) missing.push('moe_intermediate_size');
+    // Two expert widths (Hunyuan hy_v3: expert_hidden_dim and moe_intermediate_size): the smaller one, so fewer
+    // expert parameters leave more active per token.
+    const expertHidden = num(t, 'expert_hidden_dim');
+    if (expertHidden !== undefined && expertFfnDim !== undefined && expertHidden !== expertFfnDim) {
+      const smaller = Math.min(expertHidden, expertFfnDim);
+      estimate('moe-layout', `two expert widths (expert_hidden_dim ${expertHidden}, moe_intermediate_size ${expertFfnDim}): the smaller, ${smaller}, is used`);
+      expertFfnDim = smaller;
+    }
     if (topK !== undefined && expertFfnDim !== undefined) moe = { experts, topK, expertFfnDim };
-    unsupportedMoe(t, kinds, layers, fail);
+  }
+  if (moe && layers !== undefined) {
+    const moeLayers = moe.layers ?? moeLayerCount(t, layers);
+    if (moeLayers !== undefined && moeLayers < layers) moe = { ...moe, layers: moeLayers };
+    const latent = num(t, 'moe_latent_size');
+    if (latent !== undefined) {
+      estimate('moe-layout', `latent MoE: experts work in moe_latent_size ${latent}, not hidden_size`);
+      moe = { ...moe, width: latent };
+    }
+    // Inkling's shared_expert_sink: its semantics are not documented in the config, so it is named, not modelled.
+    if (present(t.shared_expert_sink)) estimate('moe-layout', 'shared_expert_sink: not modelled (its weights are in the parameter count)');
+    const actKey = ['mlp_hidden_act', 'hidden_act', 'hidden_activation'].find((k) => t[k] !== undefined && t[k] !== null);
+    const act = actKey !== undefined ? t[actKey] : undefined;
+    if (act !== undefined && (typeof act !== 'string' || !GATED_ACTS.has(act))) {
+      estimate('moe-layout', `expert activation ${JSON.stringify(act)}: sized as 2 matrices (non-gated)`);
+      moe = { ...moe, matrices: 2 };
+    }
   }
 
   // Embedding size (spec §5.1: embedding / lm_head stay 16-bit under vLLM FP8 / AWQ). vocab_size is required;
-  // tie_word_embeddings is optional (Mistral 3 text configs omit it) and absent means untied (conservative).
+  // tie_word_embeddings is optional and absent means untied (conservative).
   const vocabSize = num(t, 'vocab_size') ?? num(config, 'vocab_size');
   if (vocabSize === undefined) missing.push('vocab_size');
   const tieRaw = typeof t.tie_word_embeddings === 'boolean' ? t.tie_word_embeddings : config.tie_word_embeddings;
@@ -492,18 +435,35 @@ export function parseHfConfig(
   }
   // use_sliding_window false (final-review M22): transformers drops the window (e.g. v5.20.2
   // models/qwen2/configuration_qwen2.py L84 `sliding_window if use_sliding_window else None`), and vLLM reads the
-  // config's sliding_window (vllm/config/model.py L1612-L1614). With per-layer sliding types it is ambiguous: fail closed.
+  // config's sliding_window (vllm/config/model.py L1612-L1614). Beside layers typed sliding_attention it is ambiguous
+  // whether they slide: they are sized as full attention (the conservative side).
   if (t.use_sliding_window === false && window !== undefined) {
     if (kinds?.includes('sliding')) {
-      missing.push('use_sliding_window false with sliding_attention layer types (ambiguous: not supported)');
-    } else {
-      notes.push(`use_sliding_window false: sliding_window ${window} ignored (every layer full attention)`);
-      window = undefined;
-    }
+      estimate('sliding-window', `use_sliding_window false beside sliding_attention layer types: those layers sized as full attention`);
+      kinds = kinds.map((k) => (k === 'sliding' ? 'full' : k));
+    } else notes.push(`use_sliding_window false: sliding_window ${window} ignored (every layer full attention)`);
+    window = undefined;
+  }
+  // A window with no per-layer types beside compressed KV, MLA or a DeepSeek-style MoE layout (e.g. an OCR model): not
+  // every layer is known to slide, so every layer is sized as full attention.
+  const compressed = ['compress_ratios', 'compress_rates'].filter((k) => present(t[k]));
+  if (!kinds && window !== undefined && (compressed.length > 0 || t.first_k_dense_replace !== undefined || mla)) {
+    estimate(compressed.length > 0 ? 'compressed-attention' : 'sliding-window',
+      `sliding_window ${window} beside ${compressed.length > 0 ? compressed.join(', ') : 'a DeepSeek-style layout'}: every layer sized as full attention`);
+    window = undefined;
+  }
+  if (compressed.length > 0 && kinds) estimate('compressed-attention', `${compressed.join(', ')}: compressed layers sized as full attention`);
+  if (present(t.kv_source_layer_ids) || (num(t, 'num_kv_shared_layers') ?? 0) > 0) {
+    estimate('cross-layer-kv', 'KV shared across layers: every layer counted with its own KV');
   }
 
+  // Fixed-state layers (linear attention, short convolution): their per-sequence state from the config's own sizes.
+  const kdaKeys = ['linear_attn_config', 'kda_lower_bound', 'use_kda_lora', 'num_kv_heads_for_linear_attn'].filter((k) => t[k] !== undefined);
+  const linState = kinds?.includes('linear') || (!kinds && kdaKeys.length > 0) ? linearStateBytes(t, heads, headDim, estimate) : undefined;
+  const convState = convStateBytes(t, hidden, estimate);
+
   let layerGroups: LayerGroup[] | undefined;
-  if (!kinds && window !== undefined && layers !== undefined) {
+  if (!kinds && window !== undefined && layers !== undefined && !mla) {
     // A window with no per-layer type field means every layer uses sliding-window attention.
     layerGroups = [{ kind: 'sliding', count: layers, kvHeads, headDim, window }];
   }
@@ -512,7 +472,10 @@ export function parseHfConfig(
     for (const k of kinds) counts.set(k, (counts.get(k) ?? 0) + 1);
     layerGroups = [];
     for (const [kind, count] of counts) {
-      if (kind === 'none') continue;
+      if (kind === 'none') {
+        layerGroups.push({ kind: 'none', count });
+        continue;
+      }
       if (kind === 'full') {
         // Gemma 4 global layers: num_global_key_value_heads / global_head_dim; attention_k_eq_v (K and V share
         // one projection, see docs/research/open-models.md) applies to these global layers.
@@ -521,7 +484,6 @@ export function parseHfConfig(
           kvHeads: num(t, 'num_global_key_value_heads') ?? kvHeads,
           headDim: num(t, 'global_head_dim') ?? headDim,
         };
-        // A sliding / full hybrid may give its full layers their own dims (Gemma 4); without them the model's are used.
         const absent = ['num_global_key_value_heads', 'global_head_dim'].filter((k) => num(t, k) === undefined);
         if (kinds.includes('sliding') && absent.length > 0) {
           notes.push(
@@ -539,6 +501,11 @@ export function parseHfConfig(
           headDim: num(t, 'swa_head_dim') ?? headDim,
           ...(window !== undefined ? { window } : {}),
         });
+      } else if (kind === 'linear' || kind === 'conv') {
+        const bytes = kind === 'linear' ? linState : convState;
+        // No sizes in the config: sized as full attention (the conservative fallback).
+        if (bytes === undefined) layerGroups.push({ kind: 'full', count, kvHeads, headDim });
+        else layerGroups.push({ kind: 'state', count, stateBytes: bytes });
       } else {
         // Mamba2 state per layer: mamba_num_heads × mamba_head_dim × ssm_state_size elements of
         // mamba_ssm_cache_dtype (absent → 2 bytes, the model dtype default; see config/models/README.md).
@@ -554,62 +521,99 @@ export function parseHfConfig(
           notes.push('mamba_ssm_cache_dtype absent: SSM state assumed 2 bytes per element (16-bit model dtype default)');
         } else {
           stateBytesPerElem = typeof dtype === 'string' ? SSM_DTYPE_BYTES[dtype] : undefined;
-          if (stateBytesPerElem === undefined) missing.push(`mamba_ssm_cache_dtype: unknown dtype ${JSON.stringify(dtype)}`);
+          if (stateBytesPerElem === undefined) {
+            stateBytesPerElem = 4;
+            estimate('unknown-layer-type', `mamba_ssm_cache_dtype ${JSON.stringify(dtype)}: sized as 4 bytes per element`);
+          }
         }
-        if (ssmHeads !== undefined && ssmHeadDim !== undefined && stateSize !== undefined && stateBytesPerElem !== undefined) {
+        if (ssmHeads !== undefined && ssmHeadDim !== undefined && stateSize !== undefined) {
           layerGroups.push({ kind, count, ssm: { heads: ssmHeads, headDim: ssmHeadDim, stateSize, stateBytesPerElem } });
         }
       }
     }
+    if (layerGroups.every((g) => g.kind === 'none')) layerGroups = undefined;
   }
 
-  // Native quantization (config.json quantization_config, else ModelOpt's hf_quant_config.json): map the method, never
-  // guess (fail closed).
-  let nativeQuant: Model['nativeQuant'];
-  const qc = quantizationConfig(config, opts.hfQuantConfig);
-  if (qc) {
-    let method: string | undefined;
-    let quant: string | undefined;
-    if (qc.key === 'hf_quant_config.json') {
-      const mo = modeloptNativeQuant(qc.value);
-      if ('missing' in mo) fail(mo.missing, 'native-quant');
-      else ({ method, quant } = mo);
-    } else {
-      method = isObj(qc.value) && typeof qc.value.quant_method === 'string' ? qc.value.quant_method : undefined;
-      quant = method !== undefined && Object.hasOwn(NATIVE_QUANT_IDS, method) ? NATIVE_QUANT_IDS[method] : undefined;
-      if (qc.key !== 'quantization_config') fail(`${qc.key} (native quantization not supported)`, 'native-quant');
-      else if (method === undefined) missing.push('quantization_config.quant_method');
-      else if (quant === undefined) {
-        fail(`quantization_config.quant_method ${JSON.stringify(method)} (native quantization not supported)`, 'native-quant',
-          `quant_method ${JSON.stringify(method)}`);
-      }
-    }
-    const bytes = opts.checkpointWeightBytes;
-    if (bytes === undefined || bytes === null) missing.push('checkpoint weight bytes (model.safetensors.index.json file sizes)');
-    if (method !== undefined && quant !== undefined && typeof bytes === 'number') {
-      nativeQuant = {
-        method,
-        quant,
-        checkpointWeightBytes: {
-          value: bytes, unit: 'B', status: 'official', source: hfSourceId(repo, sha),
-          verified: opts.verified ?? new Date().toISOString().slice(0, 10),
-        },
-      };
-    }
+  // Caches beyond the layers above, each an estimate.
+  let extraBytesPerToken = 0;
+  let extraStateBytes = 0;
+  const attnLayers = layerGroups
+    ? layerGroups.filter((g) => g.kind === 'full' || g.kind === 'sliding').reduce((s, g) => s + g.count, 0)
+    : layers ?? 0;
+  // A sparse-attention indexer keeps its own key per token (DSA style): indexer KV heads × index head dim at 2 bytes on
+  // every attention layer (some designs share it between layers; counting each is the upper bound).
+  const indexKeys = ['index_n_heads', 'index_topk', 'indexer_n_heads', 'indexer_budget'].filter((k) => present(t[k]));
+  if (indexKeys.length > 0) {
+    const kvH = num(t, 'indexer_kv_heads') ?? 1;
+    const dim = firstNum(t, ['index_head_dim', 'indexer_head_dim']) ?? headDim ?? 0;
+    extraBytesPerToken += attnLayers * kvH * dim * 2;
+    estimate('sparse-indexer', `${indexKeys.join(', ')}: an indexer key cache of ${kvH} × ${dim} at 2 bytes per token on ${attnLayers} layers; every token counted as read`);
   }
-
-  if (safetensorsTotal === null) missing.push('safetensors.total');
-  if (!opts.origin) missing.push('origin (developer, country)');
-
+  // KDA layers whose positions the config does not list (Ling bailing_hybrid): every layer keeps its attention cache AND
+  // a linear state (an upper bound on whichever it is).
+  if (!kinds && kdaKeys.length > 0 && layers !== undefined) {
+    const bytes = linState ?? (heads !== undefined && headDim !== undefined ? heads * headDim * headDim * 4 : 0);
+    extraStateBytes += layers * bytes;
+    estimate('linear-attention', `linear-attention (KDA) layers not listed by position (${kdaKeys.join(', ')}): every layer counted with both its attention cache and a ${bytes}-byte state`);
+  }
+  // Memory layers (MemT, a delta-rule memory updated per token): per memory layer a recurrent state of memory heads ×
+  // head_dim × head_dim at 4 bytes, plus one chunk (chunk_tokens) of the model's own KV held while it is folded in.
+  if (isObj(t.memt)) {
+    const memLayers = Array.isArray(t.memt.layers) ? t.memt.layers.length : layers ?? 0;
+    const memHeads = firstNum(t.memt, ['num_memory_heads', 'num_kv_heads']) ?? heads ?? 1;
+    const memDim = num(t.memt, 'head_dim') ?? headDim ?? 0;
+    const chunk = num(t.memt, 'chunk_tokens') ?? 0;
+    const perLayer = memHeads * memDim * memDim * 4 + chunk * 2 * (kvHeads ?? 1) * (headDim ?? 0) * 2;
+    extraStateBytes += memLayers * perLayer;
+    estimate('memory-layers', `memt on ${memLayers} layers: a state of ${memHeads} × ${memDim} × ${memDim} at 4 bytes plus one ${chunk}-token chunk of KV (2 bytes) = ${perLayer} bytes per layer`);
+  }
+  // Layers run more than once (Nemotron Labs Dory): the attention layers of the repeated block keep KV per pass.
+  const loops = num(t, 'n_recurrent_loops');
+  if (loops !== undefined && loops > 1 && kinds && kvHeads !== undefined && headDim !== undefined) {
+    const start = num(t, 'n_input_layers') ?? 0;
+    const n = num(t, 'n_recurrent_layers') ?? kinds.length - start;
+    const attn = kinds.slice(start, start + n).filter((k) => k === 'full' || k === 'sliding').length;
+    extraBytesPerToken += attn * (loops - 1) * 2 * kvHeads * headDim * 2;
+    estimate('recurrent-depth', `${n} layers run ${loops} times: ${attn} attention layers keep KV for each extra pass (2 bytes); the repeated passes' compute is not counted`);
+  }
+  const lookup = ['engram_layer_ids', 'engram_num_embeddings', 'ngram_vocab_size_base', 'ple_layer_ids'].filter((k) => present(t[k]));
+  if (lookup.length > 0) {
+    estimate('lookup-tables', `${lookup.join(', ')}: lookup tables counted as weights read in full every step`);
+  }
   // Hyper-connections widen the residual stream only: their weights are in safetensors.total, and they keep no
   // per-sequence cache, so nothing the calculator sizes changes (stated, not silent).
   const hc = firstNum(t, ['hc_mult', 'hc_count']);
   if (hc !== undefined && hc > 1) notes.push(`hyper-connections (${hc} residual streams): weights counted in the total; no per-sequence cache`);
 
-  if (missing.length > 0) return result();
+  const nativeQuant = parseNativeQuant(repo, sha, config, opts, missing, estimate);
+  for (const e of opts.estimates ?? []) estimate(e.feature, e.detail);
+
+  if (safetensorsTotal === null) missing.push('safetensors.total');
+  if (!opts.origin) missing.push('origin (developer, country)');
+  if (missing.length > 0) return { missing: [...new Set(missing)], notes };
 
   const source = hfSourceId(repo, sha);
   const verified = opts.verified ?? new Date().toISOString().slice(0, 10);
+  // A packed checkpoint (native-other) counts stored elements: its base model's count is the parameter count.
+  let totalParamsB: Model['totalParamsB'] = { value: (safetensorsTotal as number) / 1e9, unit: 'B', status: 'official', source, verified };
+  const base = opts.baseParams;
+  if (nativeQuant?.quant === 'native-other' && base && base.total > (safetensorsTotal as number)) {
+    totalParamsB = {
+      value: base.total / 1e9, unit: 'B', status: 'estimate', verified, evidence: [source],
+      basis: `量化 checkpoint 的 safetensors 計數是打包後的元素數（${((safetensorsTotal as number) / 1e9).toFixed(2)}B），改用 model card 的 base model ${base.repo} 的參數量`,
+    };
+    estimate('native-quant', `packed checkpoint counts ${((safetensorsTotal as number) / 1e9).toFixed(2)}B elements: parameter count ${(base.total / 1e9).toFixed(2)}B taken from its base model ${base.repo}`);
+  }
+  // The config's expert sizes cannot exceed the parameter count; when they do the MoE layout is not what the formula
+  // assumes, so every weight is counted as read every step (dense: the conservative side for speed).
+  if (moe && layers !== undefined && hidden !== undefined) {
+    const { experts, expertFfnDim, matrices = 3, width = hidden, layers: moeLayers = layers } = moe;
+    const expertB = (experts * matrices * width * expertFfnDim * moeLayers) / 1e9;
+    if (expertB >= totalParamsB.value) {
+      estimate('moe-layout', `expert parameters from the config (${expertB.toFixed(1)}B) exceed the parameter count (${totalParamsB.value.toFixed(1)}B): every weight counted as read every step`);
+      moe = undefined;
+    }
+  }
   const maxContext = firstNum(t, ['max_position_embeddings', 'model_max_length']);
   const candidate = {
     id: modelSlug(repo),
@@ -618,14 +622,16 @@ export function parseHfConfig(
     origin: opts.origin,
     ...(opts.base ? { baseModel: opts.base.repo } : {}),
     ...(opts.base?.origin ? { baseOrigin: opts.base.origin } : {}),
-    totalParamsB: { value: (safetensorsTotal as number) / 1e9, unit: 'B', status: 'official', source, verified },
+    totalParamsB,
     layers, heads, kvHeads, headDim, hidden,
     attention: mla ? 'mla' : 'gqa',
     ...(mla ? { mla } : {}),
     ...(layerGroups && layerGroups.length > 0 ? { layerGroups } : {}),
     ...(moe ? { moe } : {}),
-    slidingWindow: window ?? null,
+    slidingWindow: mla ? null : window ?? null,
     ...(nativeQuant ? { nativeQuant } : {}),
+    ...(extraBytesPerToken > 0 || extraStateBytes > 0 ? { extraCache: { bytesPerToken: extraBytesPerToken, stateBytes: extraStateBytes } } : {}),
+    ...(estimates.length > 0 ? { estimates } : {}),
     ...(maxContext !== undefined ? { maxContext } : {}),
     vocabSize,
     ...(tieWordEmbeddings !== undefined ? { tieWordEmbeddings } : {}),
@@ -635,8 +641,128 @@ export function parseHfConfig(
   };
   const r = ModelSchema.safeParse(candidate);
   if (!r.success) {
-    missing.push(...r.error.issues.map((i) => `invalid ${i.path.join('.') || 'model'}: ${i.message}`));
-    return result();
+    return { missing: r.error.issues.map((i) => `invalid ${i.path.join('.') || 'model'}: ${i.message}`), notes };
   }
-  return result(r.data);
+  return { model: r.data, missing: [], notes };
+}
+
+/**
+ * Per-sequence state of one linear-attention layer, from the config's own sizes (an estimate until sourced; CLAUDE.md
+ * "Goal for imported models"):
+ * - Gated DeltaNet (Qwen3.5 / 3.8 keys): recurrent state linear_num_value_heads × linear_key_head_dim ×
+ *   linear_value_head_dim at mamba_ssm_dtype (absent → 4 bytes), plus a conv state of conv_dim × linear_conv_kernel_dim
+ *   at 2 bytes, conv_dim = 2 × linear_num_key_heads × linear_key_head_dim + linear_num_value_heads × linear_value_head_dim.
+ * - KDA (`linear_attn_config` { num_heads, head_dim }): num_heads × head_dim × head_dim at 4 bytes, plus a conv state
+ *   of 3 × num_heads × head_dim × short_conv_kernel_size (absent → 4) at 2 bytes.
+ * Undefined when the config gives no sizes (the layers are then sized as full attention).
+ */
+function linearStateBytes(t: Obj, heads: number | undefined, headDim: number | undefined, estimate: Estimate): number | undefined {
+  const nv = num(t, 'linear_num_value_heads');
+  const nk = num(t, 'linear_num_key_heads') ?? nv;
+  const dk = num(t, 'linear_key_head_dim');
+  const dv = num(t, 'linear_value_head_dim') ?? dk;
+  const dtype = t.mamba_ssm_dtype ?? t.mamba_ssm_cache_dtype;
+  const elem = typeof dtype === 'string' && SSM_DTYPE_BYTES[dtype] !== undefined ? SSM_DTYPE_BYTES[dtype]! : 4;
+  if (nv !== undefined && nk !== undefined && dk !== undefined && dv !== undefined) {
+    const kernel = num(t, 'linear_conv_kernel_dim') ?? 4;
+    const bytes = nv * dk * dv * elem + (2 * nk * dk + nv * dv) * kernel * 2;
+    estimate('linear-attention', `Gated DeltaNet layers: state ${nv} × ${dk} × ${dv} at ${elem} bytes + conv state (2 × ${nk} × ${dk} + ${nv} × ${dv}) × ${kernel} at 2 bytes = ${bytes} bytes per layer`);
+    return bytes;
+  }
+  const kda = isObj(t.linear_attn_config) ? t.linear_attn_config : undefined;
+  const kh = (kda && num(kda, 'num_heads')) ?? (kda ? heads : undefined);
+  const kd = (kda && num(kda, 'head_dim')) ?? (kda ? headDim : undefined);
+  if (kh !== undefined && kd !== undefined) {
+    const kernel = (kda && firstNum(kda, ['short_conv_kernel_size', 'conv_kernel_size'])) ?? 4;
+    const bytes = kh * kd * kd * 4 + 3 * kh * kd * kernel * 2;
+    estimate('linear-attention', `KDA layers: state ${kh} × ${kd} × ${kd} at 4 bytes + conv state 3 × ${kh} × ${kd} × ${kernel} at 2 bytes = ${bytes} bytes per layer`);
+    return bytes;
+  }
+  if (Array.isArray(t.layer_types) && t.layer_types.includes('linear_attention')) {
+    estimate('linear-attention', 'linear-attention layers without state sizes in the config: sized as full attention');
+  }
+  return undefined;
+}
+
+/** LFM2 short convolution: hidden_size × conv_L_cache at 2 bytes per layer (an estimate until sourced). */
+function convStateBytes(t: Obj, hidden: number | undefined, estimate: Estimate): number | undefined {
+  if (!(Array.isArray(t.layer_types) && t.layer_types.includes('conv'))) return undefined;
+  const cache = num(t, 'conv_L_cache');
+  if (hidden === undefined || cache === undefined) {
+    estimate('short-conv', 'short-convolution layers without conv_L_cache: sized as full attention');
+    return undefined;
+  }
+  const bytes = hidden * cache * 2;
+  estimate('short-conv', `short-convolution layers: state hidden_size ${hidden} × conv_L_cache ${cache} at 2 bytes = ${bytes} bytes per layer`);
+  return bytes;
+}
+
+/**
+ * Per-block MoE (Nemotron puzzle `block_configs`): one MoE whose expert parameters equal the blocks' sum, with the
+ * experts / top-k of the block that activates the largest share (the most parameters active per token: conservative).
+ */
+function heterogeneousMoe(blocks: Obj[], missing: string[], estimate: Estimate): Model['moe'] {
+  const parsed = blocks.map((b) => ({
+    experts: firstNum(b, ['n_routed_experts', 'num_experts']), topK: firstNum(b, ['num_experts_per_tok']), ffn: num(b, 'moe_intermediate_size'),
+  }));
+  if (parsed.some((p) => p.experts === undefined || p.topK === undefined || p.ffn === undefined)) {
+    missing.push('block_configs: a MoE block without n_routed_experts / num_experts_per_tok / moe_intermediate_size');
+    return undefined;
+  }
+  const ok = parsed as Array<{ experts: number; topK: number; ffn: number }>;
+  const widest = ok.reduce((a, b) => (b.topK / b.experts > a.topK / a.experts ? b : a));
+  const sum = ok.reduce((s, b) => s + b.experts * b.ffn, 0);
+  const expertFfnDim = Math.max(1, Math.floor(sum / (widest.experts * ok.length)));
+  estimate('heterogeneous-blocks', `${ok.length} MoE blocks with their own expert counts and widths: one MoE of ${widest.experts} experts, top-${widest.topK} (the largest active share), width ${expertFfnDim} (the blocks' total expert size)`);
+  return { experts: widest.experts, topK: widest.topK, expertFfnDim, layers: ok.length };
+}
+
+/**
+ * Native quantization (config.json quantization_config, else ModelOpt's hf_quant_config.json). A format the calculator
+ * models maps to its quantization id; any other gets the `native-other` stand-in (config/quantization.yaml), an
+ * estimate. Either way the weight memory is the checkpoint's own file size.
+ */
+function parseNativeQuant(
+  repo: string, sha: string, config: Obj, opts: ParseOptions, missing: string[], estimate: Estimate,
+): Model['nativeQuant'] {
+  const qc = quantizationConfig(config, opts.hfQuantConfig);
+  if (!qc) return undefined;
+  let method: string;
+  let quant: string;
+  const v = isObj(qc.value) ? qc.value : {};
+  if (qc.key === 'hf_quant_config.json') {
+    const mo = modeloptNativeQuant(qc.value);
+    method = 'modelopt';
+    if ('missing' in mo) {
+      quant = 'native-other';
+      estimate('native-quant', `${mo.missing}: weight memory from the checkpoint files, compute as BF16`);
+    } else quant = mo.quant;
+  } else {
+    method = typeof v.quant_method === 'string' ? v.quant_method : qc.key;
+    const algo = typeof v.quant_algo === 'string' ? v.quant_algo.toUpperCase() : undefined;
+    const exclude = [...(Array.isArray(v.exclude_modules) ? v.exclude_modules : []), ...(Array.isArray(v.ignore) ? v.ignore : [])];
+    const expertDtype = typeof v.expert_dtype === 'string' ? v.expert_dtype : undefined;
+    if (qc.key === 'quantization_config' && method === 'modelopt' && algo === 'FP8' && exclude.includes('lm_head')) {
+      // ModelOpt FP8 written into config.json: the format modeloptNativeQuant accepts from hf_quant_config.json.
+      quant = 'fp8';
+    } else if (qc.key === 'quantization_config' && Object.hasOwn(NATIVE_QUANT_IDS, method) && (expertDtype === undefined || expertDtype === method)) {
+      quant = NATIVE_QUANT_IDS[method]!;
+    } else {
+      quant = 'native-other';
+      const what = [method, algo, expertDtype && `experts ${expertDtype}`].filter(Boolean).join(' ');
+      estimate('native-quant', `quantization ${what}: weight memory from the checkpoint files, compute as BF16`);
+    }
+  }
+  const bytes = opts.checkpointWeightBytes;
+  if (bytes === undefined || bytes === null) {
+    missing.push('checkpoint weight bytes (model.safetensors.index.json file sizes)');
+    return undefined;
+  }
+  return {
+    method, quant,
+    checkpointWeightBytes: {
+      value: bytes, unit: 'B', status: 'official', source: hfSourceId(repo, sha),
+      verified: opts.verified ?? new Date().toISOString().slice(0, 10),
+    },
+  };
 }

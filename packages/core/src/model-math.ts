@@ -111,7 +111,7 @@ export function layerShapeIssues(m: LayerShapeIn): Array<{ path: (string | numbe
     };
     gqa(m.kvHeads, ['kvHeads']);
     m.layerGroups?.forEach((g, i) => {
-      if (g.kind !== 'mamba' && g.kind !== 'state' && g.kvHeads !== undefined) gqa(g.kvHeads, ['layerGroups', i, 'kvHeads']);
+      if ((g.kind === 'full' || g.kind === 'sliding') && g.kvHeads !== undefined) gqa(g.kvHeads, ['layerGroups', i, 'kvHeads']);
     });
   }
   return out;
@@ -295,7 +295,7 @@ export function kvHeadsStored(kvHeads: number, tp = 1): number {
 /** Layers that keep attention KV (or the MLA latent): every layer, or the layer groups that are not fixed-state. */
 export function attentionLayers(m: Pick<Model, 'layers' | 'layerGroups'>): number {
   if (!m.layerGroups) return m.layers;
-  return m.layerGroups.filter((g) => g.kind !== 'mamba' && g.kind !== 'state').reduce((s, g) => s + g.count, 0);
+  return m.layerGroups.filter((g) => g.kind === 'full' || g.kind === 'sliding').reduce((s, g) => s + g.count, 0);
 }
 
 /** Fixed per-sequence state of the 'mamba' and 'state' layer groups, summed over the replica (context-independent). */
@@ -393,8 +393,8 @@ export function slidingTransientKvBytes(
  *   Derived estimate: SSM recurrent state only (conv state not counted); independent of
  *   context length and of kvBytesPerElem.
  * - state group: count x stateBytes (a fixed per-sequence state already summed over the replica).
- * - indexer (sparse-attention key cache): layers x bytesPerToken x ceil(ctx / block) x block x tp, every rank keeping
- *   a copy, added on top of whichever branch above applies.
+ * - extraCache: bytesPerToken x ceil(ctx / block) x block x tp (every rank keeps a copy) + stateBytes, added on top
+ *   of whichever branch above applies.
  * `tp`: the replica's tensor-parallel size; the result is the total over its GPUs, with KV heads
  * replicated when tp > kvHeads and the MLA latent cache copied on every rank (kvBytesPerToken).
  * Mamba state is sharded by head across ranks, so its total does not depend on tp.
@@ -402,8 +402,8 @@ export function slidingTransientKvBytes(
  */
 export function kvBytesPerSequence(m: Model, contextTokens: number, kvBytesPerElem = 1, tp = 1, opts?: KvSeqOpts): number {
   const fullTokens = roundUpToBlock(contextTokens, opts?.blockTokens);
-  const indexer = m.indexer ? m.indexer.layers * m.indexer.bytesPerToken * fullTokens * tp : 0;
-  return attentionKvBytesPerSequence(m, contextTokens, fullTokens, kvBytesPerElem, tp, opts) + indexer;
+  const extra = m.extraCache ? m.extraCache.bytesPerToken * fullTokens * tp + m.extraCache.stateBytes : 0;
+  return attentionKvBytesPerSequence(m, contextTokens, fullTokens, kvBytesPerElem, tp, opts) + extra;
 }
 
 function attentionKvBytesPerSequence(
@@ -415,7 +415,7 @@ function attentionKvBytesPerSequence(
   if (m.layerGroups) {
     let total = fixedStateBytes(m);
     for (const g of m.layerGroups) {
-      if (g.kind === 'mamba' || g.kind === 'state') continue;
+      if (g.kind === 'mamba' || g.kind === 'state' || g.kind === 'none') continue;
       const kv =
         (g.kEqualsV ? 1 : 2) * kvHeadsStored(g.kvHeads ?? m.kvHeads, tp) * (g.headDim ?? m.headDim) * kvBytesPerElem;
       const tokens =

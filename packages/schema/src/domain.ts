@@ -171,8 +171,9 @@ export const LayerGroupSchema = z.strictObject({
   /**
    * `state`: a layer whose per-sequence cache is a fixed-size state (linear attention, short convolution), sized by
    * `stateBytes` per layer per sequence over the whole replica, independent of context length.
+   * `none`: a layer (block) with no per-sequence cache at all (an MLP / MoE block of a hybrid block list).
    */
-  kind: z.enum(['full', 'sliding', 'mamba', 'state']),
+  kind: z.enum(['full', 'sliding', 'mamba', 'state', 'none']),
   count: posInt,
   kvHeads: posInt.optional(),
   headDim: posInt.optional(),
@@ -199,6 +200,8 @@ export const LayerGroupSchema = z.strictObject({
   }
 });
 export type LayerGroup = z.infer<typeof LayerGroupSchema>;
+
+const nonNeg = z.number().nonnegative();
 
 export const ModelSchema = z
   .strictObject({
@@ -240,10 +243,12 @@ export const ModelSchema = z
       width: posInt.optional(),
     }).optional(),
     /**
-     * A sparse-attention indexer's own key cache (DSA style): `bytesPerToken` per token per layer on each of `layers`
-     * layers, kept by every TP rank (like the MLA latent cache).
+     * Per-sequence cache beyond the attention / state layers: a sparse-attention indexer's key cache, memory layers,
+     * repeated passes. `bytesPerToken`: bytes per context token over all layers, kept by every TP rank (like the MLA
+     * latent cache); `stateBytes`: a fixed per-sequence state over the replica. Used by estimates (CLAUDE.md "Goal
+     * for imported models"), each part named in `estimates`.
      */
-    indexer: z.strictObject({ layers: posInt, bytesPerToken: z.number().positive() }).optional(),
+    extraCache: z.strictObject({ bytesPerToken: nonNeg, stateBytes: nonNeg }).optional(),
     /**
      * Parts of this model the calculator has not modelled precisely and estimated conservatively (more memory, slower)
      * from the standard config fields (CLAUDE.md "Goal for imported models"). Results carry the nonstandard-config

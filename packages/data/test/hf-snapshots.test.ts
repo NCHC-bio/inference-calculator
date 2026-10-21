@@ -1,65 +1,76 @@
 /**
- * Regression tests for Hugging Face import coverage (issue #17): every target repo replayed from its pinned snapshot
- * (test/fixtures/hf/snapshots, written by `pnpm data:snapshot`) through fetchHfModel, exactly as the website and the
- * CLI run it. `cls` is the issue's failure class (A–H). Snapshots in the gitignored snapshots-local/ run too when
- * present. Repos the calculator cannot model yet must fail closed with one readable reason per feature; as each class gets modelled, its rows change to `ok` with the key fields asserted.
+ * Import coverage (issue #17; CLAUDE.md "Goal for imported models"): trending Hugging Face repos replayed from their
+ * pinned snapshots (test/fixtures/hf/snapshots, written by `pnpm data:snapshot`) through fetchHfModel, exactly as the
+ * website and the CLI run it, then through core. Every repo must import and get an answer; a failure is a bug.
+ * `features` are the structures estimated conservatively (empty = precise compute); as an architecture gets modelled
+ * precisely, its feature leaves the list. `via`: a GGUF repo is read through its base model.
+ * Snapshots in the gitignored snapshots-local/ (expectations in its cases.json) run too when present.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { fetchHfModel, type UnsupportedFeature } from '../src/hf-fetch';
-import { loadSnapshot, replayFetch, SNAPSHOT_LOCAL_DIR } from '../src/hf-snapshot';
+import { estimateRequirements, quantOptionsFor } from '@nchc/core';
+import { fetchHfModel, type HfFetchDeps } from '../src/hf-fetch';
+import { loadSnapshot, replayFetch, SNAPSHOT_LOCAL_DIR, type Snapshot } from '../src/hf-snapshot';
+import { CONFIG_DIR, loadConfig, validateConfig } from '../src/index';
 
-type Expected =
-  | { status: 'unparsable'; features: UnsupportedFeature[] }
-  | { status: 'gguf'; baseModels: string[] };
-
-type Case = { repo: string; cls: string } & Expected;
+type Case = { repo: string; via?: string; features: string[]; model: Record<string, unknown> };
 
 const CASES: Case[] = [
-  // C: LFM2 short convolution (and num_dense_layers, unchecked before)
-  { repo: 'LiquidAI/LFM2.5-24B-A2B', cls: 'C', status: 'unparsable', features: ['short-conv', 'dense-and-moe'] },
-  // D / F: ModelOpt in config.json; Nemotron latent MoE, relu2, MoE on a subset of blocks, per-block configs
-  { repo: 'nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB', cls: 'D+F', status: 'unparsable', features: ['heterogeneous-blocks', 'moe-layout', 'dense-and-moe', 'native-quant'] },
-  { repo: 'nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16', cls: 'F', status: 'unparsable', features: ['moe-layout', 'dense-and-moe'] },
-  { repo: 'nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4', cls: 'D+F', status: 'unparsable', features: ['moe-layout', 'dense-and-moe', 'native-quant'] },
-  // E: GGUF-only repos → the model they were converted from
-  { repo: 'unsloth/LFM2.5-24B-A2B-GGUF', cls: 'E', status: 'gguf', baseModels: ['LiquidAI/LFM2.5-24B-A2B'] },
-  { repo: 'nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF', cls: 'E', status: 'gguf', baseModels: ['nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16'] },
-  // H: outside the supported structures (stay refused, with a readable reason)
-  { repo: 'nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16', cls: 'H', status: 'unparsable', features: ['recurrent-depth'] },
+  {repo: 'LiquidAI/LFM2.5-24B-A2B',features: ['short-conv'],model: {layers: 40,attention: 'gqa',layerGroups: [{kind: 'state',count: 30},{kind: 'full',count: 10}],moe: {experts: 64,topK: 4,expertFfnDim: 1536,layers: 38}}},
+  {repo: 'nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-GGUF',via: 'nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16',features: ['heterogeneous-blocks','moe-layout','gguf'],model: {layers: 88,attention: 'gqa',layerGroups: [{kind: 'mamba',count: 40},{kind: 'none',count: 40},{kind: 'full',count: 8}],moe: {experts: 240,topK: 9,expertFfnDim: 3364,layers: 40,matrices: 2,width: 1024}}},
+  {repo: 'nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB',features: ['heterogeneous-blocks','moe-layout','native-quant'],model: {layers: 88,attention: 'gqa',layerGroups: [{kind: 'mamba',count: 40},{kind: 'none',count: 40},{kind: 'full',count: 8}],moe: {experts: 240,topK: 9,expertFfnDim: 3364,layers: 40,matrices: 2,width: 1024},nativeQuant: {quant: 'native-other'}}},
+  {repo: 'nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-BF16',features: ['heterogeneous-blocks','moe-layout'],model: {layers: 88,attention: 'gqa',layerGroups: [{kind: 'mamba',count: 40},{kind: 'none',count: 40},{kind: 'full',count: 8}],moe: {experts: 240,topK: 9,expertFfnDim: 3364,layers: 40,matrices: 2,width: 1024}}},
+  {repo: 'nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16',features: ['moe-layout'],model: {layers: 88,attention: 'gqa',layerGroups: [{kind: 'mamba',count: 40},{kind: 'none',count: 40},{kind: 'full',count: 8}],moe: {experts: 512,topK: 22,expertFfnDim: 2688,layers: 40,matrices: 2,width: 1024}}},
+  {repo: 'nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-NVFP4',features: ['moe-layout','native-quant'],model: {layers: 88,attention: 'gqa',layerGroups: [{kind: 'mamba',count: 40},{kind: 'none',count: 40},{kind: 'full',count: 8}],moe: {experts: 512,topK: 22,expertFfnDim: 2688,layers: 40,matrices: 2,width: 1024},nativeQuant: {quant: 'native-other'}}},
+  {repo: 'nvidia/NVIDIA-Nemotron-Labs-Dory1.0-4B-BF16',features: ['recurrent-depth'],model: {layers: 72,attention: 'gqa',layerGroups: [{kind: 'sliding',count: 27},{kind: 'none',count: 36},{kind: 'full',count: 9}],extraCache: {bytesPerToken: 81920,stateBytes: 0}}},
+  {repo: 'unsloth/LFM2.5-24B-A2B-GGUF',via: 'LiquidAI/LFM2.5-24B-A2B',features: ['short-conv','gguf'],model: {layers: 40,attention: 'gqa',layerGroups: [{kind: 'state',count: 30},{kind: 'full',count: 10}],moe: {experts: 64,topK: 4,expertFfnDim: 1536,layers: 38}}},
 ];
 
-/** Snapshots kept on the developer's machine (gitignored snapshots-local/, expectations in its cases.json). */
 const localCasesFile = `${SNAPSHOT_LOCAL_DIR}cases.json`;
 const LOCAL_CASES: Case[] = existsSync(localCasesFile) ? (JSON.parse(readFileSync(localCasesFile, 'utf8')) as Case[]) : [];
 
-const ORIGIN = { developer: 'Test', country: 'ZZ' };
+const { bundle } = validateConfig(loadConfig(CONFIG_DIR));
 
-async function check(c: Case): Promise<void> {
-    const s = loadSnapshot(c.repo);
-    const r = await fetchHfModel(c.repo, { fetch: replayFetch(s), revision: s.sha, origin: ORIGIN });
-    expect(r.ok).toBe(false);
-    if (r.ok) return;
-    expect(r.status).toBe(c.status);
-    // The failure names the repo and the commit it was read at (the "report this model" link needs both).
-    expect(r).toMatchObject({ repo: c.repo, sha: s.sha });
-    if (c.status === 'gguf') {
-      expect(r.baseModels).toEqual(c.baseModels);
-      expect(r.message).toContain(c.baseModels[0]);
-      return;
+/** Replays every snapshot a case needs: its own and, for a GGUF repo or a quantized derivative, its base model's. */
+const loaded = new Map<string, Snapshot | null>();
+const snapshotOf = (repo: string): Snapshot | null => {
+  if (!loaded.has(repo)) {
+    try { loaded.set(repo, loadSnapshot(repo)); } catch { loaded.set(repo, null); }
+  }
+  return loaded.get(repo)!;
+};
+function replayAll(repos: string[]): HfFetchDeps['fetch'] {
+  const snaps = repos.map(snapshotOf).filter((x): x is Snapshot => x !== null);
+  return async (url, init) => {
+    for (const s of snaps) {
+      try { return await replayFetch(s)(url, init); } catch { /* the next snapshot */ }
     }
-    expect(r.unsupported?.map((u) => u.feature)).toEqual(c.features);
-    // Each problem once: no repeated line, no repeated clause in the one-sentence message.
-    expect(new Set(r.missing).size).toBe(r.missing?.length);
-    const clauses = r.message.split(/; |\. /);
-    expect(new Set(clauses).size).toBe(clauses.length);
-    expect(r.message).toMatch(/^unsupported architecture: /);
+    return { status: 404, ok: false, json: async () => ({}), text: async () => 'not in any snapshot' };
+  };
 }
 
-describe('Hugging Face import coverage (issue #17 snapshots)', () => {
-  it.each(CASES)('$cls $repo → $status', check);
+async function check(c: Case, bases: string[]): Promise<void> {
+  const s = snapshotOf(c.repo)!;
+  const r = await fetchHfModel(c.repo, { fetch: replayAll([c.repo, ...bases]), revision: s.sha });
+  if (!r.ok) throw new Error(`import failed (a bug): ${r.status} ${r.message}`);
+  expect(r.repo).toBe(c.via ?? c.repo);
+  expect(r.model).toMatchObject(c.model);
+  expect([...new Set((r.model.estimates ?? []).map((e) => e.feature))].sort()).toEqual([...c.features].sort());
+  const res = estimateRequirements(bundle!, {
+    model: { imported: { model: r.model, source: r.source } },
+    quant: quantOptionsFor(bundle!, r.model)[0]!, workload: 'chat', speed: 'smooth', users: 15,
+  });
+  expect(res.perPlatform.length).toBeGreaterThan(0);
+  expect(res.warnings.some((w) => w.code === 'nonstandard-config')).toBe(c.features.length > 0);
+}
+
+const allRepos = [...CASES, ...LOCAL_CASES].flatMap((c) => [c.repo, ...(c.via ? [c.via] : [])]);
+const basesOf = (c: Case) => allRepos.filter((r) => r !== c.repo);
+
+describe('Hugging Face import coverage (issue #17 snapshots)', { timeout: 30_000 }, () => {
+  it.each(CASES)('$repo', (c) => check(c, basesOf(c)));
 });
 
-describe.runIf(LOCAL_CASES.length > 0)('Hugging Face import coverage (local snapshots)', () => {
-  it.each(LOCAL_CASES)('$cls $repo → $status', check);
+describe.runIf(LOCAL_CASES.length > 0)('Hugging Face import coverage (local snapshots)', { timeout: 30_000 }, () => {
+  it.each(LOCAL_CASES)('$repo', (c) => check(c, basesOf(c)));
 });

@@ -4,9 +4,9 @@
  * never stored or logged here (direct-manipulation design §6.3).
  */
 import { HF_REPO_RE, UNCHECKED_ORIGIN, type Model, type Origin, type Source } from '@nchc/schema';
-import { checkpointWeightBytes, hfSourceId, parseHfConfig, quantizationConfig, type Unsupported } from './hf-parse';
+import { checkpointWeightBytes, hfSourceId, parseHfConfig, quantizationConfig, type EstimatedFeature } from './hf-parse';
 
-export { UNSUPPORTED_FEATURES, type Unsupported, type UnsupportedFeature } from './hf-parse';
+export { ESTIMATED_FEATURES, type EstimatedFeature } from './hf-parse';
 
 const HF = 'https://huggingface.co';
 
@@ -33,6 +33,8 @@ export type HfFetchDeps = {
   origin?: Origin;
   /** ISO date written to `verified` / `accessed`; defaults to today. */
   today?: string;
+  /** Estimates already made by the caller (a GGUF repo read through its base model). */
+  estimates?: Array<{ feature: EstimatedFeature; detail: string }>;
   /**
    * Called with the model card's `base_model` repos right after the model API answers, before config.json is read.
    * Returns the lineage to record, or `error` to stop (status 'unparsable', message verbatim).
@@ -48,14 +50,15 @@ export type HfFetchResult =
   }
   | {
     ok: false;
-    /** `gguf`: a GGUF-only repo (no config.json); `baseModels` names the original models to import instead. */
+    /**
+     * `unparsable`: a field no estimate can do without is missing, an importer bug (CLAUDE.md "Goal for imported
+     * models"); `gguf`: a GGUF-only repo whose model card names no base model to read the architecture from.
+     */
     status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network' | 'gguf';
-    /** One readable reason, each problem named once (issue #17). */
+    /** One readable reason, each problem named once. */
     message: string;
-    /** Every field or structure that could not be read, each once. */
+    /** Every field that could not be read, each once. */
     missing?: string[];
-    /** Recognised but unmodelled architecture features, one per feature (unparsable only). */
-    unsupported?: Unsupported[];
     /** The repo and the commit it was read at, once the model API answered (for the "report this model" link). */
     repo?: string;
     sha?: string;
@@ -81,20 +84,6 @@ async function deniedMessage(res: HfFetchResponse, what: string): Promise<string
   const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200);
   const hint = [code && `X-Error-Code: ${code}`, msg, body && body !== msg ? `body: ${body}` : ''].filter(Boolean).join('; ');
   return `${DENIED_PREFIX} (HTTP ${res.status} on ${what}${hint ? `; ${hint}` : ''})`;
-}
-
-/**
- * One sentence for an unparsable model: the unsupported features first (what was found), then the plain fields that
- * are missing and not explained by one of them.
- */
-export function unparsableMessage(missing: string[], unsupported: Unsupported[]): string {
-  const explained = new Set(unsupported.flatMap((u) => u.fields));
-  const rest = missing.filter((m) => !explained.has(m));
-  const parts = [
-    unsupported.length > 0 ? `unsupported architecture: ${unsupported.map((u) => u.detail).join('; ')}` : '',
-    rest.length > 0 ? `missing: ${rest.join(', ')}` : '',
-  ].filter(Boolean);
-  return parts.join('. ');
 }
 
 class Stop extends Error {
@@ -149,12 +138,24 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     const resolved = deps.resolveBase?.(cardBases);
     if (resolved?.error) throw new Stop({ ok: false, status: 'unparsable', message: resolved.error });
 
-    // A GGUF-only repo has no config.json to read: point at the model it was converted from (issue #17 E).
+    // A GGUF-only repo has no config.json: the model it was converted from (card base_model) gives the architecture and
+    // parameters, an estimate of the GGUF model (its precision is chosen in the calculator).
     const names = (api.siblings ?? []).map((s) => s.rfilename).filter((n): n is string => typeof n === 'string');
     if (!names.includes('config.json') && names.some((n) => /.gguf$/i.test(n))) {
-      throw new Stop({
-        ok: false, status: 'gguf', repo, sha, baseModels: cardBases,
-        message: `GGUF repo without config.json: import the original model instead${cardBases.length > 0 ? ` (model card base_model: ${cardBases.join(', ')})` : ''}`,
+      const base = cardBases[0];
+      if (base === undefined || deps.estimates?.some((e) => e.feature === 'gguf')) {
+        throw new Stop({
+          ok: false, status: 'gguf', repo, sha, baseModels: cardBases,
+          message: 'GGUF repo without config.json, and its model card names no base model to read the architecture from',
+        });
+      }
+      const { revision: _r, resolveBase: _b, ...rest } = deps;
+      return fetchHfModel(base, {
+        ...rest,
+        estimates: [...(deps.estimates ?? []), {
+          feature: 'gguf',
+          detail: `${repo} is a GGUF conversion: architecture and parameter count read from its base model ${base}; the GGUF file's own precision is chosen in the calculator`,
+        }],
       });
     }
 
@@ -206,19 +207,33 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     const weightMap = weightIndex && typeof weightIndex === 'object' ? (weightIndex as { weight_map?: unknown }).weight_map : undefined;
     const weightNames = weightMap && typeof weightMap === 'object' ? Object.keys(weightMap as Record<string, unknown>) : undefined;
 
+    // A quantized derivative: its base model's parameter count (a packed checkpoint counts elements, not parameters).
+    // Best effort: the base may be gated or gone, which only leaves the checkpoint's own count.
+    let baseParams: { repo: string; total: number } | undefined;
+    const baseRepo = cardBases[0];
+    if (quantizationConfig(config, hfQuantConfig) && baseRepo !== undefined && HF_REPO_RE.test(baseRepo)) {
+      try {
+        const res = await deps.fetch(`${HF}/api/models/${baseRepo}?expand[]=safetensors`, init);
+        const total = res.ok ? ((await res.json()) as { safetensors?: { total?: unknown } }).safetensors?.total : undefined;
+        if (typeof total === 'number' && total > 0) baseParams = { repo: baseRepo, total };
+      } catch { /* the checkpoint's own count stays */ }
+    }
+
     const today = deps.today ?? new Date().toISOString().slice(0, 10);
     const license = api.cardData?.license_name ?? api.cardData?.license;
-    const { model, missing, unsupported, notes } = parseHfConfig(repo, sha, config, api.safetensors?.total ?? null, {
+    const { model, missing, notes } = parseHfConfig(repo, sha, config, api.safetensors?.total ?? null, {
       origin: deps.origin ?? UNCHECKED_ORIGIN,
       ...(resolved?.base ? { base: resolved.base } : {}),
       license, verified: today,
       ...(ckptBytes !== undefined ? { checkpointWeightBytes: ckptBytes } : {}),
       ...(hfQuantConfig !== undefined ? { hfQuantConfig } : {}),
       ...(weightNames ? { weightNames } : {}),
+      ...(deps.estimates ? { estimates: deps.estimates } : {}),
+      ...(baseParams ? { baseParams } : {}),
     });
     if (!model || ckptMissing.length > 0) {
       const all = [...new Set([...ckptMissing, ...missing])];
-      return { ok: false, status: 'unparsable', message: unparsableMessage(all, unsupported), missing: all, unsupported, repo, sha };
+      return { ok: false, status: 'unparsable', message: `missing: ${all.join(', ')}`, missing: all, repo, sha };
     }
     const source: Source = {
       id: hfSourceId(repo, sha),

@@ -313,7 +313,7 @@ describe('architectures beyond the standard layout (issue #17)', () => {
     expect(expertParamsTotalB({ ...base, moe: { ...moe, matrices: 2, width: 250 } })).toBeCloseTo((8 * 2 * 250 * 100 * 10) / 1e9, 12);
   });
 
-  it('state groups add a fixed per-sequence state; the indexer adds a per-token key cache on every rank', () => {
+  it('state groups add a fixed per-sequence state; extraCache adds a per-token cache on every rank and a state', () => {
     const hybrid: Model = {
       ...llama70b,
       layers: 4,
@@ -326,7 +326,7 @@ describe('architectures beyond the standard layout (issue #17)', () => {
     expect(kvBytesPerSequence(hybrid, 1000, 2)).toBe(fullPerToken * 1000 + 3 * 1_000_000);
     // The state does not grow with context.
     expect(kvBytesPerSequence(hybrid, 2000, 2) - kvBytesPerSequence(hybrid, 1000, 2)).toBe(fullPerToken * 1000);
-    const withIndexer: Model = { ...llama70b, indexer: { layers: 80, bytesPerToken: 132 } };
-    expect(kvBytesPerSequence(withIndexer, 1000, 2, 2) - kvBytesPerSequence(llama70b, 1000, 2, 2)).toBe(80 * 132 * 1000 * 2);
+    const withExtra: Model = { ...llama70b, extraCache: { bytesPerToken: 80 * 132, stateBytes: 5000 } };
+    expect(kvBytesPerSequence(withExtra, 1000, 2, 2) - kvBytesPerSequence(llama70b, 1000, 2, 2)).toBe(80 * 132 * 1000 * 2 + 5000);
   });
 });

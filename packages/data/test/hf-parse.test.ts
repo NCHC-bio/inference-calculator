@@ -13,6 +13,8 @@ const opts = (developer: string, country: string, extra: Partial<ParseOptions> =
   ...extra,
 });
 
+const featuresOf = (r: { model?: { estimates?: Array<{ feature: string }> } }) => [...new Set((r.model?.estimates ?? []).map((e) => e.feature))];
+
 describe('parseHfConfig', () => {
   it('phi-4: dense GQA, no moe, no layer groups', () => {
     const { model, missing } = parseHfConfig('microsoft/phi-4', SHA, fixture('phi-4'), 14659507200, opts('Microsoft', 'US'));
@@ -60,19 +62,16 @@ describe('parseHfConfig', () => {
     expect(model?.moe).toBeUndefined();
   });
 
-  it('nemotron-3.5-super: fails closed on latent MoE, relu2 experts and MoE on a subset of blocks (Ruling R31)', () => {
+  it('nemotron-3.5-super: latent MoE with relu2 experts on 40 of 88 blocks, estimated (issue #17)', () => {
     const r = parseHfConfig(
       'nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16', SHA, fixture('nemotron-3.5-super'), 124453395976,
       opts('NVIDIA', 'US'),
     );
-    expect(r.model).toBeUndefined();
-    expect(r.missing).toEqual([
-      'moe_latent_size 1024 (latent MoE projection not supported)',
-      'mlp_hidden_act "relu2" (non-gated or unknown expert activation not supported)',
-      'MoE on 40 of 88 per-layer blocks (MoE on a subset of blocks not supported)',
-    ]);
+    expect(r.missing).toEqual([]);
+    expect(r.model?.moe).toEqual({ experts: 512, topK: 22, expertFfnDim: 2688, layers: 40, width: 1024, matrices: 2 });
+    expect(r.model?.layerGroups).toContainEqual({ kind: 'none', count: 40 });
+    expect(featuresOf(r)).toEqual(['moe-layout']);
   });
-
   it('nemotron-3.5-super block list without MoE keys: 8 attention layers, mamba group, MoE / MLP blocks carry no cache', () => {
     const cfg = structuredClone(fixture('nemotron-3.5-super')) as { llm_config: Record<string, unknown> };
     for (const k of ['n_routed_experts', 'num_experts_per_tok', 'moe_intermediate_size', 'moe_latent_size']) delete cfg.llm_config[k];
@@ -83,19 +82,15 @@ describe('parseHfConfig', () => {
     expect(model?.layers).toBe(88);
     expect(model?.layerGroups).toContainEqual({ kind: 'full', count: 8, kvHeads: 2, headDim: 128 });
     expect(model?.layerGroups).toContainEqual({ kind: 'mamba', count: 40, ssm: { heads: 128, headDim: 64, stateSize: 128, stateBytesPerElem: 4 } });
-    expect(model?.layerGroups).toHaveLength(2);
+    expect(model?.layerGroups).toContainEqual({ kind: 'none', count: 40 });
     expect(model?.moe).toBeUndefined();
   });
-
-  it('inkling-small: fails closed on dense_mlp_idx and shared_expert_sink (Ruling R31)', () => {
+  it('inkling-small: dense_mlp_idx makes one layer dense (exact); shared_expert_sink is named as an estimate', () => {
     const r = parseHfConfig('thinkingmachines/Inkling-Small', SHA, fixture('inkling-small'), 265956439090, opts('Thinking Machines', 'US'));
-    expect(r.model).toBeUndefined();
-    expect(r.missing).toEqual([
-      'dense_mlp_idx 2 (dense MLP layers mixed with MoE not supported)',
-      'shared_expert_sink (not supported)',
-    ]);
+    expect(r.missing).toEqual([]);
+    expect(r.model?.moe?.layers).toBe(41);
+    expect(featuresOf(r)).toEqual(['moe-layout']);
   });
-
   it('inkling-small without MoE keys: local_layer_ids select sliding layers with swa_* dims', () => {
     const cfg = structuredClone(fixture('inkling-small')) as Record<string, unknown>;
     const t = (cfg.text_config ?? cfg) as Record<string, unknown>;
@@ -112,26 +107,38 @@ describe('parseHfConfig', () => {
     expect(model?.slidingWindow).toBe(512);
   });
 
-  it('MoE fail-closed keys are each reported; shared experts with all-MoE layers are accepted', () => {
+  it('MoE layer count from every dense-layer spelling (exact); non-gated or latent experts are estimates', () => {
     const base = {
       hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
       n_routed_experts: 16, num_experts_per_tok: 2, moe_intermediate_size: 256, hidden_act: 'silu',
     };
-    const miss = (extra: Record<string, unknown>) => parseHfConfig('example/moe', SHA, { ...base, ...extra }, 1e9, opts('Example Lab', 'US')).missing;
-    expect(miss({})).toEqual([]);
-    expect(miss({ n_shared_experts: 1, first_k_dense_replace: 0 })).toEqual([]);
-    expect(miss({ first_k_dense_replace: 1 })).toEqual(['first_k_dense_replace 1 (dense MLP layers mixed with MoE not supported)']);
-    expect(miss({ moe_layer_freq: 2 })).toEqual(['moe_layer_freq 2 (MoE on a subset of layers not supported)']);
-    expect(miss({ mlp_only_layers: [0] })).toEqual(['mlp_only_layers (dense MLP layers mixed with MoE not supported)']);
-    expect(miss({ decoder_sparse_step: 2 })).toEqual(['decoder_sparse_step 2 (MoE on a subset of layers not supported)']);
-    expect(miss({ hidden_act: 'relu2' })).toEqual(['hidden_act "relu2" (non-gated or unknown expert activation not supported)']);
-    expect(miss({ moe_latent_size: 128 })).toEqual(['moe_latent_size 128 (latent MoE projection not supported)']);
-    expect(miss({ moe_latent_size: null })).toEqual([]);
-    // Every block MoE (pattern 'EEEE'): the block count is the MoE layer count, accepted.
-    expect(miss({ hybrid_override_pattern: 'EEEE' })).toEqual([]);
-    expect(miss({ hybrid_override_pattern: 'E*EE' })).toEqual(['MoE on 3 of 4 per-layer blocks (MoE on a subset of blocks not supported)']);
+    const run = (extra: Record<string, unknown>) => parseHfConfig('example/moe', SHA, { ...base, ...extra }, 1e9, opts('Example Lab', 'US'));
+    const moeOf = (extra: Record<string, unknown>) => run(extra).model?.moe;
+    expect(moeOf({})).toEqual({ experts: 16, topK: 2, expertFfnDim: 256 });
+    expect(moeOf({ n_shared_experts: 1, first_k_dense_replace: 0 })?.layers).toBeUndefined();
+    expect(moeOf({ first_k_dense_replace: 1 })?.layers).toBe(3);
+    expect(moeOf({ num_dense_layers: 2 })?.layers).toBe(2);
+    expect(moeOf({ first_k_dense_replace: 1, moe_layer_freq: 2 })?.layers).toBe(2);
+    expect(moeOf({ mlp_only_layers: [0] })?.layers).toBe(3);
+    expect(moeOf({ decoder_sparse_step: 2 })?.layers).toBe(2);
+    expect(moeOf({ mlp_layer_types: ['dense', 'sparse', 'sparse', 'sparse'] })?.layers).toBe(3);
+    expect(moeOf({ hybrid_override_pattern: 'EEEE' })?.layers).toBeUndefined();
+    expect(moeOf({ hybrid_override_pattern: 'E*EE' })?.layers).toBe(3);
+    // Dense layers counted from the config are exact: no estimate.
+    expect(featuresOf(run({ first_k_dense_replace: 1 }))).toEqual([]);
+    expect(moeOf({ hidden_act: 'relu2' })?.matrices).toBe(2);
+    expect(featuresOf(run({ hidden_act: 'relu2' }))).toEqual(['moe-layout']);
+    expect(moeOf({ moe_latent_size: 128 })?.width).toBe(128);
+    expect(moeOf({ moe_latent_size: null })?.width).toBeUndefined();
+    // Two expert widths: the smaller one (more parameters stay active per token).
+    expect(moeOf({ expert_hidden_dim: 128 })?.expertFfnDim).toBe(128);
+    expect(featuresOf(run({ expert_hidden_dim: 128 }))).toEqual(['moe-layout']);
+    expect(featuresOf(run({ expert_hidden_dim: 256 }))).toEqual([]);
+    // Expert sizes above the parameter count: dense (every weight read every step).
+    const big = run({ n_routed_experts: 4096 });
+    expect(big.model?.moe).toBeUndefined();
+    expect(featuresOf(big)).toEqual(['moe-layout']);
   });
-
   it('mla-synthetic: attention mla with kv_lora_rank and rope dim', () => {
     const { model, missing } = parseHfConfig('example/mla-synthetic', SHA, fixture('mla-synthetic'), 1e9, opts('Example Lab', 'US'));
     expect(missing).toEqual([]);
@@ -189,74 +196,59 @@ describe('parseHfConfig', () => {
     expect(r.model).toBeUndefined();
   });
 
-  it('recognised but unmodelled structures fail closed, one entry per feature (issue #17)', () => {
+  it('structures not modelled precisely are estimated conservatively, never refused (issue #17)', () => {
     const base = {
       hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
     };
     const run = (extra: Record<string, unknown>) => parseHfConfig('example/x', SHA, { ...base, ...extra }, 1e9, opts('Example Lab', 'US'));
-    const features = (extra: Record<string, unknown>) => run(extra).unsupported.map((u) => u.feature);
-    expect(features({})).toEqual([]);
-    // DeepSeek V4 style: these keys were ignored and only sliding_window was read (silently wrong KV).
-    expect(features({ sliding_window: 128, compress_ratios: [0, 2, 1, 0] })).toEqual(['compressed-attention']);
-    expect(run({ sliding_window: 128, compress_ratios: [0, 2, 1, 0] }).model).toBeUndefined();
-    expect(features({ kv_source_layer_ids: [1] })).toEqual(['cross-layer-kv']);
-    expect(features({ num_kv_shared_layers: 2 })).toEqual(['cross-layer-kv']);
-    // GLM-5.3 DSA indexer: a per-token key cache the KV math does not count.
-    expect(features({ index_n_heads: 32, index_head_dim: 128, index_topk: 2048 })).toEqual(['sparse-indexer']);
-    expect(features({ engram_layer_ids: [1] })).toEqual(['lookup-tables']);
-    expect(features({ ngram_vocab_size_base: 20000000 })).toEqual(['lookup-tables']);
-    expect(features({ ple_layer_ids: [] })).toEqual([]);
-    expect(features({ memt: { layers: [1] } })).toEqual(['memory-layers']);
-    expect(features({ n_recurrent_loops: 2 })).toEqual(['recurrent-depth']);
-    expect(features({ backbone_configs: {} })).toEqual(['nested-config']);
-    expect(features({ block_configs: [{ block_type: 'moe' }] })).toEqual(['heterogeneous-blocks']);
-    // KDA without layer_types (Ling bailing_hybrid): its own keys mark it.
-    expect(features({ kda_lower_bound: -5 })).toEqual(['linear-attention']);
-    // Hyper-connections change nothing the calculator sizes: accepted with a note.
+    expect(featuresOf(run({}))).toEqual([]);
+    // DeepSeek V4 style: the window does not apply to every layer, so every layer is full attention.
+    const v4 = run({ sliding_window: 128, compress_ratios: [0, 2, 1, 0] });
+    expect(v4.model?.slidingWindow).toBeNull();
+    expect(v4.model?.layerGroups).toBeUndefined();
+    expect(featuresOf(v4)).toEqual(['compressed-attention']);
+    expect(featuresOf(run({ kv_source_layer_ids: [1] }))).toEqual(['cross-layer-kv']);
+    expect(featuresOf(run({ num_kv_shared_layers: 2 }))).toEqual(['cross-layer-kv']);
+    // DSA indexer: its key cache is added per token (1 × 128 at 2 bytes on 4 layers).
+    const dsa = run({ index_n_heads: 32, index_head_dim: 128, index_topk: 2048 });
+    expect(dsa.model?.extraCache).toEqual({ bytesPerToken: 4 * 128 * 2, stateBytes: 0 });
+    expect(featuresOf(dsa)).toEqual(['sparse-indexer']);
+    expect(featuresOf(run({ engram_layer_ids: [1] }))).toEqual(['lookup-tables']);
+    expect(featuresOf(run({ ngram_vocab_size_base: 20000000 }))).toEqual(['lookup-tables']);
+    expect(featuresOf(run({ ple_layer_ids: [] }))).toEqual([]);
+    const memt = run({ memt: { layers: [1, 3], num_memory_heads: 4, head_dim: 64, chunk_tokens: 16 } });
+    expect(memt.model?.extraCache).toEqual({ bytesPerToken: 0, stateBytes: 2 * (4 * 64 * 64 * 4 + 16 * 2 * 2 * 128 * 2) });
+    expect(featuresOf(memt)).toEqual(['memory-layers']);
+    // A nested backbone config is read, not refused.
+    const nested = parseHfConfig('example/nested', SHA, { backbone_configs: { text_config: base } }, 1e9, opts('Example Lab', 'US'));
+    expect(nested.model).toMatchObject({ layers: 4, hidden: 1024 });
+    // KDA without layer_types (Ling bailing_hybrid): every layer keeps attention AND a state (upper bound).
+    const kda = run({ kda_lower_bound: -5 });
+    expect(kda.model?.extraCache?.stateBytes).toBe(4 * 8 * 128 * 128 * 4);
+    expect(featuresOf(kda)).toEqual(['linear-attention']);
+    // Hyper-connections change nothing the calculator sizes: a note.
     const hc = run({ hc_mult: 4 });
-    expect(hc.model).toBeDefined();
+    expect(featuresOf(hc)).toEqual([]);
     expect(hc.notes.some((n) => n.startsWith('hyper-connections (4 residual streams)'))).toBe(true);
   });
-
-  it('dense layers beside MoE in every spelling, and two expert widths, fail closed', () => {
-    const moe = {
-      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
-      num_experts: 16, num_experts_per_tok: 2, moe_intermediate_size: 256, hidden_act: 'silu',
-    };
-    const run = (extra: Record<string, unknown>) => parseHfConfig('example/moe', SHA, { ...moe, ...extra }, 1e9, opts('Example Lab', 'US'));
-    expect(run({ num_dense_layers: 2 }).unsupported).toEqual([
-      { feature: 'dense-and-moe', detail: 'num_dense_layers 2', fields: ['num_dense_layers 2 (dense MLP layers mixed with MoE not supported)'] },
-    ]);
-    expect(run({ mlp_layer_types: ['dense', 'sparse', 'sparse', 'sparse'] }).unsupported[0]?.detail).toBe('mlp_layer_types "dense" × 1');
-    expect(run({ mlp_layer_types: ['sparse', 'sparse', 'sparse', 'sparse'] }).unsupported).toEqual([]);
-    expect(run({ expert_hidden_dim: 768 }).unsupported.map((u) => u.feature)).toEqual(['moe-layout']);
-    expect(run({ expert_hidden_dim: 256 }).unsupported).toEqual([]);
-  });
-
-  it('an unknown layer type is reported once with its layer count, not once per layer (issue #17)', () => {
+  it('linear-attention and short-conv layers keep a fixed state; an unknown layer type is full attention (estimates)', () => {
     const cfg = {
-      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8,
+      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 4, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
       layer_types: ['linear_attention', 'linear_attention', 'linear_attention', 'full_attention'],
+      linear_num_key_heads: 4, linear_num_value_heads: 8, linear_key_head_dim: 64, linear_value_head_dim: 64, linear_conv_kernel_dim: 4,
     };
     const r = parseHfConfig('example/hybrid-linear', SHA, cfg, 1e9, opts('Example Lab', 'US'));
-    expect(r.missing).toEqual(['layer_types: unknown type "linear_attention"']);
-    expect(r.unsupported).toEqual([{
-      feature: 'linear-attention', detail: 'layer_types "linear_attention" on 3 of 4 layers', fields: ['layer_types: unknown type "linear_attention"'],
-    }]);
-    const other = parseHfConfig('example/chunked', SHA, { ...cfg, layer_types: ['chunked_attention', 'full_attention', 'full_attention', 'full_attention'] }, 1e9, opts('Example Lab', 'US'));
-    expect(other.unsupported.map((u) => u.feature)).toEqual(['unknown-layer-type']);
+    const state = 8 * 64 * 64 * 4 + (2 * 4 * 64 + 8 * 64) * 4 * 2;
+    expect(r.model?.layerGroups).toEqual([{ kind: 'state', count: 3, stateBytes: state }, { kind: 'full', count: 1, kvHeads: 2, headDim: 128 }]);
+    expect(r.model?.estimates).toHaveLength(1);
+    expect(featuresOf(r)).toEqual(['linear-attention']);
+    const conv = parseHfConfig('example/conv', SHA, { ...cfg, layer_types: ['conv', 'conv', 'full_attention', 'conv'], conv_L_cache: 3 }, 1e9, opts('Example Lab', 'US'));
+    expect(conv.model?.layerGroups?.[0]).toEqual({ kind: 'state', count: 3, stateBytes: 1024 * 3 * 2 });
+    expect(featuresOf(conv)).toEqual(['short-conv']);
+    const other = parseHfConfig('example/chunked', SHA, { ...cfg, layer_types: ['chunked_attention', 'chunked_attention', 'full_attention', 'full_attention'] }, 1e9, opts('Example Lab', 'US'));
+    expect(other.model?.layerGroups).toEqual([{ kind: 'full', count: 4, kvHeads: 2, headDim: 128 }]);
+    expect(other.model?.estimates).toEqual([{ feature: 'unknown-layer-type', detail: 'layer_types "chunked_attention" on 2 of 4 layers: sized as full attention' }]);
   });
-
-  it('unknown layer type is missing, not guessed', () => {
-    const cfg = {
-      hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 2, num_attention_heads: 8,
-      layer_types: ['full_attention', 'chunked_attention'],
-    };
-    const r = parseHfConfig('example/unknown-layer', SHA, cfg, 1e9, opts('Example Lab', 'US'));
-    expect(r.missing).toContain('layer_types: unknown type "chunked_attention"');
-    expect(r.model).toBeUndefined();
-  });
-
   it('implicit defaults are reported as notes, never silent (review M5)', () => {
     // phi-4 omits head_dim: hidden ÷ heads is an implicit default too, so it is noted (final-review M21).
     expect(parseHfConfig('microsoft/phi-4', SHA, fixture('phi-4'), 14659507200, opts('Microsoft', 'US')).notes).toEqual([
@@ -291,26 +283,23 @@ describe('parseHfConfig', () => {
     expect(missing).toEqual([]);
     expect(model?.layerGroups).toEqual([
       { kind: 'mamba', count: 3, ssm: { heads: 16, headDim: 64, stateSize: 128, stateBytesPerElem: 2 } },
+      { kind: 'none', count: 2 },
       { kind: 'full', count: 1, kvHeads: 2, headDim: 128 },
     ]);
   });
-
-  it('mamba_ssm_cache_dtype: bfloat16/float16 → 2, unknown dtype is missing', () => {
+  it('mamba_ssm_cache_dtype: bfloat16/float16 → 2; an unknown dtype is estimated at 4 bytes', () => {
     const base = {
       hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 2, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
       hybrid_override_pattern: 'M*', mamba_num_heads: 16, mamba_head_dim: 64, ssm_state_size: 128,
     };
-    const bytes = (dtype: string) =>
-      parseHfConfig('example/hybrid', SHA, { ...base, mamba_ssm_cache_dtype: dtype }, 1e9, opts('Example Lab', 'US'))
-        .model?.layerGroups?.[0]?.ssm?.stateBytesPerElem;
+    const parse = (dtype: string) => parseHfConfig('example/hybrid', SHA, { ...base, mamba_ssm_cache_dtype: dtype }, 1e9, opts('Example Lab', 'US'));
+    const bytes = (dtype: string) => parse(dtype).model?.layerGroups?.[0]?.ssm?.stateBytesPerElem;
     expect(bytes('float32')).toBe(4);
     expect(bytes('bfloat16')).toBe(2);
     expect(bytes('float16')).toBe(2);
-    const r = parseHfConfig('example/hybrid', SHA, { ...base, mamba_ssm_cache_dtype: 'int3' }, 1e9, opts('Example Lab', 'US'));
-    expect(r.missing).toContain('mamba_ssm_cache_dtype: unknown dtype "int3"');
-    expect(r.model).toBeUndefined();
+    expect(bytes('int3')).toBe(4);
+    expect(featuresOf(parse('int3'))).toEqual(['unknown-layer-type']);
   });
-
   it('sliding_window without a per-layer type field: one sliding group over all layers', () => {
     const cfg = {
       hidden_size: 1024, vocab_size: 32000, num_hidden_layers: 12, num_attention_heads: 8, num_key_value_heads: 2, head_dim: 128,
@@ -389,15 +378,31 @@ describe('native quantization (quantization_config) and checkpoint bytes', () =>
     expect(r.missing).toEqual(['checkpoint weight bytes (model.safetensors.index.json file sizes)']);
   });
 
-  it('an unknown quant_method, a missing quant_method or compression_config fails closed', () => {
+  it('an unmodelled native format is the native-other estimate, sized by its checkpoint bytes (issue #17)', () => {
     const cfg = (qc: Record<string, unknown>) => ({ ...(fixture('phi-4') as Record<string, unknown>), ...qc });
-    const miss = (qc: Record<string, unknown>) =>
-      parseHfConfig('microsoft/phi-4', SHA, cfg(qc), 14659507200, opts('Microsoft', 'US', { checkpointWeightBytes: 1e9 })).missing;
-    expect(miss({ quantization_config: { quant_method: 'gptq', bits: 4 } })).toEqual(['quantization_config.quant_method "gptq" (native quantization not supported)']);
-    expect(miss({ quantization_config: { bits: 4 } })).toEqual(['quantization_config.quant_method']);
-    expect(miss({ compression_config: { format: 'pack-quantized' } })).toEqual(['compression_config (native quantization not supported)']);
-    // Inherited object keys are not methods.
-    expect(miss({ quantization_config: { quant_method: 'toString' } })).toEqual(['quantization_config.quant_method "toString" (native quantization not supported)']);
+    const parse = (qc: Record<string, unknown>) =>
+      parseHfConfig('microsoft/phi-4', SHA, cfg(qc), 14659507200, opts('Microsoft', 'US', { checkpointWeightBytes: 1e9 }));
+    for (const qc of [
+      { quantization_config: { quant_method: 'gptq', bits: 4 } },
+      { quantization_config: { bits: 4 } },
+      { compression_config: { format: 'pack-quantized' } },
+      // Inherited object keys are not methods.
+      { quantization_config: { quant_method: 'toString' } },
+      // FP8 with FP4 experts is not the fp8 format.
+      { quantization_config: { quant_method: 'fp8', expert_dtype: 'fp4' } },
+    ]) {
+      const r = parse(qc);
+      expect(r.model?.nativeQuant).toMatchObject({ quant: 'native-other', checkpointWeightBytes: { value: 1e9 } });
+      expect(featuresOf(r)).toEqual(['native-quant']);
+    }
+    // ModelOpt FP8 written into config.json (lm_head excluded) is the modelled fp8 format.
+    const fp8 = parse({ quantization_config: { quant_method: 'modelopt', quant_algo: 'FP8', exclude_modules: ['lm_head'] } });
+    expect(fp8.model?.nativeQuant).toMatchObject({ method: 'modelopt', quant: 'fp8' });
+    expect(featuresOf(fp8)).toEqual([]);
+    // A packed checkpoint takes its base model's parameter count.
+    const packed = parseHfConfig('microsoft/phi-4', SHA, cfg({ quantization_config: { quant_method: 'modelopt', quant_algo: 'NVFP4' } }), 7e9,
+      opts('Microsoft', 'US', { checkpointWeightBytes: 8e9, baseParams: { repo: 'microsoft/phi-4', total: 14659507200 } }));
+    expect(packed.model?.totalParamsB).toMatchObject({ value: 14.6595072, status: 'estimate', evidence: [`hf:microsoft/phi-4@${SHA.slice(0, 7)}`] });
   });
 
   describe('ModelOpt hf_quant_config.json (no quantization_config in config.json)', () => {
@@ -429,18 +434,18 @@ describe('native quantization (quantization_config) and checkpoint bytes', () =>
       expect(model).toMatchObject({ layers: 80, heads: 64, kvHeads: 8, headDim: 128, hidden: 8192, vocabSize: 128256, tieWordEmbeddings: false });
     });
 
-    it('without hf_quant_config.json the importer would size it as BF16; with a quantized lm_head or another algo it fails closed', () => {
+    it('a quantized lm_head, another algo or another producer is the native-other estimate; no checkpoint bytes is a bug', () => {
       const lmHeadQuantized = hq();
       lmHeadQuantized.quantization.exclude_modules = [];
-      expect(parse(lmHeadQuantized).missing).toEqual([
-        'hf_quant_config.json exclude_modules without lm_head (an FP8 lm_head is not modelled: embedding / lm_head are sized 16-bit)',
-      ]);
       const nvfp4 = hq();
       nvfp4.quantization.quant_algo = 'NVFP4';
-      expect(parse(nvfp4).missing).toEqual(['hf_quant_config.json quant_algo "NVFP4" (native quantization not supported)']);
       const other = hq();
       other.producer.name = 'someone-else';
-      expect(parse(other).missing).toEqual(['hf_quant_config.json producer "someone-else" (native quantization not supported)']);
+      for (const x of [lmHeadQuantized, nvfp4, other]) {
+        const r = parse(x);
+        expect(r.model?.nativeQuant?.quant).toBe('native-other');
+        expect(featuresOf(r)).toEqual(['native-quant']);
+      }
       expect(parse(hq(), { checkpointWeightBytes: null }).missing).toEqual(['checkpoint weight bytes (model.safetensors.index.json file sizes)']);
     });
   });
@@ -501,7 +506,7 @@ describe('importer notes every implicit default and honours use_sliding_window (
     expect(unknown.model?.tieWordEmbeddings).toBe(false);
     expect(unknown.notes.join('\n')).toContain('conservative');
   });
-  it('use_sliding_window false: the window is ignored (transformers sets it to None); with sliding layer types it fails closed', () => {
+  it('use_sliding_window false: the window is ignored; beside sliding layer types those layers are full attention (estimate)', () => {
     const cfg = { ...base, head_dim: 128, sliding_window: 4096, use_sliding_window: false };
     const r = run(cfg);
     expect(r.missing).toEqual([]);
@@ -509,8 +514,8 @@ describe('importer notes every implicit default and honours use_sliding_window (
     expect(r.model?.slidingWindow).toBeNull();
     expect(r.notes.join('\n')).toContain('use_sliding_window false');
     const amb = run({ ...cfg, layer_types: ['sliding_attention', 'full_attention', 'sliding_attention', 'full_attention'] });
-    expect(amb.model).toBeUndefined();
-    expect(amb.missing.join('\n')).toContain('use_sliding_window false');
+    expect(amb.model?.layerGroups).toEqual([{ kind: 'full', count: 4, kvHeads: 2, headDim: 128 }]);
+    expect(featuresOf(amb)).toEqual(['sliding-window']);
     // sliding_window 0 means disabled (vLLM converts 0 to None).
     const zero = run({ ...base, head_dim: 128, sliding_window: 0 });
     expect(zero.model?.slidingWindow).toBeNull();

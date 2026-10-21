@@ -341,13 +341,13 @@ describe('validateConfig', () => {
     ]);
   });
 
-  it('mla-unsupported: MLA with layerGroups or a sliding window is rejected as not supported yet (Ruling R22)', () => {
+  it('mla-unsupported: MLA with a sliding layer group or a sliding window is rejected as not supported yet (Ruling R22)', () => {
     const e = errors('mla-unsupported');
     expect(e).toEqual([
       expect.objectContaining({
         file: 'models/fx-mla-groups.yaml',
         path: 'models.fx-mla-groups.layerGroups',
-        message: expect.stringContaining("architecture combination not supported yet: attention 'mla' with layerGroups"),
+        message: expect.stringContaining("architecture combination not supported yet: attention 'mla' with a sliding layer group"),
       }),
       expect.objectContaining({
         file: 'models/fx-mla-window.yaml',

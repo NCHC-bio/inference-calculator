@@ -79,7 +79,7 @@ export function attentionFlop(m: Model, ctx: number, phase: 'decode' | 'prefill'
   if (m.layerGroups) {
     let total = 0;
     for (const g of m.layerGroups) {
-      if (g.kind === 'mamba' || g.kind === 'state') continue;
+      if (g.kind !== 'full' && g.kind !== 'sliding') continue;
       const tokens = g.kind === 'sliding' && g.window !== undefined ? Math.min(ctx, g.window) : ctx;
       total += g.count * perLayer(g.headDim ?? m.headDim, tokens);
     }
