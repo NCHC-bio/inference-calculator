@@ -141,7 +141,7 @@ export const QueryInputSchema = z.strictObject({
 });
 export type QueryInput = z.input<typeof QueryInputSchema>;
 
-const RequirementInputSchema = QueryInputSchema.extend({ users: usersSchema });
+export const RequirementInputSchema = QueryInputSchema.extend({ users: usersSchema });
 /** estimateRequirements input: a QueryInput whose `users` is required. */
 export type RequirementInput = z.input<typeof RequirementInputSchema>;
 /** Capacity input: no `users` (the capacity is the answer; final-review M16 — it used to be accepted and ignored). */
@@ -400,8 +400,10 @@ export function resolvePlatform(
  * The Ctx for one platform: KV bytes per element = the platform's engine override when its
  * calibration profile has one (Ruling R32, e.g. MLX fp16 KV), else the quantization's. Adds the
  * value actually used to the basis, so the basis shows which one applied.
+ *
+ * Internal: used by performance.ts; not re-exported from index.ts.
  */
-function ctxForPlatform(
+export function ctxForPlatform(
   ctx: Ctx,
   quant: Quantization,
   resolved: {
@@ -465,8 +467,10 @@ function ctxForPlatform(
  * Add vLLM max_num_batched_tokens and the queueing rule (Little's law, Ruling R36) when the queueing model was evaluated
  * on a chosen shape: a null queue ("all decode within the budget") depends on them as much as a wait does, and the
  * wait enters the TTFT, the feasibility and the GPU count. MLX has no budget and adds nothing.
+ *
+ * Internal: used by performance.ts; not re-exported from index.ts.
  */
-function addQueueingBasis(
+export function addQueueingBasis(
   basis: BasisCollector,
   bundle: Bundle,
   resolved: { platform: ApiPlatform; vllmDefaultsBasis?: { maxNumBatchedTokens: BasisItem } },
@@ -480,8 +484,11 @@ function addQueueingBasis(
   }
 }
 
-/** Add the link bandwidth / all-reduce latency only when a chosen shape actually communicates (finding 7). */
-function addCommBasis(basis: BasisCollector, ctx: Ctx, commBasis: BasisItem[], shapes: Array<Shape | null | undefined>): void {
+/**
+ * Add the link bandwidth / all-reduce latency only when a chosen shape actually communicates (finding 7).
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export function addCommBasis(basis: BasisCollector, ctx: Ctx, commBasis: BasisItem[], shapes: Array<Shape | null | undefined>): void {
   if ((ctx.includeComm ?? true) && shapes.some((s) => s && s.tp > 1)) basis.add(...commBasis);
 }
 
@@ -740,7 +747,7 @@ function weightSizing(model: Model, res: QuantResolution, basis: BasisCollector)
   return { bytesPerParam: bpp, weights: { resident, expert: expertParams * bpp, ...emb } };
 }
 
-type Prepared = {
+export type Prepared = {
   ctx: Ctx;
   quant: Quantization;
   res: QuantResolution;
@@ -749,8 +756,11 @@ type Prepared = {
   warnings: ResultWarning[];
 };
 
-/** A verify command copied out on its own still carries the result's warnings, as leading comment lines. */
-function withWarnings(v: { verifyCommand: string; verifyNote?: string }, warnings: ResultWarning[]): typeof v {
+/**
+ * A verify command copied out on its own still carries the result's warnings, as leading comment lines.
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export function withWarnings(v: { verifyCommand: string; verifyNote?: string }, warnings: ResultWarning[]): typeof v {
   if (v.verifyCommand === '' || warnings.length === 0) return v;
   return { ...v, verifyCommand: [...warnings.map((w) => `# ${w.text}`), v.verifyCommand].join('\n') };
 }
@@ -834,7 +844,8 @@ function prepareCommon(
   return { ctx, quant: q, res };
 }
 
-function prepare(bundle: Bundle, input: z.infer<typeof QueryInputSchema>): Prepared {
+/** Internal: used by performance.ts; not re-exported from index.ts. */
+export function prepare(bundle: Bundle, input: z.infer<typeof QueryInputSchema>): Prepared {
   const basis = new BasisCollector();
   const rm = resolveModel(bundle, input.model);
   basis.add(...rm.basis);
@@ -842,8 +853,11 @@ function prepare(bundle: Bundle, input: z.infer<typeof QueryInputSchema>): Prepa
   return { ctx, quant, res, basis, warnings: rm.warnings };
 }
 
-/** Quantization fields every result carries: the resolved id, the model's native format, re-quantization flag. */
-type QuantFields = {
+/**
+ * Quantization fields every result carries: the resolved id, the model's native format, re-quantization flag.
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export type QuantFields = {
   /** Quantization id actually used ('native' resolved). */
   quant: string;
   /** The model's native quantization (absent for an unquantized checkpoint); the UI defaults to it. */
@@ -853,7 +867,8 @@ type QuantFields = {
   quantNote?: string;
 };
 
-function quantFields(model: Model, res: QuantResolution): QuantFields {
+/** Internal: used by performance.ts; not re-exported from index.ts. */
+export function quantFields(model: Model, res: QuantResolution): QuantFields {
   const nq = nativeQuantOut(model);
   return {
     quant: res.quant.id,
@@ -1203,8 +1218,10 @@ export function verifyCommand(
  *   evaluated (final-review M17) and a note that it is expected to fail and why (review M-8).
  * Adds the benchmark margin, the pinned max_num_batched_tokens (final-review M9) and, when pinned, the max_num_seqs
  * default to `basis`.
+ *
+ * Internal: used by performance.ts; not re-exported from index.ts.
  */
-function verifyFor(
+export function verifyFor(
   bundle: Bundle,
   ctx: Ctx,
   quant: Quantization,

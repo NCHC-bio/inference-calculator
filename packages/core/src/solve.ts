@@ -453,7 +453,7 @@ export function contextDetail(ctx: Pick<Ctx, 'model' | 'workload'>): string {
 }
 
 /** How far a single-user check got before failing, in the reporting order of Ruling R24 / R25. */
-const progress = (c: ReturnType<typeof checkShape>, maxTtftSec: number, minTokPerSec: number): number =>
+export const progress = (c: ReturnType<typeof checkShape>, maxTtftSec: number, minTokPerSec: number): number =>
   c.why === 'context' ? -1
     : c.why === 'weights' ? 0
       : c.why === 'mem' ? 1
@@ -659,6 +659,8 @@ export type SpeedPoint = {
   aggregateTokPerSec: number;
   /** TTFT incl. the queueing wait. */
   ttftSec: number;
+  /** What breaks at this many users (checkShape why); null when the shape serves them. */
+  why: Why | null;
 };
 
 /** Points of the speed curve (final-review I3): this many n from 1 up to the capacity, evenly spaced. */
@@ -679,18 +681,19 @@ export function shapeProfile(
   shape: Shape,
   n: number,
   eta: EtaMode,
+  pointCount = SPEED_CURVE_POINTS,
 ): { memoryOnlyMax: number; bottleneck: Why | null; speedCurve: { shape: Shape; points: SpeedPoint[] } | null } {
   const one = checkShape(ctx, platform, shape, 1, eta);
   const memoryOnlyMax = one.why === 'context' || one.why === 'weights' ? 0 : Math.min(MAX_N, one.capacityPerReplica * shape.replicas);
   const bottleneck = n >= MAX_N ? null : checkShape(ctx, platform, shape, n + 1, eta).why;
   if (n < 1) return { memoryOnlyMax, bottleneck, speedCurve: null };
-  const ns = [...new Set(Array.from({ length: SPEED_CURVE_POINTS }, (_, i) => Math.max(1, Math.round(((i + 1) * n) / SPEED_CURVE_POINTS))))];
+  const ns = [...new Set(Array.from({ length: pointCount }, (_, i) => Math.max(1, Math.round(((i + 1) * n) / pointCount))))];
   const points = ns.map((users) => {
     const c = checkShape(ctx, platform, shape, users, eta);
     const gen = concurrencyFor(users, ctx.kind, ctx.agentShare).generating;
     const perReplica = Math.ceil(gen / shape.replicas);
     const decoding = Math.min(gen, shape.replicas * (c.queueing ? c.queueing.decodingMax : perReplica));
-    return { users, tokPerSecPerUser: c.tokPerSecPerUser, aggregateTokPerSec: decoding * c.tokPerSecPerUser, ttftSec: c.ttftSec };
+    return { users, tokPerSecPerUser: c.tokPerSecPerUser, aggregateTokPerSec: decoding * c.tokPerSecPerUser, ttftSec: c.ttftSec, why: c.why };
   });
   return { memoryOnlyMax, bottleneck, speedCurve: { shape, points } };
 }

@@ -47,3 +47,12 @@ export { legalTpOptions } from './solve';
 /** Per-shape usage for the web detail panel (spec §8.3.3). */
 export { shapeUsage } from './solve';
 export type { Replica, WorkloadIn } from './timing';
+/** Performance of a chosen platform, GPU count and user count (spec 2026-10-21 §5.1). */
+export {
+  estimatePerformance,
+  PerformanceInputSchema,
+  PERFORMANCE_CURVE_POINTS,
+  type PerformanceInput,
+  type PerformanceResult,
+  type SplitEval,
+} from './performance';
