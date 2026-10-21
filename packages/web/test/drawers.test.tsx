@@ -336,6 +336,40 @@ describe('ManualModelDrawer', () => {
   });
 });
 
+describe('ManualModelDrawer re-save (v8 minor 7)', () => {
+  const moeModel = {
+    name: 'Sparse',
+    totalParamsB: 20,
+    layers: 24,
+    heads: 64,
+    kvHeads: 8,
+    headDim: 64,
+    hidden: 2880,
+    moe: { experts: 32, topK: 4, expertFfnDim: 2880 },
+    slidingWindow: 128,
+  };
+
+  it('keeps the fields the form does not edit and says which', async () => {
+    const seeded: CalcState = { ...defaultState(b), model: 'custom', customModel: { kind: 'manual', value: moeModel } };
+    renderWith(<ManualModelDrawer />, '?' + encodeUrl(seeded));
+    expect(state().customModel).toEqual({ kind: 'manual', value: moeModel });
+    openDialog({ type: 'dialog', id: 'manualModel' });
+    const d = await drawer();
+    expect(within(d).getByTestId('manual-kept')).toHaveTextContent('moe、slidingWindow');
+    await fill(d, /層數/, '20');
+    await userEvent.click(within(d).getByRole('button', { name: '加入' }));
+    await waitFor(() => expect(state().customModel).toEqual({ kind: 'manual', value: { ...moeModel, layers: 20 } }));
+  });
+
+  it('a plain model shows no kept-fields note', async () => {
+    const plain = { name: 'Plain', totalParamsB: 8, layers: 32, heads: 32, kvHeads: 8, headDim: 128, hidden: 4096 };
+    renderWith(<ManualModelDrawer />, '?' + encodeUrl({ ...defaultState(b), model: 'custom', customModel: { kind: 'manual', value: plain } }));
+    openDialog({ type: 'dialog', id: 'manualModel' });
+    const d = await drawer();
+    expect(within(d).queryByTestId('manual-kept')).toBeNull();
+  });
+});
+
 describe('HfImportDrawer', () => {
   const origin = async (d: HTMLElement) => {
     await fill(d, /發表者（/, 'Test Org');

@@ -283,6 +283,7 @@ const zhTW = {
   'manual.add': '加入',
   'manual.added': '已加入模型',
   'manual.issues': '架構不合法：',
+  'manual.kept': '此表單不編輯 {fields}，儲存時沿用原本的值',
   'manual.hint': '數字可在模型的 config.json 找到（num_hidden_layers、num_attention_heads、num_key_value_heads、head_dim、hidden_size）。這裡只描述一般的 GQA 架構；MoE、MLA 等請改用 Hugging Face 匯入。',
   'hw.title.add': '新增你的硬體',
   'hw.title.edit': '編輯你的硬體',

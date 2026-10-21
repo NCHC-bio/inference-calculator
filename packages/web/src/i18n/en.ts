@@ -280,6 +280,7 @@ const en = {
   'manual.add': 'Add',
   'manual.added': 'Model added',
   'manual.issues': 'Invalid architecture:',
+  'manual.kept': 'This form does not edit {fields}; saving keeps their current values',
   'manual.hint': 'The numbers are in the model’s config.json (num_hidden_layers, num_attention_heads, num_key_value_heads, head_dim, hidden_size). This form describes a plain GQA model; for MoE, MLA and others import from Hugging Face.',
   'hw.title.add': 'Add your hardware',
   'hw.title.edit': 'Edit your hardware',

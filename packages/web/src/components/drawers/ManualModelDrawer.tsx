@@ -1,7 +1,7 @@
 import { ModelOverrideSchema, type ModelOverride } from '@nchc/core';
 import { Alert, App as AntApp, Button, Form, Input, InputNumber, Typography } from 'antd';
 import { useState, type JSX } from 'react';
-import { useT, type MsgKey } from '../../i18n';
+import { useLang, useT, type MsgKey } from '../../i18n';
 import { useCalc } from '../../state/store';
 import { CalcDrawer } from './CalcDrawer';
 
@@ -16,16 +16,23 @@ const FIELDS: { key: Num; label: MsgKey; int: boolean }[] = [
   { key: 'hidden', label: 'manual.hidden', int: true },
 ];
 type Values = { name?: string } & Partial<Record<Num, number>>;
+const FORM_KEYS: ReadonlySet<string> = new Set(['name', ...FIELDS.map((f) => f.key)]);
 
 function Body(): JSX.Element {
   const tr = useT();
   const [s, dispatch] = useCalc();
   const { message } = AntApp.useApp();
   const [issues, setIssues] = useState<string[]>([]);
+  const lang = useLang();
   const current = s.customModel?.kind === 'manual' ? s.customModel.value : undefined;
+  // Fields of the model being edited that this form does not show (moe, mla, layerGroups, slidingWindow, …): kept as
+  // they are on re-save, and listed so the user knows (v8 minor 7).
+  const kept = current ? Object.keys(current).filter((k) => !FORM_KEYS.has(k)) : [];
   const submit = (v: Values) => {
     const name = v.name?.trim();
+    const { name: _oldName, ...rest } = current ?? {};
     const value: ModelOverride = {
+      ...rest,
       ...(name ? { name } : {}),
       totalParamsB: v.totalParamsB!,
       layers: v.layers!,
@@ -57,6 +64,15 @@ function Body(): JSX.Element {
           description={issues.map((x) => (
             <div key={x}>{x}</div>
           ))}
+        />
+      )}
+      {kept.length > 0 && (
+        <Alert
+          data-testid="manual-kept"
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          title={tr('manual.kept', { fields: kept.join(lang === 'en' ? ', ' : '、') })}
         />
       )}
       <Form<Values>
