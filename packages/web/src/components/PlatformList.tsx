@@ -86,6 +86,9 @@ export function PlatformList(): JSX.Element | null {
         className="rows"
         ghost
         accordion
+        // A closed row's workbench unmounts after its leave motion, so its typing clock, tweens and chart
+        // transitions stop (v8 minor 1); Workbench keeps its last bench only for that leave animation.
+        destroyOnHidden
         activeKey={open === undefined ? [] : [open]}
         onChange={(keys) => dispatch({ type: 'openRow', row: keys[0] ?? null })}
         items={items}

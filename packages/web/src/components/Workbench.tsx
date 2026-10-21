@@ -369,7 +369,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
  * nobody (no usage): only the reason and the suggested actions.
  *
  * Bench data is computed only while this row is open; a closed row keeps its last bench so the close animation still
- * has content.
+ * has content; the list's Collapse (`destroyOnHidden`) unmounts it once that animation ends.
  */
 export function Workbench({ row }: { row: OkRow }): JSX.Element | null {
   const tr = useT();

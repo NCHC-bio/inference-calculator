@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { PlatformList } from '../src/components/PlatformList';
@@ -310,5 +310,32 @@ describe('QueueLine', () => {
     const { container } = renderStore(<QueueLine queueing={null} />);
     expect(container.textContent).not.toMatch(/排隊/);
     expect(screen.queryByTestId('queue-line')).toBeNull();
+  });
+});
+
+describe('closed rows stop their clocks (v8 minor 1)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('after the close animation no interval or frame from the row is left running', async () => {
+    const live = new Set<unknown>();
+    const realSet = globalThis.setInterval;
+    const realClear = globalThis.clearInterval;
+    vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
+      const id = realSet(fn, ms);
+      live.add(id);
+      return id;
+    }) as typeof setInterval);
+    vi.spyOn(globalThis, 'clearInterval').mockImplementation(((id?: ReturnType<typeof setInterval>) => {
+      live.delete(id);
+      realClear(id);
+    }) as typeof clearInterval);
+    const wb = await openBench('');
+    expect(within(wb).getByTestId('typed')).toBeInTheDocument();
+    await waitFor(() => expect(live.size).toBeGreaterThan(0));
+    await userEvent.click(within(rowOf(H200)).getByTestId('row-name'));
+    // Past the 400 ms close animation.
+    await new Promise((r) => setTimeout(r, 700));
+    expect(live.size).toBe(0);
+    expect(within(rowOf(H200)).queryByTestId('workbench')).toBeNull();
   });
 });
