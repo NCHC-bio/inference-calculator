@@ -9,7 +9,7 @@ const s0 = defaultState(b);
 // Test fixtures (not catalog values).
 const gpu = (name: string): CustomPlatformInput => ({ name, unit: 'gpu', gpusPerNode: 8, memGB: 80, memBwTBs: 3, tflops: 900, engine: 'vllm' });
 const manual = { name: 'My 8B', totalParamsB: 8, layers: 32, heads: 32, kvHeads: 8, headDim: 128, hidden: 4096 };
-const pin: Omit<Pin, 'id'> = { platform: 'H200', count: '8', model: 'M', users: 15, tps: 30, ttft: 1, max: 40, kw: null };
+const pin: Omit<Pin, 'id'> = { platform: 'H200', count: '8', model: 'M', users: 15, tps: 30, ttft: 1, max: 40, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] };
 
 const run = (s: CalcState, ...as: Action[]) => as.reduce((x, a) => reduce(b, x, a), s);
 

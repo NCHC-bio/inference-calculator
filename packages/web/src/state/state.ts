@@ -8,6 +8,7 @@ import {
   resolveModel,
   type CustomPlatformInput,
   type ModelOverride,
+  type ResultWarning,
 } from '@nchc/core';
 import type { Lang } from '../i18n/t';
 
@@ -35,6 +36,11 @@ export type Pin = {
   ttft: number | null;
   max: number;
   kw: number | null;
+  /** Trust flags of the pinned result (spec §2.1): the comparison marks a miss, estimates, custom values and warnings. */
+  ok: boolean;
+  hasEstimate: boolean;
+  hasUser: boolean;
+  warnings: ResultWarning[];
 };
 export type DialogId = 'basis' | 'cite' | 'verify' | 'accuracy' | 'funnel' | 'workload' | 'speed' | 'hf' | 'manualModel' | 'hardware';
 export type BasisFilter = 'est' | 'all';

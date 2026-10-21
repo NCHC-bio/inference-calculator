@@ -32,7 +32,7 @@ describe('url', () => {
       customPlatforms: [gpu, mac],
       overrides: { 'nano4-h200': { gpus: 8, tp: 2 }, 'custom:0': { gpus: 4 }, 'custom:1': { gpus: 3 } },
       openRow: 'custom:0',
-      pins: [{ id: 1, platform: 'H200', count: '8', model: 'M', users: 1, tps: 1, ttft: 1, max: 1, kw: null }],
+      pins: [{ id: 1, platform: 'H200', count: '8', model: 'M', users: 1, tps: 1, ttft: 1, max: 1, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] }],
       dialog: 'hardware',
       editingPlatform: 1,
     };

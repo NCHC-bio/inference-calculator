@@ -212,6 +212,8 @@ const zhTW = {
   'compare.ttft': '首字（秒）',
   'compare.max': '上限人數',
   'compare.kw': '功耗 kW',
+  'compare.ok': '達到速度目標',
+  'compare.miss': '未達速度目標',
   'footer.cost': '費用：尚未包含',
   'footer.cost.tip': '國網計費費率尚未取得，結果只顯示卡數與功耗',
   'footer.p95': '尾端延遲（P95）：尚未估算',

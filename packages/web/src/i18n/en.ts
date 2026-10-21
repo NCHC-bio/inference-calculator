@@ -209,6 +209,8 @@ const en = {
   'compare.ttft': 'First word (s)',
   'compare.max': 'Max users',
   'compare.kw': 'Power kW',
+  'compare.ok': 'Meets the speed target',
+  'compare.miss': 'Misses the speed target',
   'footer.cost': 'Cost: not included',
   'footer.cost.tip': 'NCHC billing rates are not available yet; results show only card count and power',
   'footer.p95': 'Tail latency (P95): not estimated',

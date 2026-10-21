@@ -1,16 +1,18 @@
-import { DeleteOutlined, PushpinOutlined } from '@ant-design/icons';
-import { Button, Card, Table } from 'antd';
+import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, PushpinOutlined } from '@ant-design/icons';
+import { Alert, Button, Card, Flex, Table, Tag, theme } from 'antd';
 import { useRef, type JSX } from 'react';
 import { useLang, useT } from '../i18n';
 import type { Pin } from '../state/state';
 import { useCalc } from '../state/store';
+import { STATUS_COLOR } from './BasisModal';
 
 const fmt = (lang: string, n: number, d = 0) => new Intl.NumberFormat(lang, { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
 
 /**
  * Pinned setups side by side (design §4 item 6). The card is always mounted inside a `.reveal` so the first pin grows it
  * open and the last removal closes it; it keeps the last rows while closing so the content does not vanish first.
- * Pins are snapshots taken when 加入比較 was pressed.
+ * Pins are snapshots taken when 加入比較 was pressed, trust flags included (spec §2.1): a miss, 推估 and 自訂 are marked
+ * per row and the warnings of any pin show under the table.
  */
 export function CompareTable(): JSX.Element {
   const tr = useT();
@@ -19,6 +21,8 @@ export function CompareTable(): JSX.Element {
   const shown = useRef<Pin[]>(pins);
   if (pins.length > 0) shown.current = pins;
   const rows = shown.current;
+  const { token } = theme.useToken();
+  const warnings = [...new Map(rows.flatMap((p) => p.warnings).map((w) => [w.code, w])).values()];
   const num = (v: number | null, d = 0) => (v === null ? tr('status.unverified') : fmt(lang, v, d));
   return (
     <div className={'reveal' + (pins.length > 0 ? ' on' : '')} inert={pins.length === 0} aria-hidden={pins.length === 0}>
@@ -46,7 +50,30 @@ export function CompareTable(): JSX.Element {
             dataSource={rows}
             rowKey="id"
             columns={[
-              { title: tr('compare.platform'), dataIndex: 'platform' },
+              {
+                title: tr('compare.platform'),
+                dataIndex: 'platform',
+                render: (v: string, p) => (
+                  <Flex gap={4} align="center" wrap="wrap">
+                    {p.ok ? (
+                      <CheckCircleOutlined aria-label={tr('compare.ok')} title={tr('compare.ok')} style={{ color: token.colorSuccess }} />
+                    ) : (
+                      <CloseCircleOutlined aria-label={tr('compare.miss')} title={tr('compare.miss')} style={{ color: token.colorError }} />
+                    )}
+                    <span>{v}</span>
+                    {p.hasEstimate && (
+                      <Tag color={STATUS_COLOR.estimate} style={{ borderStyle: 'dashed', marginInlineEnd: 0 }}>
+                        {tr('tag.estimate')}
+                      </Tag>
+                    )}
+                    {p.hasUser && (
+                      <Tag color={STATUS_COLOR.user} style={{ marginInlineEnd: 0 }}>
+                        {tr('tag.user')}
+                      </Tag>
+                    )}
+                  </Flex>
+                ),
+              },
               { title: tr('compare.count'), dataIndex: 'count' },
               { title: tr('compare.model'), dataIndex: 'model' },
               { title: tr('compare.users'), dataIndex: 'users', render: (v: number) => fmt(lang, v) },
@@ -63,6 +90,9 @@ export function CompareTable(): JSX.Element {
               },
             ]}
           />
+          {warnings.map((w) => (
+            <Alert key={w.code} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} />
+          ))}
         </Card>
       </div>
     </div>

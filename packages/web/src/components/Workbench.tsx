@@ -268,6 +268,10 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
         ttft: usage.ttftSec,
         max: perf.maxConcurrent,
         kw: perf.powerKw,
+        ok: perf.ok,
+        hasEstimate: perf.hasEstimate,
+        hasUser: perf.hasUser,
+        warnings: perf.warnings,
       },
     });
   };

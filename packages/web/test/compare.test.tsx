@@ -1,11 +1,16 @@
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { t, type MsgKey } from '../src/i18n';
 import { getBundle } from '../src/bundle';
 import { withQuant } from '../src/components/Workbench';
-import { shown } from './helpers';
+import { CUSTOM_MODEL_WARNING } from '@nchc/core';
+import { useEffect } from 'react';
+import { CompareTable } from '../src/components/CompareTable';
+import type { Pin } from '../src/state/state';
+import { useCalc } from '../src/state/store';
+import { renderStore, shown } from './helpers';
 
 const zh = (k: MsgKey, v?: Record<string, string | number>) => t('zh-TW', k, v);
 const H200 = 'nano4-h200';
@@ -114,5 +119,37 @@ describe('closed comparison', () => {
     expect(clear().closest('[inert]')).toBe(reveal);
     await pin();
     await waitFor(() => expect(clear().closest('[inert]')).toBeNull());
+  });
+
+  it('each pin keeps its trust flags: a miss, 推估, 自訂 and the custom-model warning (review I2)', async () => {
+    const base: Omit<Pin, 'id'> = { platform: 'P', count: '8', model: 'M', users: 15, tps: 30, ttft: 1, max: 40, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] };
+    const pins: Omit<Pin, 'id'>[] = [
+      { ...base, platform: 'Plain' },
+      { ...base, platform: 'Missed', ok: false, hasEstimate: true, hasUser: true, warnings: [CUSTOM_MODEL_WARNING] },
+    ];
+    function Seed() {
+      const [, dispatch] = useCalc();
+      useEffect(() => {
+        for (const pin of pins) dispatch({ type: 'pin', pin });
+      }, [dispatch]);
+      return null;
+    }
+    await act(async () => {
+      renderStore(
+        <>
+          <CompareTable />
+          <Seed />
+        </>,
+      );
+    });
+    await waitFor(() => expect(dataRows()).toHaveLength(2));
+    const [plain, missed] = [...dataRows()] as HTMLElement[];
+    expect(within(plain!).getByLabelText(zh('compare.ok'))).toBeInTheDocument();
+    expect(within(plain!).queryByText(zh('tag.estimate'))).toBeNull();
+    expect(within(plain!).queryByText(zh('tag.user'))).toBeNull();
+    expect(within(missed!).getByLabelText(zh('compare.miss'))).toBeInTheDocument();
+    expect(within(missed!).getByText(zh('tag.estimate'))).toBeInTheDocument();
+    expect(within(missed!).getByText(zh('tag.user'))).toBeInTheDocument();
+    expect(within(screen.getByTestId('compare')).getAllByText(CUSTOM_MODEL_WARNING.text)).toHaveLength(1);
   });
 });

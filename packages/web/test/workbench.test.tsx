@@ -256,6 +256,10 @@ describe('Workbench', () => {
       ttft: r.perf.usage!.ttftSec,
       max: r.perf.maxConcurrent,
       kw: r.perf.powerKw,
+      ok: r.perf.ok,
+      hasEstimate: r.perf.hasEstimate,
+      hasUser: r.perf.hasUser,
+      warnings: r.perf.warnings,
     });
   });
 
