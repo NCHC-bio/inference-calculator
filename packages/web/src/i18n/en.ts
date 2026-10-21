@@ -76,6 +76,8 @@ const en = {
   'cite.item': '[{i}] {text} ({status}; {source})',
   'cite.noSource': '—',
   'cite.customWorkload': 'Custom workload',
+  'cite.customWorkloadLine': 'Custom workload: {input} input tokens and {output} output tokens per request, cache hit rate {hit}% (custom)',
+  'cite.customSpeedLine': 'Custom speed target: at least {tps} tokens per second per user, time to first token at most {ttft} s (custom)',
   'cite.customModel': 'Custom model',
   'basis.title': 'Calculation basis',
   'basis.concurrency': 'How concurrent users are read',

@@ -69,6 +69,16 @@ export function citeText(b: Bundle, s: CalcState, result: RequirementResult, tr:
       cons: row.conservative.ok ? tr('cite.cons', { gpus: n(row.conservative.gpus), unit }) : tr('cite.consNone'),
     });
   }
+  // A custom workload or speed target is part of what was computed: its numbers travel with the text, marked 自訂
+  // (v8 minor 8).
+  const custom: string[] = [];
+  if (typeof s.workload !== 'string') {
+    const w = s.workload;
+    custom.push(tr('cite.customWorkloadLine', { input: n(w.inputTokens), output: n(w.outputTokens), hit: dec(w.cacheHitRate * 100) }));
+  }
+  if (typeof s.speed !== 'string') {
+    custom.push(tr('cite.customSpeedLine', { tps: dec(s.speed.minTokPerSec), ttft: dec(s.speed.maxTtftSec) }));
+  }
   const sources = sourcesOf(b, s.customModel);
   // Spec §2.1: a citation says when it rests on estimates. The weak items lead, in the 推估 popover's order (best
   // platform's first); the count is the popover's 查看全部 N.
@@ -80,5 +90,5 @@ export function citeText(b: Bundle, s: CalcState, result: RequirementResult, tr:
   const trust = result.hasEstimate && weak.length > 0 ? [tr('cite.estimates', { n: n(weak.length) })] : [];
   // The custom-model warning (spec §2.2) travels with the text.
   const warnings = result.warnings.map((w) => w.text);
-  return [head, ...trust, ...warnings, '', tr('cite.assumptions'), ...items].join('\n');
+  return [head, ...custom, ...trust, ...warnings, '', tr('cite.assumptions'), ...items].join('\n');
 }

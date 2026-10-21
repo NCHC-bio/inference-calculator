@@ -116,6 +116,27 @@ describe('CiteModal', () => {
     expect(citeText(b, s, r, tZh)).toContain(CUSTOM_MODEL_WARNING.text);
   });
 
+  it('a custom workload and speed target state their numbers and that they are 自訂 (v8 minor 8)', () => {
+    const b = getBundle();
+    // Test fixture values, not catalog values.
+    const s = {
+      ...defaultState(b),
+      workload: { base: 'chat', inputTokens: 3000, outputTokens: 600, cacheHitRate: 0.3 },
+      speed: { minTokPerSec: 12, maxTtftSec: 3 },
+    };
+    const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;
+    const zh = citeText(b, s, r, tZh);
+    expect(zh).toContain('自訂工作：每次讀入 3,000 token、回覆 600 token、快取命中率 30%（自訂）');
+    expect(zh).toContain('自訂速度標準：每人每秒至少 12 字、首字等待不超過 3 秒（自訂）');
+    const en = citeText(b, { ...s, lang: 'en' }, r, (k, v) => t('en', k, v));
+    expect(en).toContain('Custom workload: 3,000 input tokens and 600 output tokens per request, cache hit rate 30% (custom)');
+    expect(en).toContain('Custom speed target: at least 12 tokens per second per user, time to first token at most 3 s (custom)');
+    // Presets add no such lines.
+    const preset = defaultState(b);
+    const pr = (computeMain(b, preset) as MainView & { kind: 'main' }).result;
+    expect(citeText(b, preset, pr, tZh)).not.toMatch(/自訂工作：|自訂速度標準：/);
+  });
+
   it('cite modal text', async () => {
     const b = getBundle(); const s = defaultState(b);
     const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;

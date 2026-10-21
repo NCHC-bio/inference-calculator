@@ -77,6 +77,8 @@ const zhTW = {
   'cite.item': '[{i}] {text}（{status}；{source}）',
   'cite.noSource': '—',
   'cite.customWorkload': '自訂工作',
+  'cite.customWorkloadLine': '自訂工作：每次讀入 {input} token、回覆 {output} token、快取命中率 {hit}%（自訂）',
+  'cite.customSpeedLine': '自訂速度標準：每人每秒至少 {tps} 字、首字等待不超過 {ttft} 秒（自訂）',
   'cite.customModel': '自訂模型',
   'basis.title': '計算依據',
   'basis.concurrency': '同時人數的解讀',
