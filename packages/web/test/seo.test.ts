@@ -40,6 +40,8 @@ describe('index.html SEO and link previews', () => {
     const ld = JSON.parse(doc.querySelector('script[type="application/ld+json"]')!.textContent!);
     expect(ld['@type']).toBe('WebApplication');
     expect(ld.url).toBe(SITE);
+    expect(ld.publisher.logo).toBe(`${SITE}nchc-logo.png`);
+    expect(readFileSync(file('public/nchc-logo.png')).subarray(1, 4).toString()).toBe('PNG');
   });
 
   it('hardware named in the static description exists in the bundle (no stale names)', () => {
