@@ -1,0 +1,107 @@
+/* Shared motion token (design §3.6): same duration and curve as TRANSITION_MS / EASE in src/motion.ts. */
+:root {
+  --motion-dur: 400ms;
+  --motion-ease: cubic-bezier(0.215, 0.61, 0.355, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-dur: 0ms;
+  }
+}
+
+/* Opens / closes smoothly: grid-template-rows 0fr → 1fr. */
+.reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-dur) var(--motion-ease),
+    opacity var(--motion-dur) var(--motion-ease);
+}
+.reveal.on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.reveal > div {
+  overflow: hidden;
+  min-height: 0;
+}
+.fade-in {
+  animation: fade-in var(--motion-dur) var(--motion-ease) both;
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/*
+ * Platform rows. Selectors only reach the outermost rows (.rows > .ant-collapse-item > .ant-collapse-header), never a
+ * nested Collapse inside an expanded row (design §3.4). `.ant-collapse.rows` outranks antd's own (zero-specificity
+ * :where) rules regardless of injection order.
+ */
+.ant-collapse.rows > .ant-collapse-item {
+  position: relative;
+  z-index: 1;
+}
+.ant-collapse.rows > .ant-collapse-item > .ant-collapse-header {
+  align-items: center;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.ant-collapse.rows > .ant-collapse-item > .ant-collapse-header > .ant-collapse-title {
+  flex: 0 0 150px;
+  min-width: 0;
+}
+.ant-collapse.rows > .ant-collapse-item > .ant-collapse-header > .ant-collapse-extra {
+  flex: 1 1 300px;
+  min-width: 0;
+  margin-inline-start: 8px;
+}
+.ant-collapse.rows > .ant-collapse-item.row-divider > .ant-collapse-header {
+  padding-block: 4px;
+  cursor: default;
+}
+.ant-collapse.rows > .ant-collapse-item.row-divider > .ant-collapse-header > .ant-collapse-title {
+  flex: 1 1 auto;
+}
+.ant-collapse.rows > .ant-collapse-item-disabled > .ant-collapse-header {
+  cursor: default;
+}
+.row-extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  width: 100%;
+}
+.row-icons {
+  flex: 1 1 120px;
+  min-width: 0;
+}
+.row-capacity {
+  flex: 0 1 170px;
+  min-width: 140px;
+}
+.row-speed {
+  flex-basis: 100%;
+}
+.best-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+  border-left: 3px solid;
+  transition:
+    top var(--motion-dur) var(--motion-ease),
+    height var(--motion-dur) var(--motion-ease),
+    opacity var(--motion-dur) var(--motion-ease);
+}
+@media (max-width: 640px) {
+  .ant-collapse.rows > .ant-collapse-item > .ant-collapse-header > .ant-collapse-extra {
+    flex-basis: 100%;
+    margin-inline-start: 0;
+  }
+}

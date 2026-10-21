@@ -171,7 +171,7 @@ export function validCustomModel(v: unknown): v is Exclude<CustomModel, null> {
   return false;
 }
 
-const customIndex = (row: RowKey): number | null => {
+export const customIndex = (row: RowKey): number | null => {
   // Canonical index only (`custom:01` is not a row key).
   const m = /^custom:(0|[1-9]\d*)$/.exec(row);
   return m ? Number(m[1]) : null;

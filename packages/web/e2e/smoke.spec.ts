@@ -142,14 +142,13 @@ test('the best row expands to four usage bars and a typing demo that starts in t
   await page.goto('/');
   const row = bestRow(page);
   await expect(row).toHaveCount(1);
-  await expect(row).toHaveAttribute('data-platform', r.best!);
-  const toggle = row.getByTestId('row-toggle');
+  await expect(row).toHaveAttribute('data-row', r.best!);
+  const toggle = row.locator(':scope > .ant-collapse-header .ant-collapse-title');
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await toggle.click();
+  await row.getByTestId('row-name').click();
   const started = Date.now();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-  const detail = page.locator(`#${await toggle.getAttribute('aria-controls')}`);
-  await expect(detail).toHaveAttribute('data-testid', 'row-detail');
+  const detail = row.getByTestId('row-detail');
   await expect(detail.getByTestId('usage-bar')).toHaveCount(4);
   for (const key of ['usage.mem', 'usage.bw', 'usage.compute', 'usage.ttft'] as const) {
     await expect(detail.getByText(tZh(key), { exact: true })).toBeVisible();

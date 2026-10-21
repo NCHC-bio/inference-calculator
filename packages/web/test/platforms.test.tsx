@@ -1,113 +1,221 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { theme } from 'antd';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
-import { computeMain, type MainView } from '../src/compute/compute';
-import { decodeUrl } from '../src/state/url';
-import { defaultState } from '../src/state/state';
+import { PlatformList } from '../src/components/PlatformList';
+import { computeMain, type MainView, type OkRow } from '../src/compute/compute';
+import { defaultState, type CalcState } from '../src/state/state';
+import { useCalc } from '../src/state/store';
+import { decodeUrl, encodeUrl } from '../src/state/url';
+import { renderStore } from './helpers';
 import { setMedia } from './setup';
 
 // mistral-medium only offers fp8, so `q=bf16` falls back to it; its weights still do not fit the 32 GB Mac mini.
 const INFEASIBLE_MAC = '?m=mistral-medium-3.5-128b&q=bf16';
 
+const items = () => Array.from(document.querySelectorAll<HTMLElement>('.rows > .ant-collapse-item'));
 const rows = () => screen.getAllByTestId('platform-row');
-const bestRow = () => rows().find((x) => x.dataset.best === 'true')!;
+const rowOf = (key: string) => rows().find((x) => x.dataset.row === key)!;
+const toggleOf = (row: HTMLElement) => row.querySelector<HTMLElement>(':scope > .ant-collapse-header .ant-collapse-title')!;
+const main = (s: CalcState) => computeMain(getBundle(), s) as MainView & { kind: 'main' };
+const okRow = (s: CalcState, key: string) => main(s).rows.find((r) => r.row === key) as OkRow;
+const fmt0 = (n: number) => new Intl.NumberFormat('zh-TW', { maximumFractionDigits: 0 }).format(n);
+const visit = (s: CalcState) => history.replaceState(null, '', '/?' + encodeUrl(s));
+
+/** Mirrors the store so tests can read dispatched state. */
+let latest: CalcState | null = null;
+function Probe() {
+  latest = useCalc()[0];
+  return null;
+}
+const renderList = () => renderStore(<><PlatformList /><Probe /></>);
+
+const CUSTOM = { name: 'Lab GPU', unit: 'gpu' as const, gpusPerNode: 8, memGB: 80, memBwTBs: 3, tflops: 900, engine: 'vllm' as const };
 
 describe('PlatformList', () => {
-  it('one row per platform in bundle order, self group after a divider', () => {
-    render(<App />);
-    expect(rows().map((r) => r.dataset.platform)).toEqual(Object.keys(getBundle().platforms));
-    expect(screen.getByText('自建')).toBeInTheDocument();
+  beforeEach(() => {
+    latest = null;
   });
-  it('best row is marked; its big number equals expected.gpus', () => {
-    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
+  it('one row per platform in bundle order', () => {
     render(<App />);
-    const best = bestRow();
-    expect(best.dataset.platform).toBe(r.best);
-    const p = r.perPlatform.find((x) => x.platform === r.best)!;
-    expect(within(best).getByTestId('count')).toHaveTextContent(String(p.expected.ok && p.expected.gpus));
+    expect(rows().map((r) => r.dataset.row)).toEqual(Object.keys(getBundle().platforms));
   });
-  it('capacity bar reads 同時 {users} / {maxConcurrent} 人 from core', () => {
-    const b = getBundle(); const s = defaultState(b); const r = (computeMain(b, s) as MainView & { kind: 'main' }).result;
+
+  it('rows are an antd Collapse with header-only toggles', async () => {
+    const b = getBundle(); const best = main(defaultState(b)).result.best!;
     render(<App />);
-    const p = r.perPlatform.find((x) => x.platform === r.best)!;
-    expect(within(bestRow()).getByTestId('capacity')).toHaveTextContent(`同時 ${s.users} / ${p.maxConcurrent} 人`);
+    expect(document.querySelector('.ant-collapse.rows')).not.toBeNull();
+    const row = rowOf(best); const toggle = toggleOf(row);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(within(row).getByRole('img', { name: /^每個方塊/ }));
+    await userEvent.click(within(row).getByRole('spinbutton'));
+    await userEvent.click(within(row).getByTestId('capacity'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(within(row).getByText(b.platforms[best]!.name));
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await waitFor(() => expect(within(row).getByTestId('row-detail')).toBeInTheDocument());
   });
-  it('infeasible row shows one short reason, detail in a click popover', async () => {
-    const b = getBundle(); const r = (computeMain(b, decodeUrl(b, INFEASIBLE_MAC)) as MainView & { kind: 'main' }).result;
-    const mac = r.perPlatform.find((x) => x.platform === 'mac-mini-m6-32')!;
-    expect(mac.expected.ok).toBe(false);
+
+  it('infeasible rows cannot expand and show the reason', async () => {
+    const b = getBundle();
+    const mac = main(decodeUrl(b, INFEASIBLE_MAC)).rows.find((r) => r.row === 'mac-mini-m6-32')!;
+    if (mac.kind !== 'infeasible') throw new Error('mac mini should be infeasible');
     history.replaceState(null, '', '/' + INFEASIBLE_MAC);
     render(<App />);
-    const row = rows().find((x) => x.dataset.platform === 'mac-mini-m6-32')!;
-    const tag = within(row).getByText(/^✗ /); await userEvent.click(tag);
-    await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
+    const row = rowOf('mac-mini-m6-32');
+    expect(row).toHaveClass('ant-collapse-item-disabled');
+    expect(row.querySelector('.ant-collapse-expand-icon')).toBeNull();
+    const tag = within(row).getByTestId('why-tag');
+    expect(tag).toHaveClass('ant-tag-error');
+    expect(tag).toHaveTextContent(/^模型放不下$/);
     expect(within(row).queryByTestId('capacity')).toBeNull();
-    expect(tag).toHaveTextContent('✗ 模型放不下');
-    const detail = mac.expected.ok ? '' : mac.expected.detail;
-    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(detail));
-    expect(within(row).queryByTestId('row-toggle')).toBeNull();
-    expect(within(row).queryByRole('button')).toBeNull();
+    await userEvent.hover(tag);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(mac.detail));
+    expect(row.querySelector(':scope > .ant-collapse-header')).toHaveAttribute('aria-disabled', 'true');
+    await userEvent.click(within(row).getByText(b.platforms['mac-mini-m6-32']!.name));
+    expect(row).not.toHaveClass('ant-collapse-item-active');
+    expect(row.querySelector('.ant-collapse-panel, .ant-collapse-content')).toBeNull();
   });
-  it('feasible row toggles open by click and Enter', async () => {
-    render(<App />); const btn = within(bestRow()).getByTestId('row-toggle');
-    expect(btn.tagName).toBe('BUTTON');
-    await userEvent.click(btn); expect(btn).toHaveAttribute('aria-expanded', 'true');
-    btn.focus(); await userEvent.keyboard('{Enter}'); expect(btn).toHaveAttribute('aria-expanded', 'false');
+
+  it("a platform beyond the size bound shows 規模超出上限 with core's detail", async () => {
+    const url = '?m=gemma-4-26b-a4b-it&q=bf16&w=chat&n=200000';
+    const spark = main(decodeUrl(getBundle(), url)).rows.find((r) => r.row === 'dgx-spark')!;
+    expect(spark.kind === 'infeasible' && spark.why).toBe('scale');
+    history.replaceState(null, '', '/' + url);
+    render(<App />);
+    const tag = within(rowOf('dgx-spark')).getByTestId('why-tag');
+    expect(tag).toHaveTextContent('規模超出上限');
+    await userEvent.click(tag);
+    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(spark.kind === 'infeasible' ? spark.detail : ''));
   });
-  it('the expand control is a real button; the row itself is not interactive (no nested interactive content)', () => {
-    render(<App />); const row = bestRow(); const btn = within(row).getByTestId('row-toggle');
-    expect(row).not.toHaveAttribute('role'); expect(row).not.toHaveAttribute('tabindex'); expect(row).not.toHaveAttribute('aria-expanded');
-    expect(btn).toHaveAttribute('aria-controls');
-    expect(within(btn).queryByTestId('capacity')).toBeNull();
+
+  it('suggest button and count input', async () => {
+    const s = defaultState(getBundle()); const best = main(s).result.best!;
+    const r = okRow(s, best);
+    render(<App />);
+    const row = rowOf(best);
+    const suggest = within(row).getByRole('button', { name: '建議' });
+    expect(suggest).toHaveClass('ant-btn-primary');
+    expect(suggest).toHaveAttribute('aria-pressed', 'true');
+    const input = within(row).getByRole('spinbutton');
+    expect(input).toHaveValue(String(r.suggested));
+    expect(within(row).queryByTestId('speed-line')).toBeNull();
+    await userEvent.clear(input); await userEvent.type(input, '2');
+    await waitFor(() => expect(suggest).toHaveAttribute('aria-pressed', 'false'));
+    expect(suggest).not.toHaveClass('ant-btn-primary');
+    const line = await within(row).findByTestId('speed-line');
+    expect(line.querySelector('.anticon-check-circle, .anticon-close-circle')).not.toBeNull();
+    expect(line).toHaveTextContent(`建議 ${fmt0(r.suggested)} 張：${fmt0(r.suggestedPerf.usage!.tokPerSecPerUser)} 字/秒`);
+    await userEvent.click(suggest);
+    await waitFor(() => expect(within(row).queryByTestId('speed-line')).toBeNull());
+    expect(suggest).toHaveAttribute('aria-pressed', 'true');
+    expect(input).toHaveValue(String(r.suggested));
   });
-  it('a mouse click elsewhere on the row toggles it once', async () => {
-    render(<App />); const row = bestRow(); const btn = within(row).getByTestId('row-toggle');
-    await userEvent.click(within(row).getByTestId('count')); expect(btn).toHaveAttribute('aria-expanded', 'true');
-    await userEvent.click(within(row).getByTestId('count')); expect(btn).toHaveAttribute('aria-expanded', 'false');
+
+  it('count input rejects out-of-range values', async () => {
+    const s = defaultState(getBundle()); const best = main(s).result.best!;
+    renderList();
+    const input = within(rowOf(best)).getByRole('spinbutton');
+    input.focus();
+    for (const v of ['0', '100001']) {
+      fireEvent.change(input, { target: { value: v } });
+      await waitFor(() => expect(within(rowOf(best)).getByText('請輸入 1–100,000 的整數')).toBeInTheDocument());
+      expect(latest!.overrides).toEqual({});
+    }
   });
-  it('touch: tapping the capacity bar opens its explanation without toggling the row (Review Focus 5)', async () => {
+
+  it('capacity bar shows users over max and turns red when exceeded', async () => {
+    const b = getBundle(); const s = defaultState(b); const best = main(s).result.best!;
+    const r = okRow(s, best);
+    const { colorError, colorPrimary } = theme.getDesignToken();
+    visit(s);
+    const { unmount } = render(<App />);
+    const cap = within(rowOf(best)).getByTestId('capacity');
+    expect(cap).toHaveTextContent(`同時 ${s.users} / ${r.perf.maxConcurrent} 人`);
+    expect(cap.querySelector('.ant-progress-track')).not.toHaveStyle({ background: colorError });
+    unmount();
+    // The fewest cards that cannot serve everyone at the requested speed.
+    let low: OkRow | null = null;
+    for (let n = r.suggested - 1; n >= 1 && !low; n--) {
+      const x = okRow({ ...s, overrides: { [best]: { gpus: n } } }, best);
+      if (x.perf.maxConcurrent < s.users) low = x;
+    }
+    expect(low).not.toBeNull();
+    visit({ ...s, overrides: { [best]: { gpus: low!.count } } });
+    render(<App />);
+    const cap2 = within(rowOf(best)).getByTestId('capacity');
+    await waitFor(() => expect(cap2).toHaveTextContent(`同時 ${s.users} / ${low!.perf.maxConcurrent} 人`));
+    expect(cap2.querySelector('.ant-progress-track')).toHaveStyle({ background: colorError });
+    expect(colorError).not.toBe(colorPrimary);
+  });
+
+  it('self-hosted divider and add-hardware button', async () => {
+    const b = getBundle();
+    const firstSelf = Object.keys(b.platforms).find((id) => b.platforms[id]!.group === 'self')!;
+    renderList();
+    const all = items();
+    const div = all.findIndex((x) => x.textContent === '自建');
+    expect(div).toBeGreaterThanOrEqual(0);
+    expect(all[div + 1]!.dataset.row).toBe(firstSelf);
+    const add = screen.getByRole('button', { name: /找不到你的硬體？新增硬體/ });
+    const list = screen.getByTestId('platform-list');
+    expect(list.lastElementChild).toBe(add);
+    await userEvent.click(add);
+    expect(latest!.dialog).toBe('hardware');
+    expect(latest!.editingPlatform).toBeNull();
+  });
+
+  it('custom rows have a tag, edit and delete', async () => {
+    const s: CalcState = { ...defaultState(getBundle()), customPlatforms: [CUSTOM] };
+    visit(s);
+    renderList();
+    expect(rows().at(-1)!.dataset.row).toBe('custom:0');
+    const row = rowOf('custom:0');
+    expect(within(row).getByText('Lab GPU')).toBeInTheDocument();
+    expect(within(row).getByText('自訂')).toHaveClass('ant-tag');
+    await userEvent.click(within(row).getByRole('button', { name: '編輯' }));
+    expect(latest!.dialog).toBe('hardware');
+    expect(latest!.editingPlatform).toBe(0);
+    expect(row).not.toHaveClass('ant-collapse-item-active');
+    await userEvent.click(within(row).getByRole('button', { name: '刪除' }));
+    expect(latest!.customPlatforms).toEqual([]);
+    await waitFor(() => expect(rows().some((x) => x.dataset.row === 'custom:0')).toBe(false));
+  });
+
+  it('best marker sits on the best row', () => {
+    const best = main(defaultState(getBundle())).result.best!;
+    render(<App />);
+    expect(screen.getByTestId('best-marker')).toHaveAttribute('data-row', best);
+    expect(screen.getByTestId('best-marker')).toHaveStyle({ opacity: '1' });
+    expect(rowOf(best)).toHaveAttribute('data-best', 'true');
+  });
+
+  it('touch: tapping the capacity bar opens its explanation without toggling the row', async () => {
     setMedia({ hoverNone: true });
-    render(<App />); const row = bestRow();
+    const best = main(defaultState(getBundle())).result.best!;
+    render(<App />); const row = rowOf(best);
     await userEvent.click(within(row).getByTestId('capacity'));
     await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
     expect(screen.getByRole('tooltip')).toHaveTextContent('目前人數 / 這些機器在你要求的速度下最多能同時服務的人數');
-    expect(within(row).getByTestId('row-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(toggleOf(row)).toHaveAttribute('aria-expanded', 'false');
   });
-  it('machine icons explain themselves on tap and on focus, without toggling the row (spec §8.3.3; final review I5)', async () => {
-    const b = getBundle(); const r = (computeMain(b, defaultState(b)) as MainView & { kind: 'main' }).result;
-    const p = r.perPlatform.find((x) => x.platform === r.best)!;
-    const plat = b.platforms[r.best!]!;
-    const per = plat.gpusPerNode.value;
-    if (!p.expected.ok) throw new Error('best is feasible');
+
+  it('machine icons are shown on phones and explain themselves on tap and focus without toggling', async () => {
+    const b = getBundle(); const best = main(defaultState(b)).result.best!;
+    const per = b.platforms[best]!.gpusPerNode.value;
     const label = `每個方塊 = 1 個 node（${per} 張 GPU）；未滿一個 node 時只填滿用到的比例；實心為預期，虛線為保守估計多出的部分`;
     setMedia({ hoverNone: true });
-    render(<App />); const row = bestRow();
-    // Hidden from the role query in jsdom: antd's xs={0} column rule applies without media-query evaluation.
-    const icons = within(row).getByRole('img', { name: label, hidden: true });
-    expect(icons).toHaveAttribute('tabindex', '0');
+    render(<App />); const row = rowOf(best);
+    const icons = within(row).getByRole('img', { name: label });
     await userEvent.click(icons);
     await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
     expect(screen.getByRole('tooltip')).toHaveTextContent(label);
-    expect(within(row).getByTestId('row-toggle')).toHaveAttribute('aria-expanded', 'false');
+    expect(toggleOf(row)).toHaveAttribute('aria-expanded', 'false');
     fireEvent.keyDown(document.body, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('tooltip')).toBeNull());
-    // jsdom will not focus inside a display:none column, so the focus event is dispatched directly.
-    fireEvent.focusIn(icons);
+    icons.blur(); icons.focus();
     await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
-  });
-  it("a platform beyond the size bound shows ✗ 規模超出上限 with core's detail (final review I2)", async () => {
-    const url = '?m=gemma-4-26b-a4b-it&q=bf16&w=chat&n=200000';
-    const b = getBundle(); const r = (computeMain(b, decodeUrl(b, url)) as MainView & { kind: 'main' }).result;
-    const spark = r.perPlatform.find((x) => x.platform === 'dgx-spark')!;
-    expect(!spark.expected.ok && spark.expected.why).toBe('scale');
-    history.replaceState(null, '', '/' + url);
-    render(<App />);
-    const row = rows().find((x) => x.dataset.platform === 'dgx-spark')!;
-    const tag = within(row).getByText(/^✗ /);
-    expect(tag).toHaveTextContent('✗ 規模超出上限');
-    await userEvent.click(tag);
-    await waitFor(() => expect(screen.getByRole('tooltip')).toHaveTextContent(spark.expected.ok ? '' : spark.expected.detail));
   });
 });

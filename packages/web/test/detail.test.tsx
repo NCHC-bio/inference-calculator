@@ -6,7 +6,6 @@ import { App } from '../src/App';
 import { getBundle } from '../src/bundle';
 import { computeMain, type MainView } from '../src/compute/compute';
 import { MemoryBar } from '../src/components/MemoryBar';
-import { rowDetailId } from '../src/components/PlatformRow';
 import { RowDetail } from '../src/components/RowDetail';
 import { UsageBars } from '../src/components/UsageBars';
 import { defaultState } from '../src/state/state';
@@ -113,9 +112,9 @@ describe('RowDetail', () => {
     const b = getBundle();
     const why = b.hardware[b.platforms['nano4-gb200']!.hardware]!.tdpW.conflict!;
     render(<App />);
-    const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.platform === 'nano4-gb200')!;
-    await userEvent.click(within(row).getByTestId('row-toggle'));
-    const detail = document.getElementById(rowDetailId('nano4-gb200'))!;
+    const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.row === 'nano4-gb200')!;
+    await userEvent.click(within(row).getByTestId('row-name'));
+    const detail = await within(row).findByTestId('row-detail');
     await userEvent.click(within(detail).getByText('功耗未查證'));
     await waitFor(() => expect(screen.getByRole('tooltip')).toBeVisible());
     expect(screen.getByRole('tooltip')).toHaveTextContent(`功耗未查證：${why}`);
@@ -141,14 +140,14 @@ describe('RowDetail', () => {
     renderStore(<RowDetail usage={usage()} unit="gpu" demoText="x" queueing={null} />);
     expect(document.body.textContent).not.toMatch(/排隊/);
   });
-  it('opens under the row with the toggle-controlled id and core data', async () => {
+  it('opens inside the row with core data', async () => {
     const b = getBundle(); const s = defaultState(b); const res = (computeMain(b, s) as MainView & { kind: 'main' }).result;
     const p = res.perPlatform.find((x) => x.platform === res.best)!;
     render(<App />);
-    const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.platform === res.best)!;
-    expect(document.getElementById(rowDetailId(res.best!))).toBeNull();
-    await userEvent.click(within(row).getByTestId('row-toggle'));
-    const detail = document.getElementById(rowDetailId(res.best!))!;
+    const row = screen.getAllByTestId('platform-row').find((x) => x.dataset.row === res.best)!;
+    expect(within(row).queryByTestId('row-detail')).toBeNull();
+    await userEvent.click(within(row).getByTestId('row-name'));
+    const detail = await within(row).findByTestId('row-detail');
     expect(detail).toBeInTheDocument();
     expect(within(detail).getAllByTestId('usage-bar')).toHaveLength(4);
     expect(within(detail).getAllByTestId('memory-bar')).toHaveLength(1);

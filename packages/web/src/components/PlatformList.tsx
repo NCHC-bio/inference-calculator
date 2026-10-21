@@ -1,63 +1,106 @@
-import { Divider } from 'antd';
-import { Fragment, type JSX } from 'react';
+import { PlusOutlined } from '@ant-design/icons';
+import { Button, Collapse, Divider, type CollapseProps } from 'antd';
+import { useRef, type JSX } from 'react';
 import { getBundle } from '../bundle';
-import { useMain } from '../compute/useResults';
+import { useDeferredState, useMain } from '../compute/useResults';
 import { useT } from '../i18n';
 import { workloadId } from '../state/state';
 import { useCalc } from '../state/store';
-import { PlatformRow, rowDetailId } from './PlatformRow';
-import { RowDetail } from './RowDetail';
+import { BestMarker } from './BestMarker';
+import { CustomActions, RowBody, RowExtra, RowName, rowInfo, WhyTag } from './PlatformRow';
 
-/** 每個平台一列（spec §8.3.3-4），照 bundle 的順序；catalog 平台。 */
+type Item = NonNullable<CollapseProps['items']>[number];
+
+/**
+ * 平台列表（design §4 item 4）: one antd Collapse item per platform in bundle order, then custom hardware; a 「自建」
+ * divider before the first self-hosted row; the add-hardware button last. Only the platform name toggles a row
+ * (`collapsible: 'header'`); infeasible rows are disabled and have no arrow. Inputs sit in the header `extra`.
+ */
 export function PlatformList(): JSX.Element | null {
   const tr = useT();
-  const [{ openRow, workload }, dispatch] = useCalc();
+  const [current, dispatch] = useCalc();
+  // Rows describe the deferred inputs; their platforms are read from the same state.
+  const s = useDeferredState();
   const view = useMain();
+  const wrap = useRef<HTMLDivElement>(null);
   if (view.kind !== 'main') return null;
-  const { result } = view;
-  const bundle = getBundle();
-  const platforms = bundle.platforms;
-  const demoText = bundle.workloads[workloadId(workload)]!.demoText;
-  const byId = new Map(result.perPlatform.map((p) => [p.platform, p]));
-  // Core's note says power is unverified; the bundle's TDP record says why (its `conflict`), when it has one.
-  const powerNote = (note: string, hw: string) => {
-    const tdp = bundle.hardware[hw]?.tdpW;
-    return tdp?.value === null && tdp.conflict ? tr('detail.powerNote', { note, why: tdp.conflict }) : note;
-  };
-  const firstSelf = Object.keys(platforms).find((id) => platforms[id]!.group === 'self');
+  const b = getBundle();
+  const demoText = b.workloads[workloadId(s.workload)]!.demoText;
+  const best = view.result.best;
+
+  const items: Item[] = [];
+  let divider = false;
+  for (const r of view.rows) {
+    const info = rowInfo(b, s, r.row);
+    if (info.self && !divider) {
+      divider = true;
+      items.push({
+        key: '__self',
+        className: 'row-divider',
+        showArrow: false,
+        collapsible: 'disabled',
+        label: (
+          <Divider titlePlacement="start" plain style={{ margin: 0, fontSize: 12 }}>
+            {tr('platforms.self')}
+          </Divider>
+        ),
+      });
+    }
+    const attrs = { 'data-testid': 'platform-row', 'data-row': r.row, 'data-best': String(best === r.row) };
+    const onEdit = () => dispatch({ type: 'dialog', id: 'hardware', editingPlatform: info.custom });
+    const onDelete = () => info.custom !== null && dispatch({ type: 'removePlatform', index: info.custom });
+    if (r.kind === 'infeasible') {
+      const extra = (
+        <div className="row-extra">
+          <WhyTag why={r.why} detail={r.detail} />
+          {info.custom !== null && <CustomActions onEdit={onEdit} onDelete={onDelete} />}
+        </div>
+      );
+      items.push({ key: r.row, ...attrs, showArrow: false, collapsible: 'disabled', label: <RowName info={info} />, extra });
+      continue;
+    }
+    const tdp = info.hardware === null ? undefined : b.hardware[info.hardware]?.tdpW;
+    items.push({
+      key: r.row,
+      ...attrs,
+      collapsible: 'header',
+      label: <RowName info={info} />,
+      extra: (
+        <RowExtra
+          r={r}
+          info={info}
+          users={view.users}
+          onSuggest={() => dispatch({ type: 'override', row: r.row, value: null })}
+          onSet={(gpus) => dispatch({ type: 'override', row: r.row, value: { gpus } })}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
+      ),
+      children: <RowBody r={r} info={info} demoText={demoText} tdpConflict={tdp?.value === null && tdp.conflict ? tdp.conflict : null} />,
+    });
+  }
+  const open = view.rows.find((r) => r.row === current.openRow && r.kind === 'ok')?.row;
+
   return (
-    <div data-testid="platform-list" style={{ marginTop: 12 }}>
-      {Object.keys(platforms).map((id) => {
-        const r = byId.get(id);
-        if (!r) return null;
-        const open = openRow === id && r.expected.ok;
-        return (
-          <Fragment key={id}>
-            {id === firstSelf && (
-              <Divider titlePlacement="start" plain style={{ margin: '8px 0', fontSize: 12 }}>
-                {tr('platforms.self')}
-              </Divider>
-            )}
-            <PlatformRow
-              r={r}
-              users={view.users}
-              best={result.best === id}
-              open={open}
-              onToggle={() => dispatch({ type: 'openRow', row: open ? null : id })}
-            />
-            {open && r.usage && (
-              <RowDetail
-                id={rowDetailId(id)}
-                usage={r.usage}
-                unit={platforms[id]!.unit}
-                demoText={demoText}
-                power={{ kw: r.powerKw, ...(r.powerNote !== undefined ? { note: powerNote(r.powerNote, platforms[id]!.hardware) } : {}) }}
-                queueing={r.queueing}
-              />
-            )}
-          </Fragment>
-        );
-      })}
+    <div ref={wrap} data-testid="platform-list" style={{ position: 'relative', marginTop: 12 }}>
+      <BestMarker container={wrap} rowKey={best} />
+      <Collapse
+        className="rows"
+        ghost
+        accordion
+        activeKey={open === undefined ? [] : [open]}
+        onChange={(keys) => dispatch({ type: 'openRow', row: keys[0] ?? null })}
+        items={items}
+      />
+      <Button
+        type="dashed"
+        block
+        icon={<PlusOutlined />}
+        style={{ marginTop: 8, whiteSpace: 'normal', height: 'auto' }}
+        onClick={() => dispatch({ type: 'dialog', id: 'hardware', editingPlatform: null })}
+      >
+        {tr('platforms.addHardware')}
+      </Button>
     </div>
   );
 }

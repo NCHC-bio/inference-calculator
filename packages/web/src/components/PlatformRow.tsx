@@ -1,149 +1,185 @@
-import { DownOutlined, RightOutlined } from '@ant-design/icons';
-import type { PlatformResult } from '@nchc/core';
-import { Col, Row, Tag, theme, Typography } from 'antd';
-import { useRef, type JSX, type MouseEvent } from 'react';
-import { getBundle } from '../bundle';
-import { useLang, useT } from '../i18n';
+import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
+import type { Bundle } from '@nchc/schema';
+import { Button, Space, Tag, theme, Typography } from 'antd';
+import type { JSX } from 'react';
+import type { OkRow } from '../compute/compute';
+import { useLang, useT, type MsgKey } from '../i18n';
+import { useTween } from '../motion/useTween';
+import { customIndex, type CalcState, type RowKey } from '../state/state';
 import { CapacityBar } from './CapacityBar';
+import { CountControl } from './CountControl';
 import { Explain } from './Explain';
 import { Isotype } from './Isotype';
+import { RowDetail } from './RowDetail';
 import { WHY } from './why';
 
-const fmt = (lang: string, n: number) => new Intl.NumberFormat(lang).format(n);
-const stop = (e: MouseEvent) => e.stopPropagation();
+const fmt = (lang: string, n: number, digits = 0) =>
+  new Intl.NumberFormat(lang, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 
-/** Id of the detail region a row's toggle controls (Task 8 renders the detail with this id). */
-export const rowDetailId = (platform: string): string => `platform-detail-${platform}`;
+/** What a row shows about its platform: catalog entry or the user's custom one. */
+export type RowInfo = {
+  name: string;
+  /** Catalog sub-label, or the custom platform's memory × count and engine. */
+  sub: { key: MsgKey; vars: Record<string, string | number> } | string;
+  unit: 'gpu' | 'machine';
+  gpusPerNode: number;
+  /** Index into customPlatforms for a custom row. */
+  custom: number | null;
+  /** Bundle group ('nchc' | 'self'); custom rows count as self-hosted. */
+  self: boolean;
+  /** Catalog hardware id (for its TDP record). */
+  hardware: string | null;
+};
 
-// Reset the native button look but keep the browser's focus ring.
-const toggleStyle = {
-  background: 'transparent',
-  border: 0,
-  padding: 0,
-  margin: 0,
-  font: 'inherit',
-  color: 'inherit',
-  textAlign: 'left',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  width: '100%',
-  cursor: 'pointer',
-  borderRadius: 4,
-} as const;
+export function rowInfo(b: Bundle, s: CalcState, row: RowKey): RowInfo {
+  const i = customIndex(row);
+  if (i !== null) {
+    const p = s.customPlatforms[i]!;
+    return {
+      name: p.name,
+      sub: { key: 'platforms.customSub', vars: { mem: p.memGB, gpn: p.gpusPerNode, engine: p.engine === 'mlx' ? 'MLX' : 'vLLM' } },
+      unit: p.unit,
+      gpusPerNode: p.gpusPerNode,
+      custom: i,
+      self: true,
+      hardware: null,
+    };
+  }
+  const p = b.platforms[row]!;
+  return { name: p.name, sub: p.sub, unit: p.unit, gpusPerNode: p.gpusPerNode.value, custom: null, self: p.group === 'self', hardware: p.hardware };
+}
 
-function PlatformName({ name, sub }: { name: string; sub: string }) {
+/** Header label (the only part that toggles the row): name, 「自訂」 tag, sub-label. */
+export function RowName({ info }: { info: RowInfo }): JSX.Element {
+  const tr = useT();
+  const lang = useLang();
+  const sub =
+    typeof info.sub === 'string'
+      ? info.sub
+      : tr(info.sub.key, Object.fromEntries(Object.entries(info.sub.vars).map(([k, v]) => [k, typeof v === 'number' ? fmt(lang, v) : v])));
   return (
-    <span style={{ display: 'block' }}>
-      <span style={{ display: 'block', fontWeight: 700 }}>{name}</span>
-      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+    <div data-testid="row-name" style={{ minWidth: 0 }}>
+      <div style={{ fontWeight: 700, overflowWrap: 'anywhere' }}>
+        {info.name}
+        {info.custom !== null && (
+          <Tag color="geekblue" style={{ marginInlineStart: 6 }}>
+            {tr('tag.user')}
+          </Tag>
+        )}
+      </div>
+      <Typography.Text type="secondary" style={{ fontSize: 12, overflowWrap: 'anywhere' }}>
         {sub}
       </Typography.Text>
-    </span>
+    </div>
   );
 }
 
-/**
- * One platform: name, machine icons, big count and capacity bar; or, when infeasible, one short reason.
- * The expand control is a real <button> around the header (name + sub + chevron), so the row holds no nested
- * interactive content; the row container itself is not focusable.
- */
-export function PlatformRow({ r, users, best, open, onToggle }: { r: PlatformResult; users: number; best: boolean; open: boolean; onToggle: () => void }): JSX.Element {
+/** Infeasible row: red reason tag; core's detail on hover / tap / focus. */
+export function WhyTag({ why, detail }: { why: keyof typeof WHY; detail: string }): JSX.Element {
+  const tr = useT();
+  return (
+    <div className="fade-in">
+      <Explain content={<div style={{ maxWidth: 320 }}>{detail}</div>}>
+        <Tag data-testid="why-tag" color="error" icon={<CloseCircleOutlined />} tabIndex={0} style={{ cursor: 'help', whiteSpace: 'normal' }}>
+          {tr(WHY[why])}
+        </Tag>
+      </Explain>
+    </div>
+  );
+}
+
+/** Edit / delete buttons of a custom hardware row. */
+export function CustomActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }): JSX.Element {
+  const tr = useT();
+  return (
+    <Space size={4}>
+      <Button size="small" type="text" aria-label={tr('row.edit')} icon={<EditOutlined />} onClick={onEdit} />
+      <Button size="small" type="text" danger aria-label={tr('row.delete')} icon={<DeleteOutlined />} onClick={onDelete} />
+    </Space>
+  );
+}
+
+/** The extra line of an adjusted row: speed and TTFT at the user's count, and what the suggested count gives. */
+function SpeedLine({ r, unit }: { r: OkRow; unit: 'gpu' | 'machine' }) {
   const tr = useT();
   const lang = useLang();
   const { token } = theme.useToken();
-  const toggleRef = useRef<HTMLButtonElement>(null);
-  const plat = getBundle().platforms[r.platform]!;
-  const { expected, conservative } = r;
-  const unit = tr(plat.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
-  const perNode = plat.gpusPerNode.value;
-
-  // Mouse convenience: a click anywhere on a feasible row toggles it. Ignored: clicks on the toggle button (it toggles
-  // itself) and clicks from portalled popups (React bubbles them here, but they are outside the row's DOM). The
-  // capacity bar and the reason tag stop their own clicks. Keyboard and screen-reader users use the button.
-  const onRowClick = (e: MouseEvent<HTMLDivElement>) => {
-    const t = e.target as Node;
-    if (!expected.ok || !e.currentTarget.contains(t) || toggleRef.current?.contains(t)) return;
-    onToggle();
-  };
-
-  let body: JSX.Element;
-  if (expected.ok) {
-    const consGpus = conservative.ok ? conservative.gpus : null;
-    const countUnit = tr(plat.unit === 'machine' ? 'platforms.count.machine' : 'platforms.count.gpu');
-    const under = !conservative.ok
-      ? tr('platforms.conservativeNone', { unit: countUnit })
-      : conservative.gpus > expected.gpus
-        ? tr('platforms.conservative', { n: fmt(lang, conservative.gpus), unit })
-        : countUnit;
-    body = (
-      <>
-        <Col xs={0} md={7}>
-          {/* The icons explain themselves on hover, tap and focus (inside Isotype); a tap does not toggle the row. */}
-          <Isotype expected={expected.gpus} conservative={consGpus} gpusPerNode={perNode} unit={plat.unit} />
-        </Col>
-        <Col xs={12} md={3} style={{ textAlign: 'right' }}>
-          <div data-testid="count" style={{ fontSize: 24, fontWeight: 800, lineHeight: 1 }}>
-            {fmt(lang, expected.gpus)}
-          </div>
-          <Typography.Text type="secondary" style={{ fontSize: 11 }}>
-            {under}
-          </Typography.Text>
-        </Col>
-        <Col xs={24} md={9}>
-          <CapacityBar users={users} max={r.maxConcurrent} />
-        </Col>
-      </>
-    );
-  } else {
-    body = (
-      <Col xs={24} md={19}>
-        <Explain content={<div style={{ maxWidth: 320 }}>{expected.detail}</div>}>
-          <Tag color="error" tabIndex={0} onClick={stop} style={{ cursor: 'help' }}>
-            ✗ {tr(WHY[expected.why])}
-          </Tag>
-        </Explain>
-      </Col>
-    );
-  }
-
+  const { perf, suggestedPerf } = r;
+  const tps = useTween(perf.usage?.tokPerSecPerUser ?? 0);
+  const ttft = useTween(perf.usage?.ttftSec ?? 0);
+  const unitText = tr(unit === 'machine' ? 'unit.machine' : 'unit.gpu');
   return (
-    <div
-      data-testid="platform-row"
-      data-platform={r.platform}
-      data-best={String(best)}
-      onClick={onRowClick}
-      style={{
-        cursor: expected.ok ? 'pointer' : 'default',
-        padding: '12px 8px',
-        borderRadius: token.borderRadiusLG,
-        borderLeft: `3px solid ${best ? token.colorPrimary : 'transparent'}`,
-        background: best ? token.colorFillTertiary : 'transparent',
-      }}
-    >
-      <Row align="middle" gutter={[12, 8]} wrap>
-        <Col xs={expected.ok ? 12 : 24} md={5}>
-          {expected.ok ? (
-            <button
-              ref={toggleRef}
-              type="button"
-              data-testid="row-toggle"
-              aria-expanded={open}
-              aria-controls={rowDetailId(r.platform)}
-              onClick={onToggle}
-              style={toggleStyle}
-            >
-              <span aria-hidden style={{ color: token.colorTextTertiary, fontSize: 12 }}>
-                {open ? <DownOutlined /> : <RightOutlined />}
-              </span>
-              <PlatformName name={plat.name} sub={plat.sub} />
-            </button>
-          ) : (
-            <PlatformName name={plat.name} sub={plat.sub} />
-          )}
-        </Col>
-        {body}
-      </Row>
+    <Typography.Text data-testid="speed-line" style={{ fontSize: 13 }}>
+      {perf.ok ? <CheckCircleOutlined style={{ color: token.colorSuccess }} /> : <CloseCircleOutlined style={{ color: token.colorError }} />}{' '}
+      {perf.usage && tr('row.speed', { tps: fmt(lang, tps), ttft: fmt(lang, ttft, 1) })}
+      {!perf.ok && perf.why && <Typography.Text type="danger">{tr('row.speedWhy', { why: tr(WHY[perf.why]) })}</Typography.Text>}
+      {suggestedPerf.usage && (
+        <Typography.Text type="secondary" style={{ fontSize: 12, marginInlineStart: 12 }}>
+          {tr('row.suggested', { n: fmt(lang, r.suggested), unit: unitText, tps: fmt(lang, suggestedPerf.usage.tokPerSecPerUser) })}
+        </Typography.Text>
+      )}
+    </Typography.Text>
+  );
+}
+
+type ExtraProps = {
+  r: OkRow;
+  info: RowInfo;
+  users: number;
+  onSuggest: () => void;
+  onSet: (n: number) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+};
+
+/**
+ * Feasible row header `extra` (outside the toggle): machine icons, count control, capacity bar, custom edit / delete,
+ * and — for an adjusted row — the speed line, which opens with a `grid-template-rows` 0fr → 1fr transition.
+ */
+export function RowExtra({ r, info, users, onSuggest, onSet, onEdit, onDelete }: ExtraProps): JSX.Element {
+  const tr = useT();
+  return (
+    <div className="row-extra fade-in">
+      <div className="row-icons">
+        {/* Adjusted rows draw no conservative outline: it belongs to the suggested amount (design §3.5). */}
+        <Isotype expected={r.count} conservative={r.adjusted ? null : r.conservative} unit={info.unit} gpusPerNode={info.gpusPerNode} />
+      </div>
+      <CountControl
+        unit={info.unit}
+        suggested={r.suggested}
+        count={r.count}
+        adjusted={r.adjusted}
+        onSuggest={onSuggest}
+        onSet={onSet}
+        label={tr('row.count', { name: info.name })}
+      />
+      <div className="row-capacity">
+        <CapacityBar users={users} max={r.perf.maxConcurrent} />
+      </div>
+      {info.custom !== null && <CustomActions onEdit={onEdit} onDelete={onDelete} />}
+      <div className={'reveal row-speed' + (r.adjusted ? ' on' : '')} aria-hidden={!r.adjusted}>
+        <div>{r.adjusted && <SpeedLine r={r} unit={info.unit} />}</div>
+      </div>
     </div>
+  );
+}
+
+/** Expanded content for now: the detail at the row's count (Task 5 replaces it with the workbench). */
+export function RowBody({ r, info, demoText, tdpConflict }: { r: OkRow; info: RowInfo; demoText: string; tdpConflict: string | null }): JSX.Element {
+  const tr = useT();
+  const { perf } = r;
+  if (!perf.usage) {
+    return <Typography.Text type="secondary">{perf.why ? tr(WHY[perf.why]) : perf.detail}</Typography.Text>;
+  }
+  // Core's note says power is unverified; the bundle's TDP record says why (its `conflict`), when it has one.
+  const note = perf.powerNote === undefined ? undefined : tdpConflict ? tr('detail.powerNote', { note: perf.powerNote, why: tdpConflict }) : perf.powerNote;
+  return (
+    <RowDetail
+      usage={perf.usage}
+      unit={info.unit}
+      demoText={demoText}
+      power={{ kw: perf.powerKw, ...(note !== undefined ? { note } : {}) }}
+      queueing={perf.queueing}
+    />
   );
 }

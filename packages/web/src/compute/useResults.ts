@@ -30,8 +30,11 @@ const notesOf = lastBy((s: CalcState, main: MainView): Record<string, ModelNote>
   main.kind === 'main' ? modelOptionNotes(getBundle(), s, main.rows) : null,
 );
 
-/** Input changes are deferred, so typing stays responsive while core recomputes. */
-function useDeferredState(): CalcState {
+/**
+ * Input changes are deferred, so typing stays responsive while core recomputes. Components that read state next to a
+ * view (e.g. a row's custom platform) read this one, so both describe the same inputs.
+ */
+export function useDeferredState(): CalcState {
   const [s] = useCalc();
   return useDeferredValue(s);
 }
