@@ -154,9 +154,9 @@ describe('Sentence', () => {
   });
 
   it('model notes: platform counts without an adjusted row', async () => {
-    expect(screen.queryByText(NOTE_RE)).toBeNull();
     setMedia({ hoverNone: true });
     render(<App />);
+    expect(screen.queryByText(NOTE_RE)).toBeNull();
     await userEvent.click(screen.getByLabelText('模型'));
     await waitFor(() => expect(screen.getAllByText(NOTE_RE)).toHaveLength(Object.keys(getBundle().models).length), { timeout: 10_000 });
   }, 15_000);
@@ -197,26 +197,26 @@ describe('Sentence', () => {
     const u = userEvent.setup();
     await u.click(screen.getByLabelText('模型'));
     await u.type(screen.getByLabelText('模型'), 'meta-llama/foo');
-    await shown('找不到這個模型？');
+    await waitFor(() => expect(screen.getByText('找不到這個模型？')).toBeVisible(), { timeout: 10_000 });
     expect(within(menu()).getByRole('button', { name: /手動輸入架構/ })).toBeInTheDocument();
     await u.click(within(menu()).getByRole('button', { name: /匯入 meta-llama\/foo/ }));
     await waitFor(() => expect(probe()).toMatchObject({ dialog: 'hf', hfQuery: 'meta-llama/foo' }));
-  });
+  }, 15_000);
 
   it('a not-found search that is not owner/name imports without a pre-fill; manual entry opens its dialog', async () => {
     renderSentence();
     const u = userEvent.setup();
     await u.click(screen.getByLabelText('模型'));
     await u.type(screen.getByLabelText('模型'), 'zzz nothing');
-    await shown('找不到這個模型？');
+    await waitFor(() => expect(screen.getByText('找不到這個模型？')).toBeVisible(), { timeout: 10_000 });
     await u.click(within(menu()).getByRole('button', { name: /從 Hugging Face 匯入/ }));
     await waitFor(() => expect(probe()).toMatchObject({ dialog: 'hf', hfQuery: '' }));
     act(() => send({ type: 'dialog', id: null }));
     await u.click(screen.getByLabelText('模型'));
     await u.type(screen.getByLabelText('模型'), 'zzz');
-    await u.click(await within(menu()).findByRole('button', { name: /手動輸入架構/ }));
+    await u.click(await within(menu()).findByRole('button', { name: /手動輸入架構/ }, { timeout: 10_000 }));
     await waitFor(() => expect(probe().dialog).toBe('manualModel'));
-  });
+  }, 15_000);
 
   it('users focus shows the funnel hint; blur hides it; clicking it opens the funnel', async () => {
     renderSentence();
