@@ -370,7 +370,7 @@
 # per-request TTFT overhead on MLX and DGX Spark, which no source supports.
 - id: gh-issue-12-mac-spark-calibration
   title: 本專案 GitHub issue #12「校正：Mac TTFT 誤差 +33.3%、Mac／DGX Spark 未量測的開銷與缺比對點」：記錄 Mac（MLX）與 DGX Spark 尚無每步固定開銷、首字開銷等實測，待國網量測
-  url: https://github.com/NCHC-bio/inference-deployment-calculator/issues/12
+  url: https://github.com/NCHC-bio/inference-calculator/issues/12
   accessed: 2026-10-21
   kind: internal
 - id: nchc-model-policy

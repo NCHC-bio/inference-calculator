@@ -26,6 +26,7 @@ import { antdTheme, useDarkMode, useReducedMotion } from './theme';
 function PageTheme({ dark }: { dark: boolean }) {
   const { token } = theme.useToken();
   const lang = useLang();
+  const tr = useT();
   useEffect(() => {
     const { body, documentElement } = document;
     body.style.background = token.colorBgLayout;
@@ -34,7 +35,9 @@ function PageTheme({ dark }: { dark: boolean }) {
   }, [token.colorBgLayout, token.colorText, dark]);
   useEffect(() => {
     document.documentElement.lang = lang;
-  }, [lang]);
+    // The tab and bookmark title follow the language switch (index.html carries the zh-TW default for crawlers).
+    document.title = tr('app.title');
+  }, [lang, tr]);
   return null;
 }
 

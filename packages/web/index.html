@@ -3,7 +3,64 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>推論部署試算</title>
+    <title>國網推論算力計算機｜NCHC Inference Calculator</title>
+    <meta
+      name="description"
+      content="輸入同時使用人數、工作、模型與精度，估算 H100、H200、GB200、Mac Studio、DGX Spark 各需要幾張 GPU，以及每人速度與首字等待；每個數字都附出處與可在機台上執行的驗證指令。"
+    />
+    <!-- Absolute URLs: link previews and crawlers need them (deployed by .github/workflows/deploy.yml). -->
+    <link rel="canonical" href="https://nchc-bio.github.io/inference-calculator/" />
+    <link rel="alternate" hreflang="zh-TW" href="https://nchc-bio.github.io/inference-calculator/" />
+    <link rel="alternate" hreflang="en" href="https://nchc-bio.github.io/inference-calculator/?lang=en" />
+    <link rel="alternate" hreflang="x-default" href="https://nchc-bio.github.io/inference-calculator/" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <meta name="theme-color" content="#1677ff" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="國網推論算力計算機" />
+    <meta property="og:title" content="國網推論算力計算機｜NCHC Inference Calculator" />
+    <meta
+      property="og:description"
+      content="N 人同時使用，要幾張 GPU？每人速度、首字等待一次看懂，每個數字都附出處與驗證指令。"
+    />
+    <meta property="og:url" content="https://nchc-bio.github.io/inference-calculator/" />
+    <meta property="og:image" content="https://nchc-bio.github.io/inference-calculator/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="國網推論算力計算機：輸入人數與模型，列出各平台需要的 GPU 數" />
+    <meta property="og:locale" content="zh_TW" />
+    <meta property="og:locale:alternate" content="en_US" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="國網推論算力計算機｜NCHC Inference Calculator" />
+    <meta
+      name="twitter:description"
+      content="N 人同時使用，要幾張 GPU？每人速度、首字等待一次看懂，每個數字都附出處與驗證指令。"
+    />
+    <meta name="twitter:image" content="https://nchc-bio.github.io/inference-calculator/og-image.png" />
+    <meta name="twitter:image:alt" content="國網推論算力計算機：輸入人數與模型，列出各平台需要的 GPU 數" />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "國網推論算力計算機",
+        "alternateName": "NCHC Inference Calculator",
+        "url": "https://nchc-bio.github.io/inference-calculator/",
+        "description": "估算部署 LLM 推論服務在 H100、H200、GB200、Mac Studio、DGX Spark 上需要的 GPU 數、每人速度與首字等待，每個數字附出處與驗證指令。",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Any",
+        "inLanguage": ["zh-TW", "en"],
+        "isAccessibleForFree": true,
+        "publisher": {
+          "@type": "Organization",
+          "name": "國家高速網路與計算中心",
+          "alternateName": "NCHC",
+          "logo": "https://nchc-bio.github.io/inference-calculator/nchc-logo.png"
+        },
+        "image": "https://nchc-bio.github.io/inference-calculator/og-image.png"
+      }
+    </script>
     <style>
       :root { --motion-dur: .4s; --motion-ease: cubic-bezier(.215, .61, .355, 1); }
       @media (prefers-reduced-motion: reduce) { :root { --motion-dur: 0s; } }
@@ -11,6 +68,10 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <h1>國網推論算力計算機</h1>
+      <p>輸入同時使用人數、工作、模型與精度，估算各平台需要幾張 GPU、每人速度與首字等待。這個計算機需要啟用 JavaScript。</p>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

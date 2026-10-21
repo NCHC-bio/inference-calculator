@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://nchc-bio.github.io/inference-calculator/sitemap.xml

@@ -1,15 +1,20 @@
 <div align="center">
 
-# 🧮 inference-deployment-calculator
+# 🧮 inference-calculator
 
 **國網推論算力計算機：這個推論工作負載，在國網每一種機台上要幾張卡？**
 
+[![Website](https://img.shields.io/badge/website-nchc--bio.github.io%2Finference--calculator-1677FF?logo=githubpages&logoColor=white)](https://nchc-bio.github.io/inference-calculator/)
 ![TypeScript](https://img.shields.io/badge/TypeScript-7.0-3178C6?logo=typescript&logoColor=white)
 ![Node](https://img.shields.io/badge/node-24-5FA04E?logo=nodedotjs&logoColor=white)
 ![pnpm](https://img.shields.io/badge/pnpm-12.9.1-F69220?logo=pnpm&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-754%20passed-brightgreen?logo=vitest&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-798%20passed-brightgreen?logo=vitest&logoColor=white)
 ![Models](https://img.shields.io/badge/models-14-2A6DB2)
 ![Status](https://img.shields.io/badge/status-core%20%C2%B7%20web%20done%20%C2%B7%20MCP%20pending-orange)
+
+[![國網推論算力計算機](packages/web/public/og-image.png)](https://nchc-bio.github.io/inference-calculator/)
+
+**[線上使用 →](https://nchc-bio.github.io/inference-calculator/)**
 
 </div>
 
@@ -33,7 +38,7 @@
 | `explain` | 這個數字用了哪些數值、出處與公式？ |
 | `verifyCommand` | 要怎麼在機台上驗證？ |
 
-範例：200 人用 gpt-oss-120b 聊天（實際輸出摘錄）
+範例：200 人用 gpt-oss-120b 聊天、速度目標「流暢」（實際輸出摘錄）
 
 | 平台 | GPU 數 | 每人速度 | 首字時間 |
 | --- | --- | --- | --- |
@@ -56,6 +61,12 @@ pnpm web:e2e       # 以 Playwright 在桌面與手機尺寸跑真實瀏覽器�
 ```
 
 網站（[packages/web](packages/web/)，純靜態，`pnpm web:build` 輸出到 `packages/web/dist/`）已完成 v8：填空句輸入、一行答案、每個平台一列；沒有模式切換，在自己那一列調卡數就是反向查詢（我的卡能撐多少人、多快）。點開一列是試算區：打字示範、使用率與記憶體組成、切法、卡數與人數兩張速度曲線、建議動作與驗證指令。可新增自訂硬體、從 Hugging Face 匯入或手動輸入模型、自訂工作與速度、把方案加入比較；依據與引用是 Modal，準確度在頁尾。版面在 390／768／1024／1440 px 以真實瀏覽器驗證無橫向捲動，動畫以逐格截圖驗證。MCP 尚未開始。[docs/prototypes/](docs/prototypes/) 裡的是早期的靜態 UI 原型。
+
+### 部署
+
+- **CI**（[ci.yml](.github/workflows/ci.yml)）：每次 push 與 PR 跑 `typecheck` → `data:build` → `test` → `web:build` → `calibrate`。`web:e2e` 需要瀏覽器，只在本機跑。
+- **CD**（[deploy.yml](.github/workflows/deploy.yml)）：push 到 `main` 時重跑 `typecheck` 與 `test`，再把 `packages/web/dist` 發布到 GitHub Pages：<https://nchc-bio.github.io/inference-calculator/>。第一次使用前，repo 管理員要在 Settings → Pages 把 Source 設為 GitHub Actions。
+- 連結預覽（Open Graph／Twitter）、`robots.txt` 與 `sitemap.xml` 在 [packages/web/public/](packages/web/public/)；預覽圖 `og-image.png` 是真實網站畫面的截圖，也可以上傳到 repo 的 Settings → Social preview。
 
 ## 🗺️ 架構
 
@@ -107,5 +118,6 @@ pnpm data:import <owner/repo> --developer <名稱> --country <ISO2>
 ## 📖 文件
 
 - [設計文件](docs/superpowers/specs/2026-10-19-inference-calculator-design.md)：計算模型、資料規則
-- [實作計畫](docs/superpowers/plans/2026-10-19-core-and-config.md)
+- [網站 v8 設計](docs/superpowers/specs/2026-10-21-direct-manipulation-design.md)：版面、互動、動畫與實作時的決定（§11）
+- 實作計畫：[core 與資料](docs/superpowers/plans/2026-10-19-core-and-config.md)、[網站主畫面](docs/superpowers/plans/2026-10-21-web-main-screen.md)、[core v8](docs/superpowers/plans/2026-10-21-core-v8.md)、[網站 v8](docs/superpowers/plans/2026-10-21-web-v8.md)
 - [研究筆記](docs/research/)
