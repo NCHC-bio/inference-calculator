@@ -95,6 +95,10 @@ function Body(): JSX.Element {
       {f.kind === 'result' && (
         <div data-testid="funnel-result" className="fade-in">
           <div style={{ fontSize: 20, fontWeight: 700 }}>{tr('funnel.result', { n: fmt(lang, f.r.users) })}</div>
+          {/* Over the users limit core clamps the result and says so; 套用到句子 applies the clamped value (v8 minor 10). */}
+          {f.r.capped && f.r.capNote && (
+            <Alert data-testid="funnel-capped" className="fade-in" type="warning" showIcon title={f.r.capNote} style={{ marginTop: 8 }} />
+          )}
           <Button
             type="primary"
             style={{ marginTop: 8 }}

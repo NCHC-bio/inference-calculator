@@ -182,6 +182,38 @@ describe('FunnelDrawer', () => {
   });
 });
 
+describe('FunnelDrawer cap (v8 minor 10)', () => {
+  it('a result over the users limit shows the capNote from core, and 套用到句子 applies the capped value', async () => {
+    renderWith(<FunnelDrawer />, '?w=chat');
+    openDialog({ type: 'dialog', id: 'funnel' });
+    const d = await drawer();
+    await fill(d, /總人數/, '1000000000');
+    await fill(d, /每位活躍者每日請求數/, '1000');
+    const r = peakConcurrentFromTotal(b, {
+      total: 1e9,
+      requestsPerActivePerDay: 1000,
+      workload: 'chat',
+      speed: state().speed,
+    });
+    expect(r.capped).toBe(true);
+    const alert = await within(d).findByTestId('funnel-capped');
+    expect(alert).toHaveClass('ant-alert-warning');
+    expect(alert).toHaveTextContent(r.capNote!);
+    await userEvent.click(within(d).getByRole('button', { name: '套用到句子' }));
+    expect(state().users).toBe(r.users);
+    expect(state().dialog).toBeNull();
+  });
+
+  it('an uncapped result shows no cap warning', async () => {
+    renderWith(<FunnelDrawer />, '?w=chat');
+    openDialog({ type: 'dialog', id: 'funnel' });
+    const d = await drawer();
+    await fill(d, /總人數/, '20000');
+    await within(d).findByTestId('funnel-result');
+    expect(within(d).queryByTestId('funnel-capped')).toBeNull();
+  });
+});
+
 describe('WorkloadDrawer', () => {
   it('workload drawer', async () => {
     renderWith(<WorkloadDrawer />, '?w=assist');
