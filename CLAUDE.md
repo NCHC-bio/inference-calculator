@@ -53,6 +53,19 @@ Hugging Face ──data:import──▶ config/models/*.yaml
 - Allocation unit is individual GPUs (not nodes); a replica uses TP ∈ {1,2,4,8} within one node, and TP must be legal per vLLM's rule (`legalTpOptions`). Macs are counted in machines.
 - Calibration points are tagged `fit` or `validate` and kept separate; tolerance is ±25% for decode tok/s and TTFT and ±10% for max concurrency.
 
+## Goal for imported models (issue #17)
+
+Any Hugging Face model a user imports must get numbers (memory, GPUs, speed): precise where the calculator models its architecture, a conservative estimate otherwise. Trust order of a value:
+
+**real benchmark > precise compute > estimate (推估) >>> error**
+
+- **Real benchmark**: measured on hardware (calibration points); catalog models in the suggest list are benchmarked by the team.
+- **Precise compute**: the architecture is modelled and every formula is sourced (vLLM source at a pinned tag, the model's official code, or the paper), recorded in `docs/research/*.md` and as a spec Ruling. Every trending architecture (the targets in `packages/data/test/fixtures/hf/`) must reach this tier.
+- **Estimate**: an architecture not modelled yet is computed from the standard config fields (hidden size, layers, heads, KV heads, head dim, vocab, MoE keys, checkpoint file sizes), always on the conservative side (more memory, slower). Values are `estimate` with basis and evidence (spec §2.1). The result tells the user plainly that the model's config is not standard and estimated values are used, lists the estimated parts, and offers a pre-filled request (GitHub issue form) to support the architecture precisely. Once it is modelled, every later import of that kind of model gets precise numbers.
+- **Error**: never an expected outcome. An import that fails is a bug to fix, not a case to document; tests never assert a refusal as correct. The error view keeps the report button so users can file the bug.
+- Not every config in the world can be modelled precisely, but nearly every model can be estimated; precise support is added architecture by architecture, trending ones first.
+- Test samples are trending repos snapshotted with `pnpm data:snapshot` (replayed by `test/hf-snapshots.test.ts`); each must import, with its key fields asserted and its tier (precise or estimate) checked.
+
 ## Design goals (website)
 
 - The calculator must be able to answer **every question a real user brings**, not just "how many GPUs": forward (users → GPUs), reverse (my hardware → users, and speed at my user count), budget-limited (fewer cards than suggested: what do I get, what to relax) and well-funded (more cards: how much faster, when it stops helping, bigger models), trade-offs (precision, model size, context vs users, TP split), comparison, growth planning, custom hardware/model/workload/speed, trust (why, sources, verify command, accuracy) and output (citation, share). Do not assume users can reach the suggested amount. The question catalogue and personas are in `docs/research/user-questions.md` and `docs/research/usability-test-v4.md`.
