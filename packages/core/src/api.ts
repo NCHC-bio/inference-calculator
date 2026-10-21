@@ -156,7 +156,14 @@ export type QueryInput = z.input<typeof QueryInputSchema>;
  */
 export const CustomPlatformInputSchema = z
   .strictObject({
-    name: z.string().trim().min(1).max(100),
+    // No control or line-separator characters: the name lands in verify-command comment lines, and a newline would turn
+    // the rest of a shared link's name into a shell command.
+    name: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .regex(/^[^\p{Cc}\p{Zl}\p{Zp}]+$/u, 'name must be one line without control characters'),
     unit: z.enum(['gpu', 'machine']),
     gpusPerNode: z.number().int().min(1).max(8),
     memGB: z.number().positive().max(1e5),
@@ -1183,6 +1190,11 @@ const VerifyArgsSchema = z.strictObject({
   }),
 });
 
+/** A display string flattened to one line before it lands in a shell comment (second guard behind the input schema). */
+function oneLine(s: string): string {
+  return s.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ');
+}
+
 export function verifyCommand(
   platform: ResolvedPlatform & { engine?: 'vllm' | 'mlx'; vllmDefaults?: { maxNumSeqs: number; maxNumBatchedTokens: number; maxConcurrentBatches: number } },
   shape: Shape,
@@ -1316,7 +1328,7 @@ export function verifyCommand(
     const step = platform.prefillStepTokens !== undefined ? ` --prefill-step-size ${platform.prefillStepTokens}` : '';
     const cacheSize = prefixRep && residentRep > 10 ? ` --prompt-cache-size ${residentRep}` : '';
     return [
-      `# ${platform.name} ${platform.sub}：以 mlx_lm 啟動 OpenAI 相容服務（模型需為 MLX 格式），再以相同參數量測`,
+      `# ${oneLine(platform.name)} ${oneLine(platform.sub)}：以 mlx_lm 啟動 OpenAI 相容服務（模型需為 MLX 格式），再以相同參數量測`,
       `# 請把 <MLX ${bits}-bit checkpoint of …> 換成位元數相同的 MLX 量化版本（mlx_lm.server 只能載入 MLX 格式；目錄中的 checkpoint 不是）`,
       `# mlx_lm.server 沒有量化、記憶體比例、上下文長度等啟動參數；本估算假設：${weights}、` +
         `KV cache 每元素 ${kvElem} bytes、可用記憶體 = 實體記憶體 × ${memUtil}、每個請求的上下文 ${context} token（輸入 ${workload.inputTokens} + 輸出 ${workload.outputTokens}）`,
@@ -1376,7 +1388,7 @@ export function verifyCommand(
         ]
       : [];
   const lines = [
-    `# ${platform.name} ${platform.sub}：每份模型 ${shape.tp} ${platform.unit === 'machine' ? '台' : '張 GPU'}` +
+    `# ${oneLine(platform.name)} ${oneLine(platform.sub)}：每份模型 ${shape.tp} ${platform.unit === 'machine' ? '台' : '張 GPU'}` +
       (R > 1
         ? `，共 ${R} 份。完整部署時每個 node 可放 ${perNode} 份模型，以 CUDA_VISIBLE_DEVICES 分配不同的 GPU、各用不同的 --port，前面加負載平衡`
         : ''),
