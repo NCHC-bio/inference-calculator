@@ -173,12 +173,15 @@ describe('domain schemas', () => {
         agentGeneratingShare: off(0.033), chatRule: off('r'), agentRule: off('r'), queueRule: off('r'),
       }, benchmark: { maxModelLenMarginTokens: off(256) },
       calibrationPoints: {}, skippedCalibrationPoints: {}, calibrationGaps: {},
+      customHardware: { templates: { vllm: { platform: 'p', rationale: 'r', evidence: ['s'] }, mlx: { platform: 'p', rationale: 'r', evidence: ['s'] } } },
     };
     expect(BundleSchema.safeParse(bundle).success).toBe(true);
     const { policy: _p, ...noPolicy } = bundle;
     expect(BundleSchema.safeParse(noPolicy).success).toBe(false);
     const { benchmark: _b, ...noBenchmark } = bundle;
     expect(BundleSchema.safeParse(noBenchmark).success).toBe(false);
+    const { customHardware: _ch, ...noCustomHardware } = bundle;
+    expect(BundleSchema.safeParse(noCustomHardware).success).toBe(false);
   });
 });
 

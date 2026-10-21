@@ -9,7 +9,9 @@
  * Pure: no Node or DOM APIs; the bundle is passed in.
  */
 import { z } from 'zod';
-import { HfRepoSchema, LayerGroupSchema, type Bundle, type Hardware, type Model, type Quantization } from '@nchc/schema';
+import {
+  HfRepoSchema, LayerGroupSchema, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
+} from '@nchc/schema';
 import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } from './basis';
 import {
   capacityWhy,
@@ -141,8 +143,35 @@ export const QueryInputSchema = z.strictObject({
 });
 export type QueryInput = z.input<typeof QueryInputSchema>;
 
-export const RequirementInputSchema = QueryInputSchema.extend({ users: usersSchema });
-/** estimateRequirements input: a QueryInput whose `users` is required. */
+/**
+ * A user-entered GPU or machine (spec 2026-10-21-direct-manipulation-design §5.3). `tflops` is the dense peak per GPU,
+ * used for any compute dtype; a machine is one per node.
+ */
+export const CustomPlatformInputSchema = z
+  .strictObject({
+    name: z.string().trim().min(1).max(100),
+    unit: z.enum(['gpu', 'machine']),
+    gpusPerNode: z.number().int().min(1).max(8),
+    memGB: z.number().positive().max(1e5),
+    memBwTBs: z.number().positive().max(1e3),
+    tflops: z.number().positive().max(1e6),
+    tdpW: z.number().positive().max(1e5).optional(),
+    nvlinkBidirGBs: z.number().positive().max(1e5).optional(),
+    engine: z.enum(['vllm', 'mlx']),
+  })
+  .refine((c) => c.unit === 'gpu' || c.gpusPerNode === 1, {
+    path: ['gpusPerNode'],
+    message: 'unit machine is one per node: gpusPerNode must be 1',
+  });
+export type CustomPlatformInput = z.input<typeof CustomPlatformInputSchema>;
+
+/** A QueryInput whose `users` is required (the base of estimateRequirements' and estimatePerformance's inputs). */
+export const UsersQueryInputSchema = QueryInputSchema.extend({ users: usersSchema });
+export const RequirementInputSchema = UsersQueryInputSchema.extend({
+  /** User-entered platforms, evaluated after the catalog as `custom:<i>` (spec 2026-10-21 §5.3). */
+  customPlatforms: z.array(CustomPlatformInputSchema).max(8).optional(),
+});
+/** estimateRequirements input: a QueryInput whose `users` is required, plus optional custom platforms. */
 export type RequirementInput = z.input<typeof RequirementInputSchema>;
 /** Capacity input: no `users` (the capacity is the answer; final-review M16 — it used to be accepted and ignored). */
 const CapacityInputSchema = QueryInputSchema.omit({ users: true }).extend({
@@ -195,11 +224,27 @@ function lookup<T>(rec: Record<string, T>, id: string, what: string): T {
  * Peak FLOPS: the dense value for `computeDtype` [R-LEC C1, C2], else `effective` (Mac).
  * Engine: the calibration profile's `engine` (review M-6).
  */
-export function resolvePlatform(
-  bundle: Bundle,
-  id: string,
-  computeDtype: Quantization['computeDtype'],
-): {
+export function resolvePlatform(bundle: Bundle, id: string, computeDtype: Quantization['computeDtype']): ResolvedApiPlatform {
+  const p = lookup(bundle.platforms, id, '平台');
+  const hw: Hardware = lookup(bundle.hardware, p.hardware, '硬體');
+  const cal = lookup(bundle.calibration, p.calibration, '校正設定');
+  const prefix = { platform: `platforms.${p.id}`, hardware: `hardware.${hw.id}`, calibration: `calibration.${cal.id}` };
+  return resolveFrom(p, hw, cal, computeDtype, {
+    item: (kind, field, label, s, lecRef) => fromSourced(`${prefix[kind]}.${field}`, label, s, lecRef),
+  });
+}
+
+/** Where a platform value comes from: the platform entry, its hardware or its calibration profile. */
+type ValueKind = 'platform' | 'hardware' | 'calibration';
+
+/** How resolveFrom turns each value it uses into a basis item (catalog: fromSourced; custom: user / borrowed). */
+type ResolveOpts = {
+  /** `field` is the value's dotted path inside its section (`memGB`, `tflops.fp8`, `vllmDefaults.maxNumSeqs`). */
+  item(kind: ValueKind, field: string, label: string, s: Parameters<typeof fromSourced>[2], lecRef?: string): BasisItem;
+};
+
+/** A platform resolved for one compute dtype (resolvePlatform / resolveCustomPlatform). */
+export type ResolvedApiPlatform = {
   platform: ApiPlatform;
   /** Values every calculation on this platform uses. */
   basis: BasisItem[];
@@ -219,13 +264,21 @@ export function resolvePlatform(
   kvBlockBasis?: KvBlockBasis;
   /** mlx-lm prefill_step_size (MLX only): added by ctxForPlatform when a prompt takes more than one chunk (Ruling R38). */
   prefillStepBasis?: BasisItem;
-} {
-  const p = lookup(bundle.platforms, id, '平台');
-  const hw: Hardware = lookup(bundle.hardware, p.hardware, '硬體');
-  const cal = lookup(bundle.calibration, p.calibration, '校正設定');
+};
+
+/**
+ * The one resolution of a platform entry, its hardware and its calibration profile (resolvePlatform for the catalog,
+ * resolveCustomPlatform for a user-entered one); `opts.item` builds every basis item.
+ */
+function resolveFrom(
+  p: Platform,
+  hw: Hardware,
+  cal: CalibrationProfile,
+  computeDtype: Quantization['computeDtype'],
+  opts: ResolveOpts,
+): ResolvedApiPlatform {
   const b = new BasisCollector();
-  const hwp = `hardware.${hw.id}`;
-  const calp = `calibration.${cal.id}`;
+  const { item } = opts;
 
   const peakKey = hw.tflops[computeDtype] ? computeDtype : hw.tflops.effective ? 'effective' : null;
   if (peakKey === null) {
@@ -234,28 +287,24 @@ export function resolvePlatform(
   const peak = hw.tflops[peakKey]!;
 
   b.add(
-    fromSourced(`platforms.${p.id}.gpusPerNode`, `${p.name} ${p.sub} 每 node 卡數`, p.gpusPerNode),
-    fromSourced(`${hwp}.memGB`, `${hw.name} 記憶體容量`, hw.memGB),
-    fromSourced(`${hwp}.memBwTBs`, `${hw.name} 記憶體頻寬`, hw.memBwTBs, 'B1'),
-    fromSourced(`${hwp}.tflops.${peakKey}`, `${hw.name} ${peakKey} 峰值算力（dense）`, peak, 'A4, C1, C2'),
+    item('platform', 'gpusPerNode', `${p.name} ${p.sub} 每 node 卡數`, p.gpusPerNode),
+    item('hardware', 'memGB', `${hw.name} 記憶體容量`, hw.memGB),
+    item('hardware', 'memBwTBs', `${hw.name} 記憶體頻寬`, hw.memBwTBs, 'B1'),
+    item('hardware', `tflops.${peakKey}`, `${hw.name} ${peakKey} 峰值算力（dense）`, peak, 'A4, C1, C2'),
     // η_bw has no lecture counterpart (lecture-formulas.md A4, B1): the calculator adds it by analogy with A4's
     // utilisation; its value is the calibration profile's, so no lecRef (review L5).
-    fromSourced(`${calp}.etaBw`, '頻寬效率 η_bw（預期；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBw),
-    fromSourced(`${calp}.etaBwLow`, '頻寬效率 η_bw（保守；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBwLow),
-    fromSourced(`${calp}.etaCompute`, '算力效率 η_compute', cal.etaCompute, 'A4'),
-    fromSourced(`${calp}.memUtil`, '記憶體可用比例', cal.memUtil),
+    item('calibration', 'etaBw', '頻寬效率 η_bw（預期；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBw),
+    item('calibration', 'etaBwLow', '頻寬效率 η_bw（保守；講義無對應項，計算機比照 A4 的利用率補充，值取自校正設定）', cal.etaBwLow),
+    item('calibration', 'etaCompute', '算力效率 η_compute', cal.etaCompute, 'A4'),
+    item('calibration', 'memUtil', '記憶體可用比例', cal.memUtil),
   );
   const latency = p.allreduceLatencyUs ?? cal.allreduceLatencyUs;
   const commBasis: BasisItem[] = [];
-  if (hw.nvlinkBidirGBs) commBasis.push(fromSourced(`${hwp}.nvlinkBidirGBs`, `${hw.name} NVLink 雙向頻寬`, hw.nvlinkBidirGBs));
+  if (hw.nvlinkBidirGBs) commBasis.push(item('hardware', 'nvlinkBidirGBs', `${hw.name} NVLink 雙向頻寬`, hw.nvlinkBidirGBs));
   commBasis.push(
-    fromSourced(
-      p.allreduceLatencyUs ? `platforms.${p.id}.allreduceLatencyUs` : `${calp}.allreduceLatencyUs`,
-      'all-reduce 延遲',
-      latency,
-    ),
+    item(p.allreduceLatencyUs ? 'platform' : 'calibration', 'allreduceLatencyUs', 'all-reduce 延遲', latency),
   );
-  const tdpBasis = fromSourced(`${hwp}.tdpW`, `${hw.name} TDP`, hw.tdpW, 'D1');
+  const tdpBasis = item('hardware', 'tdpW', `${hw.name} TDP`, hw.tdpW, 'D1');
 
   const memBytes = hw.memGB.value * 1e9;
   const bw = hw.memBwTBs.value * 1e12;
@@ -332,19 +381,19 @@ export function resolvePlatform(
     },
   };
   const kvOverrideBasis = cal.kvBytesPerElemOverride
-    ? fromSourced(`${calp}.kvBytesPerElemOverride`, 'KV cache 每元素位元組（推論引擎固定，取代量化格式的值）', cal.kvBytesPerElemOverride, 'B3, C1')
+    ? item('calibration', 'kvBytesPerElemOverride', 'KV cache 每元素位元組（推論引擎固定，取代量化格式的值）', cal.kvBytesPerElemOverride, 'B3, C1')
     : undefined;
   const vd = p.vllmDefaults;
   const vllmDefaultsBasis = vd
     ? {
-        maxNumSeqs: fromSourced(`platforms.${p.id}.vllmDefaults.maxNumSeqs`, `${p.name} ${p.sub} vLLM 預設 max_num_seqs`, vd.maxNumSeqs),
-        maxNumBatchedTokens: fromSourced(
-          `platforms.${p.id}.vllmDefaults.maxNumBatchedTokens`,
+        maxNumSeqs: item('platform', 'vllmDefaults.maxNumSeqs', `${p.name} ${p.sub} vLLM 預設 max_num_seqs`, vd.maxNumSeqs),
+        maxNumBatchedTokens: item(
+          'platform', 'vllmDefaults.maxNumBatchedTokens',
           `${p.name} ${p.sub} vLLM 預設 max_num_batched_tokens（每步 chunked prefill 的 token 上限；sliding window 層在 window 之外暫存進行中的 chunk）`,
           vd.maxNumBatchedTokens,
         ),
-        maxConcurrentBatches: fromSourced(
-          `platforms.${p.id}.vllmDefaults.maxConcurrentBatches`,
+        maxConcurrentBatches: item(
+          'platform', 'vllmDefaults.maxConcurrentBatches',
           `${p.name} ${p.sub} vLLM 同時進行的批次數 max_concurrent_batches（async scheduling 預設開啟、PP = 1：2）；× max_num_batched_tokens = 進行中 token 上限`,
           vd.maxConcurrentBatches,
         ),
@@ -354,19 +403,19 @@ export function resolvePlatform(
     cal.engine === 'vllm' && vd
       ? {
           engine: 'vllm',
-          standard: fromSourced(`platforms.${p.id}.vllmDefaults.kvBlockSize`, `${p.name} ${p.sub} vLLM KV block 大小（token；KV 以整個 block 配置）`, vd.kvBlockSize),
-          mlaFp8Kv: fromSourced(`platforms.${p.id}.vllmDefaults.mlaKvBlockSize.fp8Kv`, `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（FP8 KV，token）`, vd.mlaKvBlockSize.fp8Kv),
-          mlaBf16Kv: fromSourced(`platforms.${p.id}.vllmDefaults.mlaKvBlockSize.bf16Kv`, `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（16-bit KV，token）`, vd.mlaKvBlockSize.bf16Kv),
+          standard: item('platform', 'vllmDefaults.kvBlockSize', `${p.name} ${p.sub} vLLM KV block 大小（token；KV 以整個 block 配置）`, vd.kvBlockSize),
+          mlaFp8Kv: item('platform', 'vllmDefaults.mlaKvBlockSize.fp8Kv', `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（FP8 KV，token）`, vd.mlaKvBlockSize.fp8Kv),
+          mlaBf16Kv: item('platform', 'vllmDefaults.mlaKvBlockSize.bf16Kv', `${p.name} ${p.sub} vLLM MLA backend 的 KV block 大小（16-bit KV，token）`, vd.mlaKvBlockSize.bf16Kv),
           ...(vd.mlaKvBlockSize.otherwise
             ? {
                 mlaOtherwise: {
-                  fp8Kv: fromSourced(
-                    `platforms.${p.id}.vllmDefaults.mlaKvBlockSize.otherwise.fp8Kv`,
+                  fp8Kv: item(
+                    'platform', 'vllmDefaults.mlaKvBlockSize.otherwise.fp8Kv',
                     `${p.name} ${p.sub} vLLM MLA 備用 backend 的 KV block 大小（qk_nope_head_dim 不在 ${vd.mlaKvBlockSize.qkNopeHeadDims?.join('／')} 時；FP8 KV，token）`,
                     vd.mlaKvBlockSize.otherwise.fp8Kv,
                   ),
-                  bf16Kv: fromSourced(
-                    `platforms.${p.id}.vllmDefaults.mlaKvBlockSize.otherwise.bf16Kv`,
+                  bf16Kv: item(
+                    'platform', 'vllmDefaults.mlaKvBlockSize.otherwise.bf16Kv',
                     `${p.name} ${p.sub} vLLM MLA 備用 backend 的 KV block 大小（qk_nope_head_dim 不在 ${vd.mlaKvBlockSize.qkNopeHeadDims?.join('／')} 時；16-bit KV，token）`,
                     vd.mlaKvBlockSize.otherwise.bf16Kv,
                   ),
@@ -375,25 +424,86 @@ export function resolvePlatform(
             : {}),
         }
       : cal.engine === 'mlx' && cal.mlxDefaults
-        ? { engine: 'mlx', step: fromSourced(`${calp}.mlxDefaults.kvCacheStep`, 'mlx-lm KVCache 每次擴充的 token 數（KV 以此為單位配置）', cal.mlxDefaults.kvCacheStep) }
+        ? { engine: 'mlx', step: item('calibration', 'mlxDefaults.kvCacheStep', 'mlx-lm KVCache 每次擴充的 token 數（KV 以此為單位配置）', cal.mlxDefaults.kvCacheStep) }
         : undefined;
   return {
     platform, basis: b.list(), ...(kvOverrideBasis ? { kvOverrideBasis } : {}), tdpBasis, commBasis,
-    tFixedBasis: fromSourced(`${calp}.tFixedSec`, '每步固定開銷 t_fixed（秒；decode 每步、prefill 每段各一次）', cal.tFixedSec, 'G2'),
+    tFixedBasis: item('calibration', 'tFixedSec', '每步固定開銷 t_fixed（秒；decode 每步、prefill 每段各一次）', cal.tFixedSec, 'G2'),
     // No lecture formula: the value and its form come from the R41 calibration only (final-review M7).
-    ttftOverheadBasis: fromSourced(`${calp}.ttftOverheadSec`, '每個請求的首字固定開銷（秒；每個請求一次，加在 TTFT；形式與數值都來自 Ruling R41 的校正擬合）', cal.ttftOverheadSec),
+    ttftOverheadBasis: item('calibration', 'ttftOverheadSec', '每個請求的首字固定開銷（秒；每個請求一次，加在 TTFT；形式與數值都來自 Ruling R41 的校正擬合）', cal.ttftOverheadSec),
     ...(vllmDefaultsBasis ? { vllmDefaultsBasis } : {}),
     ...(kvBlockBasis ? { kvBlockBasis } : {}),
     ...(cal.engine === 'mlx' && cal.mlxDefaults
       ? {
-          prefillStepBasis: fromSourced(
-            `${calp}.mlxDefaults.prefillStepSize`,
+          prefillStepBasis: item(
+            'calibration', 'mlxDefaults.prefillStepSize',
             'mlx-lm prefill_step_size（prompt 每段的 token 數；每段重讀一次權重）',
             cal.mlxDefaults.prefillStepSize,
           ),
         }
       : {}),
   };
+}
+
+/**
+ * Placeholder provenance for a user value inside the synthetic Hardware / Platform; never shown, because
+ * resolveCustomPlatform's `item` turns every user value into a fromUser item.
+ */
+const userValue = <T>(value: T) => ({ value, status: 'unverified' as const, verified: '' });
+
+/**
+ * Resolve a custom platform (spec 2026-10-21 §5.3) through the same resolveFrom as the catalog: the user's numbers are
+ * `user` in the basis; the efficiency factors, all-reduce latency, t_fixed, TTFT overhead, vLLM defaults and KV block
+ * size come from `bundle.customHardware.templates[engine].platform` and are `estimate` ("borrowed"), citing the template
+ * value's sources plus the template's evidence. tpOptions: {1, 2, 4, 8} ≤ gpusPerNode when an interconnect bandwidth is
+ * given and the borrowed all-reduce latency is > 0 (Ruling R14), else [1]. Basis paths are `custom.<field>`.
+ */
+export function resolveCustomPlatform(
+  bundle: Bundle,
+  raw: CustomPlatformInput,
+  computeDtype: Quantization['computeDtype'],
+): ResolvedApiPlatform {
+  const input = parseInput(CustomPlatformInputSchema, raw);
+  const tpl = bundle.customHardware.templates[input.engine];
+  const tplPlat = lookup(bundle.platforms, tpl.platform, '平台');
+  const cal = lookup(bundle.calibration, tplPlat.calibration, '校正設定');
+  if (cal.engine !== input.engine) throw new Error(`自訂硬體範本 ${tpl.platform} 的引擎是 ${cal.engine}，不是 ${input.engine}`);
+  const latency = tplPlat.allreduceLatencyUs ?? cal.allreduceLatencyUs;
+  const canSplit = input.nvlinkBidirGBs !== undefined && latency.value > 0;
+  const hw: Hardware = {
+    id: 'custom',
+    name: input.name,
+    memGB: userValue(input.memGB),
+    memBwTBs: userValue(input.memBwTBs),
+    tflops: { [computeDtype]: userValue(input.tflops) },
+    tdpW: userValue(input.tdpW ?? null),
+    ...(input.nvlinkBidirGBs !== undefined ? { nvlinkBidirGBs: userValue(input.nvlinkBidirGBs) } : {}),
+  };
+  const p: Platform = {
+    id: 'custom',
+    name: input.name,
+    sub: '自訂',
+    group: 'self',
+    unit: input.unit,
+    hardware: hw.id,
+    gpusPerNode: userValue(input.gpusPerNode),
+    tpOptions: canSplit ? ([1, 2, 4, 8] as const).filter((t) => t <= input.gpusPerNode) : [1],
+    calibration: cal.id,
+    ...(tplPlat.allreduceLatencyUs ? { allreduceLatencyUs: tplPlat.allreduceLatencyUs } : {}),
+    ...(tplPlat.vllmDefaults ? { vllmDefaults: tplPlat.vllmDefaults } : {}),
+  };
+  const borrowed = `這台硬體沒有實測，借用 ${tpl.platform} 的校正值（${tpl.rationale}）`;
+  return resolveFrom(p, hw, cal, computeDtype, {
+    item: (kind, field, label, s, lecRef) => {
+      const path = `custom.${field}`;
+      if (kind === 'hardware' || field === 'gpusPerNode') {
+        const u = fromUser(path, label, s.value, lecRef);
+        return s.value === null ? { ...u, text: `${label}；使用者未填` } : u;
+      }
+      const from = fromSourced(path, label, s, lecRef);
+      return { ...from, status: 'estimate', sourceIds: [...new Set([...from.sourceIds, ...tpl.evidence])], text: `${from.text}；${borrowed}` };
+    },
+  });
 }
 
 /**
@@ -497,7 +607,9 @@ export function powerFor(
 ): { powerKw: number | null; powerNote?: string } {
   if (!ok) return { powerKw: null, powerNote: '沒有可行配置，未計算功耗' };
   basis.add(resolved.tdpBasis);
-  if (resolved.platform.tdpW === null) return { powerKw: null, powerNote: '功耗未查證' };
+  if (resolved.platform.tdpW === null) {
+    return { powerKw: null, powerNote: resolved.tdpBasis.status === 'user' ? '未填 TDP，未計算功耗' : '功耗未查證' };
+  }
   return { powerKw: (gpus * resolved.platform.tdpW) / 1000 };
 }
 
@@ -1243,7 +1355,7 @@ export function verifyFor(
   ctx: Ctx,
   quant: Quantization,
   qres: QuantResolution,
-  resolved: ReturnType<typeof resolvePlatform>,
+  resolved: ResolvedApiPlatform,
   basis: BasisCollector,
   solved: { ok: true; shape: Shape; queueing: Queueing | null } | { ok: false; why: Why; detail: string },
   n: number,
@@ -1370,8 +1482,7 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
   const common = basis.list();
 
   // One platform's result; `basis` here is that platform's own collector (review M-11).
-  const build = (id: string, basis: BasisCollector): Omit<PlatformResult, 'basis' | 'hasEstimate' | 'hasUser'> => {
-    const resolved = resolvePlatform(bundle, id, quant.computeDtype);
+  const build = (id: string, resolved: ResolvedApiPlatform, basis: BasisCollector): Omit<PlatformResult, 'basis' | 'hasEstimate' | 'hasUser'> => {
     const { platform } = resolved;
     basis.add(...resolved.basis);
     const ctx = ctxForPlatform(baseCtx, quant, resolved, basis);
@@ -1405,17 +1516,23 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
     if (v.verifyNote !== undefined) res.verifyNote = v.verifyNote;
     return res;
   };
-  const perPlatform: PlatformResult[] = Object.keys(bundle.platforms).map((id) => {
+  const result = (id: string, resolved: ResolvedApiPlatform): PlatformResult => {
     const own = new BasisCollector().add(...common);
-    const res = build(id, own);
+    const res = build(id, resolved, own);
     const list = own.list();
     basis.add(...list);
     return { ...res, basis: list, ...trustFlags(list) };
-  });
+  };
+  // Catalog platforms first, then the user's own (spec 2026-10-21 §5.3), through the same build.
+  const perPlatform: PlatformResult[] = [
+    ...Object.keys(bundle.platforms).map((id) => result(id, resolvePlatform(bundle, id, quant.computeDtype))),
+    ...(input.customPlatforms ?? []).map((cp, i) => result(`custom:${i}`, resolveCustomPlatform(bundle, cp, quant.computeDtype))),
+  ];
 
   let best: { id: string; gpus: number } | null = null;
   for (const r of perPlatform) {
-    if (bundle.platforms[r.platform]!.group !== 'nchc' || !r.expected.ok) continue;
+    // Only NCHC catalog platforms compete; custom platforms (group self, not in the bundle) never do.
+    if (bundle.platforms[r.platform]?.group !== 'nchc' || !r.expected.ok) continue;
     if (!best || r.expected.gpus < best.gpus) best = { id: r.platform, gpus: r.expected.gpus };
   }
 

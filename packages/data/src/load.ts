@@ -18,6 +18,7 @@ export const CONFIG_FILES = {
   quantization: 'quantization.yaml',
   workloads: 'workloads.yaml',
   calibration: 'calibration.yaml',
+  customHardware: 'custom-hardware.yaml',
 } as const;
 export type ConfigSection = keyof typeof CONFIG_FILES;
 

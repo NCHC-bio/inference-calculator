@@ -15,3 +15,12 @@
     mlaKvBlockSize:
       fp8Kv: { value: 64, status: official, source: fx-src, verified: 2026-10-20 }
       bf16Kv: { value: 16, status: official, source: fx-src, verified: 2026-10-20 }
+- id: fx-mac
+  name: Fixture Mac
+  sub: fixture
+  group: self
+  unit: machine
+  hardware: fx-mac-hw
+  gpusPerNode: { value: 1, status: official, source: fx-src, verified: 2026-10-21 }
+  tpOptions: [1]
+  calibration: fx-mlx

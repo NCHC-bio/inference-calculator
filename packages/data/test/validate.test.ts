@@ -240,6 +240,32 @@ describe('validateConfig', () => {
     expect(validateConfig(loadFixture('no-nvlink')).bundle).toBeUndefined();
   });
 
+  it('custom-hardware template must exist and match its engine', () => {
+    const raw = loadFixture('good');
+    const ch = raw.docs.customHardware!;
+    const withTemplates = (vllm: string, mlx: string): RawConfig => {
+      const data = structuredClone(ch.data) as { templates: Record<string, { platform: string }> };
+      data.templates.vllm!.platform = vllm;
+      data.templates.mlx!.platform = mlx;
+      return { ...raw, docs: { ...raw.docs, customHardware: { ...ch, data } } };
+    };
+    expect(errors2(withTemplates('fx-nope', 'fx-mac'))).toEqual([
+      expect.objectContaining({ file: 'custom-hardware.yaml', path: 'customHardware.templates.vllm.platform', message: "unknown platform id 'fx-nope'" }),
+    ]);
+    expect(errors2(withTemplates('fx-mac', 'fx-mac'))).toEqual([
+      expect.objectContaining({ path: 'customHardware.templates.vllm.platform', message: expect.stringContaining("engine 'mlx'") }),
+    ]);
+    // Evidence ids are source ids like any other.
+    const data = structuredClone(ch.data) as { templates: Record<string, { evidence: string[] }> };
+    data.templates.mlx!.evidence = ['no-such-source'];
+    expect(errors2({ ...raw, docs: { ...raw.docs, customHardware: { ...ch, data } } }).map((i) => i.path)).toEqual([
+      'customHardware.templates.mlx.evidence[0]',
+    ]);
+    expect(validateConfig(raw).bundle?.customHardware.templates.mlx.platform).toBe('fx-mac');
+    // The real config.
+    expect(errors2(loadConfig(fileURLToPath(new URL('../../../config', import.meta.url))))).toEqual([]);
+  });
+
   it('vllmDefaults: required on a vLLM platform, refused on an MLX one (review L9, L10)', () => {
     const raw = loadFixture('good');
     const pl = raw.docs.platforms!;

@@ -464,3 +464,20 @@ export const CalibrationGapSchema = z.strictObject({
   note: z.string().min(1),
 });
 export type CalibrationGap = z.infer<typeof CalibrationGapSchema>;
+
+/**
+ * Template platform a user-entered (custom) platform of one engine borrows its efficiency factors, vLLM defaults and KV
+ * block size from (spec 2026-10-21-direct-manipulation-design §5.3, §6.2). The validator checks that `platform` exists
+ * and that its calibration profile's engine equals the key; `evidence` are source ids.
+ */
+const CustomHardwareTemplateSchema = z.strictObject({
+  platform: id,
+  rationale: z.string().min(1),
+  evidence: z.array(id).min(1),
+});
+export type CustomHardwareTemplate = z.infer<typeof CustomHardwareTemplateSchema>;
+
+export const CustomHardwareSchema = z.strictObject({
+  templates: z.strictObject({ vllm: CustomHardwareTemplateSchema, mlx: CustomHardwareTemplateSchema }),
+});
+export type CustomHardware = z.infer<typeof CustomHardwareSchema>;

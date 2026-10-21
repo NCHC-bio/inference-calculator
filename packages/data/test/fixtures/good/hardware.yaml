@@ -7,3 +7,10 @@
     bf16: { value: 1000, status: official, source: fx-src, verified: 2026-10-19 }
   tdpW: { value: null, status: unverified, source: fx-src, conflict: fixture, verified: 2026-10-19 }
   nvlinkBidirGBs: { value: 900, unit: GB/s, status: official, source: fx-src, verified: 2026-10-19 }
+- id: fx-mac-hw
+  name: Fixture Mac hardware
+  memGB: { value: 128, unit: GB, status: official, source: fx-src, verified: 2026-10-21 }
+  memBwTBs: { value: 0.5, unit: TB/s, status: official, source: fx-src, verified: 2026-10-21 }
+  tflops:
+    effective: { value: 30, status: official, source: fx-src, verified: 2026-10-21 }
+  tdpW: { value: 200, status: official, source: fx-src, verified: 2026-10-21 }

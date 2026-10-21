@@ -7,3 +7,12 @@
   gpusPerNode: { value: 8, status: official, source: fx-src, verified: 2026-10-19 }
   tpOptions: [1, 2, 4, 8]
   calibration: fx-cal
+- id: fx-mac
+  name: Fixture Mac
+  sub: fixture
+  group: self
+  unit: machine
+  hardware: fx-mac-hw
+  gpusPerNode: { value: 1, status: official, source: fx-src, verified: 2026-10-21 }
+  tpOptions: [1]
+  calibration: fx-mlx

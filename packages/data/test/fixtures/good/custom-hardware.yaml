@@ -1,0 +1,3 @@
+templates:
+  vllm: { platform: fx-node, rationale: fixture, evidence: [fx-src] }
+  mlx: { platform: fx-mac, rationale: fixture, evidence: [fx-src] }

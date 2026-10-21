@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import {
   BenchmarkRuleSchema, BundleSchema, CalibrationPointSchema, CalibrationProfileSchema, ConcurrencyRuleSchema, HardwareSchema,
-  MetaSchema, ModelSchema, PlatformSchema, PolicySchema, QuantizationSchema, SourceSchema, SpeedPresetSchema,
+  CustomHardwareSchema, MetaSchema, ModelSchema, PlatformSchema, PolicySchema, QuantizationSchema, SourceSchema, SpeedPresetSchema,
   WorkloadSchema, SkippedCalibrationPointSchema, CalibrationGapSchema, type Bundle, type CalibrationPoint, type Hardware, type Model, type Platform, type Quantization,
 } from '@nchc/schema';
 import { excludedOrgOf, layerShapeIssues, legalTpOptions, mlaLayoutIssues, moeParamsIssue } from '@nchc/core';
@@ -36,7 +36,8 @@ const joinPath = (...parts: Array<string | number>) =>
  * or `effective`,
  * a calibration point's tp is one vLLM accepts for its model on its platform (legalTpOptions) and, with uniform length
  * sampling, its workload holds the mean length (Ruling R41),
- * skipped calibration point → platform/quant, calibration gap → platforms, workload tierModels → catalog models),
+ * skipped calibration point → platform/quant, calibration gap → platforms, workload tierModels → catalog models,
+ * custom-hardware template → a platform whose calibration engine equals the template key),
  * (3b) quantization: the id 'native' is reserved (API input), exactly one sets `nativeForUnquantized`; a model's
  * `nativeQuant.quant` names a quantization whose vllmServe has a `nativeNote`,
  * (4) model file name = id, (4b) MoE expert parameters ≤ totalParamsB and active parameters > 0 (Ruling R31),
@@ -95,6 +96,8 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
   const meta = metaDoc && parseOne(metaDoc.file, 'meta', metaDoc.data, MetaSchema);
   const policyDoc = doc('policy');
   const policy = policyDoc && parseOne(policyDoc.file, 'policy', policyDoc.data, PolicySchema);
+  const chDoc = doc('customHardware');
+  const customHardware = chDoc && parseOne(chDoc.file, 'customHardware', chDoc.data, CustomHardwareSchema);
 
   for (const [label, schema] of [
     ['sources', SourceSchema], ['hardware', HardwareSchema], ['platforms', PlatformSchema],
@@ -248,6 +251,23 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     }
   }
   const platformItems = new Map(collections.platforms.map((p) => [p.id, p]));
+  // Custom hardware templates (spec 2026-10-21 §6.2): a custom platform of engine E borrows the calibration and vLLM
+  // defaults of templates[E].platform, so that platform must exist and run E.
+  if (customHardware && chDoc) {
+    for (const [engine, t] of Object.entries(customHardware.templates)) {
+      const path = joinPath('customHardware', 'templates', engine, 'platform');
+      const plat = platformItems.get(t.platform)?.value as unknown as Platform | undefined;
+      if (!plat) {
+        err(chDoc.file, path, `unknown platform id '${t.platform}'`);
+        continue;
+      }
+      const profEngine = (calItems.get(plat.calibration)?.value as { engine?: string } | undefined)?.engine;
+      if (profEngine !== undefined && profEngine !== engine) {
+        err(chDoc.file, path,
+          `template platform '${t.platform}' runs engine '${profEngine}' (calibration profile '${plat.calibration}'), not '${engine}'`);
+      }
+    }
+  }
   const modelById = new Map(collections.models.map((m) => [m.id, m]));
   for (const pt of collections.calibrationPoints) {
     ref(pt, 'calibrationPoints', 'platform', 'platforms', 'platform');
@@ -375,6 +395,7 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     for (const item of collections[label]) checkSources(item.file, joinPath(label, item.id), item.value);
   }
   if (policy && policyDoc) checkSources(policyDoc.file, 'policy', policy);
+  if (customHardware && chDoc) checkSources(chDoc.file, 'customHardware', customHardware);
   if (concurrency && wl) checkSources(wl.file, 'concurrency', concurrency);
   if (benchmark && wl) checkSources(wl.file, 'benchmark', benchmark);
 
@@ -449,7 +470,7 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     }
   }
 
-  if (issues.some((i) => i.level === 'error') || !meta || !policy || !concurrency || !benchmark) return { issues };
+  if (issues.some((i) => i.level === 'error') || !meta || !policy || !concurrency || !benchmark || !customHardware) return { issues };
 
   const record = (c: Collection) => Object.fromEntries(collections[c].map((i) => [i.id, i.value]));
   const assembled = {
@@ -459,6 +480,7 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     speedPresets: record('speedPresets'), calibration: record('calibration'), concurrency, benchmark,
     calibrationPoints: record('calibrationPoints'),
     skippedCalibrationPoints: record('skippedCalibrationPoints'), calibrationGaps: record('calibrationGaps'),
+    customHardware,
   };
   const r = BundleSchema.safeParse(assembled);
   if (!r.success) {

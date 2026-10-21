@@ -6,17 +6,20 @@
  * count it equals estimateRequirements' expected result.
  */
 import { z } from 'zod';
-import type { Bundle } from '@nchc/schema';
+import type { Bundle, Quantization } from '@nchc/schema';
 import {
-  RequirementInputSchema,
+  CustomPlatformInputSchema,
+  UsersQueryInputSchema,
   addCommBasis,
   addQueueingBasis,
   ctxForPlatform,
   powerFor,
   prepare,
   quantFields,
+  resolveCustomPlatform,
   resolvePlatform,
   verifyFor,
+  type ResolvedApiPlatform,
   withWarnings,
   type QuantFields,
   type ResultWarning,
@@ -50,9 +53,18 @@ export const PERFORMANCE_CURVE_POINTS = 24;
 const int = (max: number) => z.number().int().positive().max(max);
 const TpOptionSchema = int(1e4);
 
-/** Task 3 widens `platform` to also take a custom platform. */
-export const PerformanceInputSchema = RequirementInputSchema.extend({
-  platform: z.string().min(1),
+/** A catalog platform id or a user-entered platform (spec 2026-10-21 §5.3). */
+const PlatformInSchema = z.union([z.string().min(1), CustomPlatformInputSchema]);
+
+/** The one platform resolution of estimatePerformance and the sweep: catalog id or custom platform. */
+function resolveIn(bundle: Bundle, platform: z.infer<typeof PlatformInSchema>, computeDtype: Quantization['computeDtype']): ResolvedApiPlatform {
+  return typeof platform === 'string'
+    ? resolvePlatform(bundle, platform, computeDtype)
+    : resolveCustomPlatform(bundle, platform, computeDtype);
+}
+
+export const PerformanceInputSchema = UsersQueryInputSchema.extend({
+  platform: PlatformInSchema,
   gpus: int(MAX_GPUS),
   /** Force this tensor-parallel size (must be legal and fit in `gpus`); omitted → the best split. */
   tp: TpOptionSchema.optional(),
@@ -124,6 +136,7 @@ function judgeShape(ctx: Ctx, platform: ResolvedPlatform, shape: Shape | null, g
 
 export type PerformanceResult = QuantFields & {
   dataVersion: string;
+  /** The catalog platform id, or 'custom' for a user-entered platform. */
   platform: string;
   gpus: number;
   users: number;
@@ -157,8 +170,7 @@ export type PerformanceResult = QuantFields & {
 export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): PerformanceResult {
   const input = parseInput(PerformanceInputSchema, raw);
   const { ctx: baseCtx, quant, res: qres, basis, warnings } = prepare(bundle, input);
-  // Platform resolution is this one step (a custom platform replaces it later).
-  const resolved = resolvePlatform(bundle, input.platform, quant.computeDtype);
+  const resolved = resolveIn(bundle, input.platform, quant.computeDtype);
   const { platform } = resolved;
   basis.add(...resolved.basis);
   const ctx = ctxForPlatform(baseCtx, quant, resolved, basis);
@@ -170,7 +182,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
   if (input.tp !== undefined && !fitting.includes(input.tp)) {
     throw new CoreInputError(
       'invalid-input',
-      `輸入不合法：TP ${input.tp} 不能用在 ${gpus} ${unit}（這個模型在 ${input.platform} 的合法 TP：${legal.join('、')}；且不能超過 GPU 數）`,
+      `輸入不合法：TP ${input.tp} 不能用在 ${gpus} ${unit}（這個模型在 ${platform.name} ${platform.sub} 的合法 TP：${legal.join('、')}；且不能超過 GPU 數）`,
     );
   }
 
@@ -211,7 +223,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
   return {
     ...quantFields(ctx.model, qres),
     dataVersion: bundle.meta.dataVersion,
-    platform: input.platform,
+    platform: typeof input.platform === 'string' ? input.platform : 'custom',
     gpus,
     users,
     ok: why === null,
@@ -253,8 +265,8 @@ function chosenWhy(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, why: Why,
   return singleUserWhy(ctx, platform, [shape.tp], 'expected', `${gpus} ${unit}`) ?? { why, detail: `TP ${shape.tp} 放不下模型權重` };
 }
 
-const SweepInputSchema = RequirementInputSchema.extend({
-  platform: z.string().min(1),
+const SweepInputSchema = UsersQueryInputSchema.extend({
+  platform: PlatformInSchema,
   gpusList: z
     .array(int(MAX_GPUS))
     .min(1)
@@ -281,7 +293,7 @@ export function estimatePerformanceSweep(
 ): { points: SweepPoint[]; basis: BasisItem[]; hasEstimate: boolean; hasUser: boolean; warnings: ResultWarning[]; dataVersion: string } {
   const input = parseInput(SweepInputSchema, raw);
   const { ctx: baseCtx, quant, basis, warnings } = prepare(bundle, input);
-  const resolved = resolvePlatform(bundle, input.platform, quant.computeDtype);
+  const resolved = resolveIn(bundle, input.platform, quant.computeDtype);
   const { platform } = resolved;
   basis.add(...resolved.basis);
   const ctx = ctxForPlatform(baseCtx, quant, resolved, basis);

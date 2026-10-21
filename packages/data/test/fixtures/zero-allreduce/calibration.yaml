@@ -9,6 +9,18 @@ profiles:
     allreduceLatencyUs: { value: 0, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-19 }
     tFixedSec: { value: 0, unit: s, status: estimate, basis: '尚無實測；待國網量測（GitHub issue #10）', evidence: [fx-src], verified: 2026-10-20 }
     ttftOverheadSec: { value: 0, unit: s, status: estimate, basis: '尚無實測；待國網量測（GitHub issue #10）', evidence: [fx-src], verified: 2026-10-20 }
+  - id: fx-mlx
+    engine: mlx
+    etaBw: { value: 0.8, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    etaBwLow: { value: 0.7, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    etaCompute: { value: 1, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    memUtil: { value: 0.75, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    allreduceLatencyUs: { value: 0, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    tFixedSec: { value: 0, unit: s, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    ttftOverheadSec: { value: 0, unit: s, status: estimate, basis: fixture, evidence: [fx-src], verified: 2026-10-21 }
+    mlxDefaults:
+      kvCacheStep: { value: 256, status: official, source: fx-src, verified: 2026-10-21 }
+      prefillStepSize: { value: 2048, status: official, source: fx-src, verified: 2026-10-21 }
 points:
   - id: fx-point
     role: validate
