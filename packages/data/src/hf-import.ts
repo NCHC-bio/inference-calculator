@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url';
 import { parse, stringify } from 'yaml';
 import { HF_REPO_RE, PolicySchema, type Origin, type Source } from '@nchc/schema';
 import { excludedOrgOf } from '@nchc/core';
-import { cardBaseModels, fetchHfModel, type HfFetchDeps } from './hf-fetch';
+import { cardBaseModels, DENIED_PREFIX, fetchHfModel, type HfFetchDeps } from './hf-fetch';
 import { CONFIG_DIR } from './paths';
 
 export interface ImportDeps {
@@ -158,7 +158,9 @@ export async function runImport(argv: string[], deps: ImportDeps): Promise<numbe
   });
   if (!r.ok) {
     // denied → 3; unparsable (missing fields, base-flag contradiction) or invalid (repo id / revision) → 2; everything else → 1.
-    deps.log(r.status === 'denied' || r.status === 'unparsable' ? r.message : `error: ${r.message}`);
+    // The shared denied message is CLI-neutral (the browser shows it too); the CLI names its own flag.
+    const msg = r.status === 'denied' ? r.message.replace(DENIED_PREFIX, 'gated: set HF token via --token-env') : r.message;
+    deps.log(r.status === 'denied' || r.status === 'unparsable' ? msg : `error: ${msg}`);
     return r.status === 'denied' ? 3 : r.status === 'unparsable' || r.status === 'invalid' ? 2 : 1;
   }
   const { model, notes, sha, source: entry } = r;

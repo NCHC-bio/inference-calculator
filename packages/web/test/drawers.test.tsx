@@ -361,7 +361,7 @@ describe('HfImportDrawer', () => {
   });
 
   it('denied → token field; the token never reaches the URL', async () => {
-    fetchMock.mockResolvedValue({ ok: false, status: 'denied', message: 'gated' });
+    fetchMock.mockResolvedValue({ ok: false, status: 'denied', message: 'gated or private repo: an access token is required (HTTP 401 on config.json)' });
     renderWith(<HfImportDrawer />);
     const before = state().model;
     openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/gated' });
@@ -370,6 +370,11 @@ describe('HfImportDrawer', () => {
     await origin(d);
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
     const token = await within(d).findByLabelText(/Hugging Face token/);
+    // Its own localized title plus the CLI-neutral detail (no command-line flag reaches the browser).
+    const alert = within(d).getByTestId('hf-error');
+    expect(alert).toHaveTextContent('這個模型需要授權：請貼上你的 Hugging Face token 再匯入');
+    expect(alert).toHaveTextContent('gated or private repo: an access token is required');
+    expect(alert).not.toHaveTextContent('--token-env');
     expect(within(d).getByText(/token 只留在瀏覽器記憶體/)).toBeInTheDocument();
     await userEvent.type(token, 'hf_secret123');
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));

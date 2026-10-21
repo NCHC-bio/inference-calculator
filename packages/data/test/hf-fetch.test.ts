@@ -43,6 +43,10 @@ describe('fetchHfModel', () => {
   it('401 → denied', async () => {
     const r = await fetchHfModel('openai/gpt-oss-120b', { fetch: fake(undefined, 401).fn, origin: ORIGIN });
     expect(r).toMatchObject({ ok: false, status: 'denied' });
+    // Shared with the browser: CLI-neutral (the --token-env hint lives in hf-import.ts).
+    if (r.ok) throw new Error('denied');
+    expect(r.message).toMatch(/^gated or private repo: an access token is required \(HTTP 401 on /);
+    expect(r.message).not.toContain('--token-env');
   });
 
   it('404 → not-found', async () => {

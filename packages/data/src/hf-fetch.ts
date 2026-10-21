@@ -48,6 +48,9 @@ export function cardBaseModels(v: unknown): string[] {
   return list.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim());
 }
 
+/** Start of every `denied` message; CLI-neutral since the browser shows it too (the CLI swaps in its flag hint). */
+export const DENIED_PREFIX = 'gated or private repo: an access token is required';
+
 /**
  * 401/403 message. HF also answers 401 for a misspelled or private repo, so the X-Error-Code /
  * X-Error-Message headers (e.g. GatedRepo vs RepositoryNotFound) and a body snippet are included.
@@ -57,7 +60,7 @@ async function deniedMessage(res: HfFetchResponse, what: string): Promise<string
   const msg = res.headers?.get('X-Error-Message');
   const body = (await res.text().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 200);
   const hint = [code && `X-Error-Code: ${code}`, msg, body && body !== msg ? `body: ${body}` : ''].filter(Boolean).join('; ');
-  return `gated: set HF token via --token-env (HTTP ${res.status} on ${what}${hint ? `; ${hint}` : ''})`;
+  return `${DENIED_PREFIX} (HTTP ${res.status} on ${what}${hint ? `; ${hint}` : ''})`;
 }
 
 class Stop extends Error {
