@@ -241,6 +241,7 @@
 - W8：權重或 1 人都放不下的切法在切法選單中停用並標「放不下」，不會讓使用者卡在只有原因的畫面。
 - W9：「卡數 → 每人速度」畫每個卡數下能服務目前人數的最快切法（`SweepPoint.fastest`，見 5.2），曲線不下降。
 - W10：core 顯示給使用者的文字不用「副本」，改「每份模型 N 張卡」。
+- W11：CI 在 `pnpm test` 之後加跑 `pnpm web:build`（抓 Vite 建置失敗）；`web:e2e` 需要瀏覽器、較重，只在本機跑。
 
 core（ledger `.superpowers/sdd/2026-10-21-core-v8/progress.md`）：
 

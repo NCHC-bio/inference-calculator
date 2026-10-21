@@ -20,5 +20,7 @@ jobs:
       # Fails on schema, reference, sourcing or model-policy errors.
       - run: pnpm data:build
       - run: pnpm test
+      # Ruling W11: catches a broken Vite build; web:e2e stays local (needs browsers).
+      - run: pnpm web:build
       # Writes packages/data/dist/accuracy.json; out-of-tolerance validate points only WARN (exit 0, spec §10.1).
       - run: pnpm calibrate

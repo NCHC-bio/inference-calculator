@@ -26,7 +26,7 @@ pnpm data:import <owner/repo> --developer <name> --country <ISO2>   # add a mode
 
 Single test: `pnpm vitest run packages/core/test/solve.test.ts` or `pnpm vitest run -t "<test name>"`. Vitest has two projects: `node` (core/data/schema) and `web` (jsdom, `packages/web/vitest.config.ts`); select one with `--project node|web`. Tests import `bundle.json` and `accuracy.json`, so run `pnpm data:build` and `pnpm calibrate` first whenever `config/` changed (plain `pnpm test` / `pnpm typecheck` do this for you). e2e specs (`packages/web/e2e/`): `smoke` (answer, URL round trip, touch), `v8` (screenshots of every state in light and dark, no horizontal scroll at 390/768/1024/1440, values equal core, console clean), `motion` (desktop only: 0/100/200/400 ms frames from the Chrome screencast, reduced motion lands at once); screenshots and frames land in `packages/web/test-results/` and the HTML report.
 
-CI (`.github/workflows/ci.yml`) runs: `typecheck` → `data:build` → `test` → `calibrate`.
+CI (`.github/workflows/ci.yml`) runs: `typecheck` → `data:build` → `test` → `web:build` → `calibrate`. `web:e2e` is local only (needs browsers).
 
 ## Architecture
 
@@ -76,8 +76,8 @@ Hugging Face ──data:import──▶ config/models/*.yaml
 ## Design docs
 
 - `docs/superpowers/specs/2026-10-19-inference-calculator-design.md`: the main spec (computation model §5, config §7, web §8, MCP §9). Numbered "Ruling R##" decisions referenced in code comments are recorded there.
-- `docs/prototypes/calculator-demo-v8-requirements.md` (local file, not committed; may be absent): **current work** — full requirements for demo v8 (all user feedback after phase 2); read it first. The demo draft is `docs/prototypes/calculator-demo-v8.html`.
-- `docs/superpowers/specs/2026-10-21-direct-manipulation-design.md`: earlier draft of the web rework, partly superseded by the demo v8 requirements (direct manipulation, motion, parity with the v7 prototype in `docs/prototypes/calculator-demo-v7.html`). §11 lists the rulings taken while implementing v8 (web W1–W10, core R1–R7).
+- `docs/superpowers/specs/2026-10-21-direct-manipulation-design.md`: the binding design of the website v8 (implemented): direct manipulation, workbench, custom inputs, motion; visual spec `docs/prototypes/calculator-demo-v8.html`. §11 lists the rulings taken while implementing v8 (web W1–W11, core R1–R7).
+- `docs/prototypes/calculator-demo-v8-requirements.md` (local file, not committed; may be absent): history — the user feedback after phase 2 that demo v8 answered; the design doc above supersedes it.
 - `docs/superpowers/plans/`: implementation plans per phase.
 - `reference/` (lecture slides) is gitignored and not needed.
 - The spec's §10 layout says `apps/web`, but the site actually lives in `packages/web`.
