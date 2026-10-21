@@ -250,7 +250,10 @@ describe('Workbench', () => {
     await userEvent.click(within(wb).getByRole('button', { name: /加入比較/ }));
     expect(latest!.pins).toHaveLength(1);
     expect(latest!.pins[0]).toMatchObject({
-      platform: `${getBundle().platforms[H200]!.name} ${getBundle().platforms[H200]!.sub}`,
+      platform: { row: H200, name: getBundle().platforms[H200]!.name, sub: getBundle().platforms[H200]!.sub },
+      unit: 'gpu',
+      count: r.count,
+      model: { name: getBundle().models[decodeUrl(getBundle(), '').model]!.name, quant: getBundle().quantization[r.perf.quant]!.name },
       users: 15,
       tps: r.perf.usage!.tokPerSecPerUser,
       ttft: r.perf.usage!.ttftSec,

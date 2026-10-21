@@ -10,7 +10,7 @@ import {
   type ModelOverride,
   type ResultWarning,
 } from '@nchc/core';
-import type { Lang } from '../i18n/t';
+import type { Lang, MsgKey } from '../i18n/t';
 
 /** A bundle platform id or `custom:${i}` (index into customPlatforms). */
 export type RowKey = string;
@@ -26,11 +26,20 @@ export type CustomModel =
    * `imported` is absent after a URL reload until the refetch answers.
    */
   | { kind: 'hf'; repo: string; sha: string; origin?: Origin; imported?: { model: Model; source: Source } };
+/** A platform sub-label as data: catalog text, or a message key with its values (formatted in the current language). */
+export type SubLabel = string | { key: MsgKey; vars: Record<string, string | number> };
+/**
+ * A comparison snapshot (values frozen when 加入比較 was pressed), stored as raw values and formatted at render in the
+ * current language (v8 minor 6).
+ */
 export type Pin = {
   id: number;
-  platform: string;
-  count: string;
-  model: string;
+  /** Row key at pin time (bundle id or `custom:i`), with the name and sub-label so later edits or deletes do not change it. */
+  platform: { row: RowKey; name: string; sub: SubLabel };
+  unit: 'gpu' | 'machine';
+  count: number;
+  /** Model name and the quantization's display name (null when the bundle has none). */
+  model: { name: string; quant: string | null };
   users: number;
   tps: number | null;
   ttft: number | null;

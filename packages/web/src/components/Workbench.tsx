@@ -9,13 +9,14 @@ import type { BenchView, OkRow } from '../compute/compute';
 import { queryOf } from '../compute/query';
 import { useBench, useDeferredState } from '../compute/useResults';
 import { useLang, useT } from '../i18n';
+import type { Lang } from '../i18n/t';
 import { useTween } from '../motion/useTween';
 import { PINS_MAX, workloadId, type Action, type CalcState } from '../state/state';
 import { useCalc } from '../state/store';
 import { ActionChips } from './ActionChips';
 import { Explain } from './Explain';
 import { MemoryBar } from './MemoryBar';
-import { rowInfo, useSubText } from './PlatformRow';
+import { rowInfo } from './PlatformRow';
 import { Roofline } from './Roofline';
 import { SpeedChart, speedZones, type ChartZone } from './SpeedChart';
 import { SplitSelect, SplitText, splitText } from './SplitSelect';
@@ -49,17 +50,20 @@ function Heading({ children }: { children: ReactNode }): JSX.Element {
   return <div className="wb-h">{children}</div>;
 }
 
-/** The current model and quant as one label (for a comparison pin). */
-function modelLabel(b: Bundle, s: CalcState, perf: PerformanceResult): string {
+/** The current model's name and the quant's display name (for a comparison pin; joined at render by withQuant). */
+function modelOf(b: Bundle, s: CalcState, perf: PerformanceResult): { name: string; quant: string | null } {
   const name = s.customModel === null ? b.models[s.model]!.name : resolveModel(b, queryOf(b, s).model).model.name;
-  const q = b.quantization[perf.quant]?.name;
-  return q ? withQuant(name, q) : name;
+  return { name, quant: b.quantization[perf.quant]?.name ?? null };
 }
 
-/** 「模型（量化）」, without the suffix when the name already carries the quant as a token (display only). */
-export function withQuant(name: string, quant: string): string {
+/**
+ * 「模型（量化）」 (en 「model (quant)」), without the suffix when the name already carries the quant as a token (display
+ * only).
+ */
+export function withQuant(name: string, quant: string, lang: Lang = 'zh-TW'): string {
   const esc = quant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`, 'i').test(name) ? name : `${name}（${quant}）`;
+  if (new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`, 'i').test(name)) return name;
+  return lang === 'en' ? `${name} (${quant})` : `${name}（${quant}）`;
 }
 
 /** Peak power, or 「功耗未查證」 with core's note (plus the bundle TDP record's reason) on hover. */
@@ -239,7 +243,6 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const usage = perf.usage!;
   const shape = perf.shape ?? usage.shape;
   const info = rowInfo(b, s, row.row);
-  const subText = useSubText(info);
   const { message } = AntApp.useApp();
   const unitText = tr(info.unit === 'machine' ? 'unit.machine' : 'unit.gpu');
   const target = speedTarget(b, s);
@@ -260,9 +263,10 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
     dispatch({
       type: 'pin',
       pin: {
-        platform: `${info.name} ${subText}`,
-        count: `${fmtIn(lang, row.count)} ${unitText}`,
-        model: modelLabel(b, s, perf),
+        platform: { row: row.row, name: info.name, sub: info.sub },
+        unit: info.unit,
+        count: row.count,
+        model: modelOf(b, s, perf),
         users: s.users,
         tps: usage.tokPerSecPerUser,
         ttft: usage.ttftSec,

@@ -5,6 +5,8 @@ import { useLang, useT } from '../i18n';
 import type { Pin } from '../state/state';
 import { useCalc } from '../state/store';
 import { STATUS_COLOR } from './BasisModal';
+import { subLabelText } from './PlatformRow';
+import { withQuant } from './Workbench';
 
 const fmt = (lang: string, n: number, d = 0) => new Intl.NumberFormat(lang, { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
 
@@ -12,7 +14,8 @@ const fmt = (lang: string, n: number, d = 0) => new Intl.NumberFormat(lang, { mi
  * Pinned setups side by side (design §4 item 6). The card is always mounted inside a `.reveal` so the first pin grows it
  * open and the last removal closes it; it keeps the last rows while closing so the content does not vanish first.
  * Pins are snapshots taken when 加入比較 was pressed, trust flags included (spec §2.1): a miss, 推估 and 自訂 are marked
- * per row and the warnings of any pin show under the table.
+ * per row and the warnings of any pin show under the table. A pin holds raw values; labels, units and number formats
+ * follow the current language (v8 minor 6).
  */
 export function CompareTable(): JSX.Element {
   const tr = useT();
@@ -52,15 +55,15 @@ export function CompareTable(): JSX.Element {
             columns={[
               {
                 title: tr('compare.platform'),
-                dataIndex: 'platform',
-                render: (v: string, p) => (
+                key: 'platform',
+                render: (_, p) => (
                   <Flex gap={4} align="center" wrap="wrap">
                     {p.ok ? (
                       <CheckCircleOutlined aria-label={tr('compare.ok')} title={tr('compare.ok')} style={{ color: token.colorSuccess }} />
                     ) : (
                       <CloseCircleOutlined aria-label={tr('compare.miss')} title={tr('compare.miss')} style={{ color: token.colorError }} />
                     )}
-                    <span>{v}</span>
+                    <span>{`${p.platform.name} ${subLabelText(p.platform.sub, lang, tr)}`}</span>
                     {p.hasEstimate && (
                       <Tag color={STATUS_COLOR.estimate} style={{ borderStyle: 'dashed', marginInlineEnd: 0 }}>
                         {tr('tag.estimate')}
@@ -74,8 +77,8 @@ export function CompareTable(): JSX.Element {
                   </Flex>
                 ),
               },
-              { title: tr('compare.count'), dataIndex: 'count' },
-              { title: tr('compare.model'), dataIndex: 'model' },
+              { title: tr('compare.count'), key: 'count', render: (_, p) => `${fmt(lang, p.count)} ${tr(p.unit === 'machine' ? 'unit.machine' : 'unit.gpu')}` },
+              { title: tr('compare.model'), key: 'model', render: (_, p) => (p.model.quant ? withQuant(p.model.name, p.model.quant, lang) : p.model.name) },
               { title: tr('compare.users'), dataIndex: 'users', render: (v: number) => fmt(lang, v) },
               { title: tr('compare.tps'), dataIndex: 'tps', render: (v: number | null) => num(v) },
               { title: tr('compare.ttft'), dataIndex: 'ttft', render: (v: number | null) => num(v, 1) },

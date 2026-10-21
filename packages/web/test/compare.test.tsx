@@ -8,7 +8,7 @@ import { withQuant } from '../src/components/Workbench';
 import { CUSTOM_MODEL_WARNING } from '@nchc/core';
 import { useEffect } from 'react';
 import { CompareTable } from '../src/components/CompareTable';
-import type { Pin } from '../src/state/state';
+import type { Action, Pin } from '../src/state/state';
 import { useCalc } from '../src/state/store';
 import { renderStore, shown } from './helpers';
 
@@ -122,10 +122,10 @@ describe('closed comparison', () => {
   });
 
   it('each pin keeps its trust flags: a miss, 推估, 自訂 and the custom-model warning (review I2)', async () => {
-    const base: Omit<Pin, 'id'> = { platform: 'P', count: '8', model: 'M', users: 15, tps: 30, ttft: 1, max: 40, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] };
+    const base: Omit<Pin, 'id'> = { platform: { row: 'p', name: 'P', sub: '' }, unit: 'gpu', count: 8, model: { name: 'M', quant: null }, users: 15, tps: 30, ttft: 1, max: 40, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] };
     const pins: Omit<Pin, 'id'>[] = [
-      { ...base, platform: 'Plain' },
-      { ...base, platform: 'Missed', ok: false, hasEstimate: true, hasUser: true, warnings: [CUSTOM_MODEL_WARNING] },
+      { ...base, platform: { row: 'p', name: 'Plain', sub: '' } },
+      { ...base, platform: { row: 'p', name: 'Missed', sub: '' }, ok: false, hasEstimate: true, hasUser: true, warnings: [CUSTOM_MODEL_WARNING] },
     ];
     function Seed() {
       const [, dispatch] = useCalc();
@@ -151,5 +151,84 @@ describe('closed comparison', () => {
     expect(within(missed!).getByText(zh('tag.estimate'))).toBeInTheDocument();
     expect(within(missed!).getByText(zh('tag.user'))).toBeInTheDocument();
     expect(within(screen.getByTestId('compare')).getAllByText(CUSTOM_MODEL_WARNING.text)).toHaveLength(1);
+  });
+});
+
+describe('pins follow the current language (v8 minor 6)', () => {
+  it('a pin made in zh-TW is formatted in en after the switch; its values stay frozen', async () => {
+    const pins: Omit<Pin, 'id'>[] = [
+      {
+        platform: { row: 'custom:0', name: 'Lab GPU', sub: { key: 'platforms.customSub', vars: { mem: 80, gpn: 8, engine: 'vLLM' } } },
+        unit: 'gpu',
+        count: 1200,
+        model: { name: 'gpt-oss-20b', quant: 'MXFP4' },
+        users: 1500,
+        tps: 31.4,
+        ttft: null,
+        max: 2400,
+        kw: 1.25,
+        ok: true,
+        hasEstimate: false,
+        hasUser: false,
+        warnings: [],
+      },
+    ];
+    let send: (a: Action) => void = () => {};
+    function Seed() {
+      const [, dispatch] = useCalc();
+      send = dispatch;
+      useEffect(() => {
+        for (const pin of pins) dispatch({ type: 'pin', pin });
+      }, [dispatch]);
+      return null;
+    }
+    await act(async () => {
+      renderStore(
+        <>
+          <CompareTable />
+          <Seed />
+        </>,
+      );
+    });
+    await waitFor(() => expect(dataRows()).toHaveLength(1));
+    const cells = () => [...(dataRows()[0] as HTMLElement).querySelectorAll('td')].map((td) => td.textContent);
+    expect(cells().slice(0, 8)).toEqual([
+      'Lab GPU 80 GB × 8／台・vLLM',
+      '1,200 張',
+      'gpt-oss-20b（MXFP4）',
+      '1,500',
+      '31',
+      zh('status.unverified'),
+      '2,400',
+      '1.3',
+    ]);
+    act(() => send({ type: 'lang', lang: 'en' }));
+    const en = (k: MsgKey) => t('en', k);
+    await waitFor(() => expect(cells()[1]).toBe('1,200 GPUs'));
+    expect(cells().slice(0, 8)).toEqual([
+      'Lab GPU 80 GB × 8 per machine · vLLM',
+      '1,200 GPUs',
+      'gpt-oss-20b (MXFP4)',
+      '1,500',
+      '31',
+      en('status.unverified'),
+      '2,400',
+      '1.3',
+    ]);
+    expect(screen.getByTestId('compare').querySelector('thead')!.textContent).toContain(en('compare.platform'));
+  });
+
+  it('a real pin, then the language switch: the count unit turns English, the numbers stay', async () => {
+    render(<App />);
+    await pin();
+    await waitFor(() => expect(dataRows()).toHaveLength(1));
+    const cells = () => [...(dataRows()[0] as HTMLElement).querySelectorAll('td')].map((td) => td.textContent ?? '');
+    const before = cells();
+    expect(before[1]).toMatch(/ 張$/);
+    await userEvent.click(screen.getByText(zh('lang.en')));
+    await waitFor(() => expect(cells()[1]).toMatch(/ GPUs$/));
+    const after = cells();
+    expect(after[1]!.replace(' GPUs', '')).toBe(before[1]!.replace(' 張', ''));
+    expect(after.slice(3, 8)).toEqual(before.slice(3, 8));
   });
 });

@@ -3,9 +3,10 @@ import type { Bundle } from '@nchc/schema';
 import { Button, Space, Tag, theme, Typography } from 'antd';
 import type { JSX } from 'react';
 import type { OkRow } from '../compute/compute';
-import { useLang, useT, type MsgKey } from '../i18n';
+import { useLang, useT } from '../i18n';
+import type { TFn } from '../i18n/t';
 import { useTween } from '../motion/useTween';
-import { customIndex, type CalcState, type RowKey } from '../state/state';
+import { customIndex, type CalcState, type RowKey, type SubLabel } from '../state/state';
 import { CapacityBar } from './CapacityBar';
 import { CountControl } from './CountControl';
 import { Explain } from './Explain';
@@ -19,7 +20,7 @@ const fmt = (lang: string, n: number, digits = 0) =>
 export type RowInfo = {
   name: string;
   /** Catalog sub-label, or the custom platform's memory × count and engine. */
-  sub: { key: MsgKey; vars: Record<string, string | number> } | string;
+  sub: SubLabel;
   unit: 'gpu' | 'machine';
   gpusPerNode: number;
   /** Index into customPlatforms for a custom row. */
@@ -48,13 +49,18 @@ export function rowInfo(b: Bundle, s: CalcState, row: RowKey): RowInfo {
   return { name: p.name, sub: p.sub, unit: p.unit, gpusPerNode: p.gpusPerNode.value, custom: null, self: p.group === 'self', hardware: p.hardware };
 }
 
+/** A sub-label as text in `lang` (catalog sub as is; a message with its numbers formatted). */
+export function subLabelText(sub: SubLabel, lang: string, tr: TFn): string {
+  return typeof sub === 'string'
+    ? sub
+    : tr(sub.key, Object.fromEntries(Object.entries(sub.vars).map(([k, v]) => [k, typeof v === 'number' ? fmt(lang, v) : v])));
+}
+
 /** The sub-label as text (catalog sub, or the custom platform's memory × count and engine). */
 export function useSubText(info: RowInfo): string {
   const tr = useT();
   const lang = useLang();
-  return typeof info.sub === 'string'
-    ? info.sub
-    : tr(info.sub.key, Object.fromEntries(Object.entries(info.sub.vars).map(([k, v]) => [k, typeof v === 'number' ? fmt(lang, v) : v])));
+  return subLabelText(info.sub, lang, tr);
 }
 
 /** Header label (the only part that toggles the row): name, 「自訂」 tag, sub-label. */
