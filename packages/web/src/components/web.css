@@ -175,3 +175,37 @@ body {
   white-space: normal;
   transition: opacity var(--motion-dur) var(--motion-ease);
 }
+
+/* Input sentence (demo v8 `.sent`): one sentence; each clause keeps together, the sentence wraps between clauses. */
+.sent {
+  font-size: 20px;
+  line-height: 2.4;
+  margin-top: 16px;
+}
+.sent .clause {
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .sent {
+    font-size: 17px;
+  }
+}
+
+/* Option descriptions (design §3.2): open for the active / selected option (OptionSelect adds .on; every option
+   under (hover: none)). Height and opacity animate with the shared motion token. */
+.opt-desc {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--motion-dur) var(--motion-ease),
+    opacity var(--motion-dur) var(--motion-ease);
+}
+.opt-desc.on {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+.opt-desc > * {
+  overflow: hidden;
+  min-height: 0;
+}

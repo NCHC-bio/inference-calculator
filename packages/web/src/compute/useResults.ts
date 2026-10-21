@@ -2,7 +2,7 @@ import { useDeferredValue } from 'react';
 import { getBundle } from '../bundle';
 import type { CalcState, RowKey } from '../state/state';
 import { useCalc } from '../state/store';
-import { computeBench, computeMain, modelOptionNotes, type BenchView, type MainView, type ModelNote } from './compute';
+import { computeBench, computeMain, modelNoteRow, modelOptionNotes, type BenchView, type MainView, type ModelNote } from './compute';
 
 /**
  * Remembers the last result per function, keyed on the identity of the inputs it reads. The reducer keeps unchanged
@@ -53,11 +53,16 @@ export function useBench(row: RowKey | null): BenchView | null {
   return benchOf([main, row], s, main, row);
 }
 
+/** Model option notes and the row they refer to (null: platform counts), computed only while the menu is open. */
+export type ModelNotesView = { notes: Record<string, ModelNote>; row: { row: RowKey; count: number } | null };
+
 /** Model option notes, computed only while the model menu is open (`enabled`). */
-export function useModelNotes(enabled: boolean): ReturnType<typeof modelOptionNotes> | null {
+export function useModelNotes(enabled: boolean): ModelNotesView | null {
   const s = useDeferredState();
   const main = mainOf(mainKey(s), s);
-  if (!enabled) return null;
+  if (!enabled || main.kind !== 'main') return null;
   // The note row is the open adjusted one when there is one (modelOptionNotes).
-  return notesOf([main, s.openRow], s, main);
+  const notes = notesOf([main, s.openRow], s, main);
+  const target = modelNoteRow(s, main.rows);
+  return notes && { notes, row: target ? { row: target.row, count: target.count } : null };
 }

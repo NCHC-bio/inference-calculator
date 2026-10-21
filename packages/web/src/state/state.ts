@@ -53,6 +53,11 @@ export type CalcState = {
   basisFilter: BasisFilter;
   /** customPlatforms index the hardware dialog edits (null: adding a new one). */
   editingPlatform: number | null;
+  /**
+   * Repo the HF import dialog starts with: the model search text when it looks like `owner/name` (the not-found
+   * 「匯入 owner/name」 button), else ''. Set by `dialog` with `hfQuery`; reset to '' when another dialog opens.
+   */
+  hfQuery: string;
 };
 export type Action =
   | { type: 'lang'; lang: Lang }
@@ -72,7 +77,7 @@ export type Action =
   | { type: 'pin'; pin: Omit<Pin, 'id'> }
   | { type: 'unpin'; id: number }
   | { type: 'clearPins' }
-  | { type: 'dialog'; id: DialogId | null; basisFilter?: BasisFilter; editingPlatform?: number | null };
+  | { type: 'dialog'; id: DialogId | null; basisFilter?: BasisFilter; editingPlatform?: number | null; hfQuery?: string };
 
 export const USERS_MAX = 1e7;
 /** Upper bound of a row's card / machine count. */
@@ -125,6 +130,7 @@ export function defaultState(b: Bundle): CalcState {
     dialog: null,
     basisFilter: 'est',
     editingPlatform: null,
+    hfQuery: '',
   };
 }
 
@@ -286,7 +292,8 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
       if (a.id !== null && !DIALOGS.includes(a.id)) return s;
       const basisFilter = a.basisFilter === 'est' || a.basisFilter === 'all' ? a.basisFilter : s.basisFilter;
       const editingPlatform = a.editingPlatform !== undefined ? a.editingPlatform : a.id === null ? null : s.editingPlatform;
-      return { ...s, dialog: a.id, basisFilter, editingPlatform };
+      const hfQuery = a.id === 'hf' ? (typeof a.hfQuery === 'string' ? a.hfQuery.trim() : s.hfQuery) : '';
+      return { ...s, dialog: a.id, basisFilter, editingPlatform, hfQuery };
     }
   }
 }

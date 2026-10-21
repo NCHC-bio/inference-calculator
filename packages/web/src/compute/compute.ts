@@ -102,6 +102,12 @@ export function computeBench(b: Bundle, s: CalcState, row: OkRow): BenchView {
 
 export type ModelNote = { kind: 'onRow'; tps: number; ok: boolean } | { kind: 'noFit' } | { kind: 'platforms'; ok: number; total: number };
 
+/** The row the model notes refer to: the open adjusted row, else the first adjusted one; undefined when none. */
+export function modelNoteRow(s: CalcState, rows: RowView[]): OkRow | undefined {
+  const adjusted = rows.filter((r): r is OkRow => r.kind === 'ok' && r.adjusted);
+  return adjusted.find((r) => r.row === s.openRow) ?? adjusted[0];
+}
+
 /**
  * Per catalog model, the note its option shows. With an adjusted row (the open one first, else the first adjusted):
  * that model's speed on the row's cards, or noFit when the weights / one user's context do not fit. Otherwise how many
@@ -109,8 +115,7 @@ export type ModelNote = { kind: 'onRow'; tps: number; ok: boolean } | { kind: 'n
  * core rejects with CoreInputError counts as runnable nowhere (final review C1); anything else is rethrown.
  */
 export function modelOptionNotes(b: Bundle, s: CalcState, rows: RowView[]): Record<string, ModelNote> {
-  const adjusted = rows.filter((r): r is OkRow => r.kind === 'ok' && r.adjusted);
-  const target = adjusted.find((r) => r.row === s.openRow) ?? adjusted[0];
+  const target = modelNoteRow(s, rows);
   const total = Object.keys(b.platforms).length + s.customPlatforms.length;
   const out: Record<string, ModelNote> = {};
   for (const id of Object.keys(b.models)) {
