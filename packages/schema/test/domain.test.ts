@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   HardwareSchema, PlatformSchema, ModelSchema, WorkloadSchema, QuantizationSchema, PolicySchema,
   CalibrationProfileSchema, LayerGroupSchema, BenchmarkRuleSchema, CalibrationPointSchema, SkippedCalibrationPointSchema,
+  HF_REPO_RE,
 } from '../src/domain';
 import { BundleSchema } from '../src/bundle';
 
@@ -277,5 +278,16 @@ describe('hfRepo is owner/name and required for catalog models (final-review I4)
       SkippedCalibrationPointSchema.safeParse({ ...sk, modelName: 'Llama 3.1 8B', modelOrigin: { developer: 'Meta', country: 'US' } }).success,
     ).toBe(true);
     expect(SkippedCalibrationPointSchema.safeParse(sk).success).toBe(false);
+  });
+});
+
+describe('HF_REPO_RE', () => {
+  it('rejects names made only of dots or without an alphanumeric, accepts real repo ids', () => {
+    for (const bad of ['a/..', 'a/.', '../..', './x', 'a/---', 'a/__', 'a/...', 'a', 'a/b/c', 'https://huggingface.co/a/b']) {
+      expect(HF_REPO_RE.test(bad), bad).toBe(false);
+    }
+    for (const ok of ['meta-llama/Llama-3.3-70B-Instruct', 'openai/gpt-oss-120b', 'a/b', 'a/.b', 'a/b.', 'x_y/z-1.5']) {
+      expect(HF_REPO_RE.test(ok), ok).toBe(true);
+    }
   });
 });

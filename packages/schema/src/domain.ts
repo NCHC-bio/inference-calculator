@@ -150,8 +150,8 @@ export const QuantizationSchema = z.strictObject({
 });
 export type Quantization = z.infer<typeof QuantizationSchema>;
 
-/** A Hugging Face repo id `owner/name`. HF owner and repo names use letters, digits, '-', '_' and '.'. */
-export const HF_REPO_RE = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/;
+/** A Hugging Face repo id `owner/name`: letters, digits, '-', '_' and '.'; the owner starts with an alphanumeric and the name contains one (so never '.' or '..'). */
+export const HF_REPO_RE = /^[A-Za-z0-9][\w.-]*\/(?=[\w.-]*[A-Za-z0-9])[\w.-]+$/;
 export const HfRepoSchema = z.string().regex(HF_REPO_RE, 'Hugging Face repo id owner/name (no URL, no bare owner)');
 
 export const OriginSchema = z.strictObject({
