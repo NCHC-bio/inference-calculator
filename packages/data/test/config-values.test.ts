@@ -679,7 +679,7 @@ describe('unmeasured t_fixed / TTFT-overhead placeholders on MLX and DGX Spark (
         expect(v.evidence).toEqual(['gh-issue-12-mac-spark-calibration']);
       }
     }
-    expect(b.sources['gh-issue-12-mac-spark-calibration']!.url).toBe('https://github.com/NCHC-bio/inference-deployment-calculator/issues/12');
+    expect(b.sources['gh-issue-12-mac-spark-calibration']!.url).toBe('https://github.com/NCHC-bio/inference-calculator/issues/12');
   });
 });
 
