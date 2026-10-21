@@ -81,8 +81,7 @@ describe('PlatformList', () => {
     const plat = b.platforms[r.best!]!;
     const per = plat.gpusPerNode.value;
     if (!p.expected.ok) throw new Error('best is feasible');
-    const cons = p.conservative.ok ? Math.max(0, Math.ceil(p.conservative.gpus / per) - Math.ceil(p.expected.gpus / per)) : 0;
-    const label = `每個圖示是 1 個 node（${per} 張 GPU）：實心 ${Math.ceil(p.expected.gpus / per)} 個為預期，虛線 ${cons} 個為保守估計多出的`;
+    const label = `每個方塊 = 1 個 node（${per} 張 GPU）；未滿一個 node 時只填滿用到的比例；實心為預期，虛線為保守估計多出的部分`;
     setMedia({ hoverNone: true });
     render(<App />); const row = bestRow();
     // Hidden from the role query in jsdom: antd's xs={0} column rule applies without media-query evaluation.

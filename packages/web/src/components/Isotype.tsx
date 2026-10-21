@@ -2,136 +2,175 @@ import { select, type Selection } from 'd3-selection';
 import 'd3-transition';
 import { theme } from 'antd';
 import { useEffect, useRef, type JSX } from 'react';
-import { transitionMs } from '../motion';
+import { useT } from '../i18n';
+import { tZh, type TFn } from '../i18n/t';
+import { useWidth } from '../media';
+import { easeCubicOut, transitionMs } from '../motion';
+import { Explain } from './Explain';
 
-/** Layout only (no hardware values): every icon has the same height, so platforms read on one scale (spec §8.3.1-2). */
-const H = 20;
-const PAD = 1;
-const GAP = 3;
-const MAX_ICONS = 16;
+/** Layout only (no hardware values). Spec §3.5: GPU node 12 × 22, Mac 20 × 13, radius 2, gap 4, ellipsis 22 wide. */
 const SHAPE = {
-  gpu: { w: 12, rx: 2 }, // a node: tall, nearly square corners
-  machine: { w: 20, rx: 5 }, // a Mac / Spark: wide box with rounder corners
+  gpu: { w: 12, h: 22 },
+  machine: { w: 20, h: 13 },
 } as const;
+const GAP = 4;
+const RX = 2;
+const ELLIPSIS_W = 22;
+const ICON_H = 24; // height of the icon row; shapes sit on its baseline
+const BRACE_H = 34; // brace + label below the icons
+const FALLBACK_WIDTH = 300; // before the first measurement (and in jsdom, which has no layout)
 
-type Icon = { key: string; kind: 'solid' | 'dashed'; fill: number };
-type Colors = { solid: string; dashed: string; text: string };
+type Unit = 'gpu' | 'machine';
+export type IsotypeCounts = { expected: number; conservative: number | null; unit: Unit; gpusPerNode: number };
+export type Slot = { index: number; x: number; fill: number; dashed: boolean };
+export type IsotypeLayout = { slots: Slot[]; fits: boolean; total: number; label: string; ellipsisX: number; width: number };
 
-/** Icons for the counts: the first expected nodes solid (the last one filled to its share), the rest up to the conservative count dashed. */
-function isotypeIcons(expectedGpus: number, conservativeGpus: number | null, gpusPerNode: number): { icons: Icon[]; total: number } {
-  const exp = Math.ceil(expectedGpus / gpusPerNode);
-  const total = Math.max(exp, conservativeGpus === null ? 0 : Math.ceil(conservativeGpus / gpusPerNode));
-  const icons: Icon[] = [];
-  for (let i = 0; i < Math.min(total, MAX_ICONS); i++) {
-    const solid = i < exp;
-    icons.push({ key: String(i), kind: solid ? 'solid' : 'dashed', fill: solid ? Math.min(1, expectedGpus / gpusPerNode - i) : 0 });
+const num = (n: number) => n.toLocaleString('en');
+
+/** Which blocks to draw for the available width: all of them, or k at each end with an ellipsis between. `expected` and
+ *  `conservative` are GPUs for GPU platforms (blocks are nodes) and machines for Macs. Pure: no DOM. */
+export function isotypeLayout(n: IsotypeCounts, width: number, tr: TFn = tZh): IsotypeLayout {
+  const mac = n.unit === 'machine';
+  const per = SHAPE[n.unit].w + GAP;
+  const cons = n.conservative ?? 0;
+  const total = mac ? Math.max(n.expected, cons) : Math.ceil(Math.max(n.expected, cons) / n.gpusPerNode);
+  const blocksExpected = mac ? n.expected : n.expected / n.gpusPerNode;
+  const avail = Math.max(per * 3, width);
+  const fits = total * per <= avail;
+  const make = (index: number, x: number): Slot => {
+    const fill = Math.max(0, Math.min(1, blocksExpected - index));
+    return { index, x, fill, dashed: fill <= 0 };
+  };
+
+  let slots: Slot[];
+  let ellipsisX = 0;
+  if (fits) {
+    slots = Array.from({ length: total }, (_, i) => make(i, i * per));
+  } else {
+    const k = Math.max(1, Math.floor((avail - ELLIPSIS_W) / per / 2));
+    ellipsisX = k * per;
+    slots = [
+      ...Array.from({ length: k }, (_, i) => make(i, i * per)),
+      ...Array.from({ length: k }, (_, j) => make(total - k + j, k * per + ELLIPSIS_W + j * per)),
+    ];
   }
-  return { icons, total };
+  const last = slots[slots.length - 1];
+  const w = last ? last.x + per - GAP : 0;
+
+  const extra = n.conservative !== null && n.conservative > n.expected ? tr('isotype.label.conservative', { n: num(n.conservative) }) : '';
+  const label =
+    (mac
+      ? tr('isotype.label.machine', { n: num(n.expected) })
+      : tr('isotype.label.gpu', { nodes: num(Math.ceil(n.expected / n.gpusPerNode)), gpus: num(n.expected) })) + extra;
+  return { slots, fits, total, label, ellipsisX, width: w };
 }
 
-function draw(svgEl: SVGSVGElement, icons: Icon[], total: number, unit: 'gpu' | 'machine', c: Colors, ms: number, ghost: boolean): void {
-  const { w, rx } = SHAPE[unit];
-  const x = (i: number) => PAD + i * (w + GAP);
-  const svg = select(svgEl);
-  const overflow = total > icons.length;
-  svg
-    .attr('width', x(icons.length) + (overflow ? 30 : 0))
-    .attr('height', H + 2 * PAD)
-    .attr('aria-hidden', 'true')
-    .style('display', 'block')
-    .style('overflow', 'visible');
+type Colors = { solid: string; dashed: string; brace: string; text: string };
 
-  // A new state supersedes any running transition: stop it and drop icons still shrinking away.
+/** Run `sel` at once (ms = 0) or as a d3 transition with the shared motion token. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const moving = (sel: Selection<any, any, any, any>, ms: number): any => (ms > 0 ? sel.transition().duration(ms).ease(easeCubicOut) : sel);
+
+/** D3 owns the SVG's children; React renders only the element. The first paint (and reduced motion) apply at once; later
+ *  changes tween together with `transitionMs()`: blocks slide, grow from height 0, the brace stretches. */
+function draw(svgEl: SVGSVGElement, lay: IsotypeLayout, unit: Unit, c: Colors, ms: number): void {
+  const { w, h } = SHAPE[unit];
+  const svg = select(svgEl);
+
+  // A new state supersedes any running transition: stop it and drop blocks still shrinking away.
   svg.selectAll('*').interrupt();
   svg.selectAll('g.exit').remove();
+  svg.attr('aria-hidden', 'true').style('display', 'block').style('overflow', 'visible');
+  moving(svg, ms)
+    .attr('width', Math.max(lay.width, 1))
+    .attr('height', lay.fits ? ICON_H + 2 : ICON_H + BRACE_H);
 
-  // Ghost (spec §8.3.1-4): a copy of the previous state that fades out over this one transition.
-  svg.selectAll('g.ghost').remove();
-  const live = svg.select<SVGGElement>('g.icons');
-  if (ghost && ms > 0 && !live.empty()) {
-    const copy = live.node()!.cloneNode(true) as SVGGElement;
-    copy.setAttribute('class', 'ghost');
-    copy.setAttribute('data-ghost', '');
-    copy.querySelectorAll('[data-icon]').forEach((n) => n.removeAttribute('data-icon'));
-    copy.querySelectorAll('.exit').forEach((n) => n.remove());
-    svgEl.insertBefore(copy, svgEl.firstChild);
-    select(copy).attr('opacity', 0.3).transition().duration(ms).attr('opacity', 0).remove();
-  }
+  let root = svg.select<SVGGElement>('g.icons');
+  if (root.empty()) root = svg.append('g').attr('class', 'icons');
+  const joined = root.selectAll<SVGGElement, Slot>('g.icon:not(.exit)').data(lay.slots, (d) => d.index);
 
-  const root = live.empty() ? svg.append('g').attr('class', 'icons') : live;
-  const dashed = (g: Selection<SVGGElement, Icon, SVGGElement, unknown>) =>
-    g
-      .attr('data-icon', (d) => d.kind)
-      .select('.outline')
-      .attr('fill', 'none')
-      .attr('stroke', (d) => (d.kind === 'solid' ? c.solid : c.dashed))
-      .attr('stroke-dasharray', (d) => (d.kind === 'solid' ? null : '3 2'));
+  const enter = joined.enter().append('g').attr('class', 'icon').attr('transform', (d) => `translate(${d.x},0)`);
+  // New blocks grow up from the baseline (height 0), unless motion is off.
+  enter.append('rect').attr('class', 'outline').attr('rx', RX).attr('width', w).attr('y', ICON_H).attr('height', 0);
+  enter.append('rect').attr('class', 'fill').attr('rx', RX).attr('width', w).attr('y', ICON_H).attr('height', 0).attr('stroke', 'none');
+  const all = enter.merge(joined);
 
-  const joined = root.selectAll<SVGGElement, Icon>('g.icon:not(.exit)').data(icons, (d) => d.key);
+  moving(all, ms).attr('transform', (d: Slot) => `translate(${d.x},0)`);
+  all.attr('data-icon', (d) => (d.dashed ? 'dashed' : 'solid'));
+  all
+    .select('.outline')
+    .attr('fill', 'none')
+    .attr('stroke-width', 1)
+    .attr('stroke', (d) => (d.dashed ? c.dashed : c.solid))
+    .attr('stroke-dasharray', (d) => (d.dashed ? '3 2' : null));
+  all.select('.fill').attr('fill', c.solid);
+  moving(all.select('.outline'), ms)
+    .attr('y', ICON_H - h)
+    .attr('height', h);
+  moving(all.select('.fill'), ms)
+    .attr('y', (d: Slot) => ICON_H - h * d.fill)
+    .attr('height', (d: Slot) => h * d.fill);
 
-  const enter = joined.enter().append('g').attr('class', 'icon');
-  enter.append('rect').attr('class', 'outline').attr('rx', rx).attr('width', w).attr('stroke-width', 1);
-  enter.append('rect').attr('class', 'fill').attr('rx', rx).attr('stroke', 'none');
-  const all = enter.merge(joined).attr('transform', (_, i) => `translate(${x(i)},0)`);
-  dashed(all);
-  all.select('.outline').attr('rx', rx).attr('width', w);
-  all.select('.fill').attr('fill', c.solid).attr('rx', rx);
-
-  const exit = joined.exit<Icon>().classed('exit', true).attr('data-icon', null);
-  if (ms === 0) {
-    exit.remove();
-    enter.selectAll('rect').attr('y', PAD).attr('height', H);
-    all.select('.outline').attr('y', PAD).attr('height', H);
-    all.select<SVGRectElement>('.fill').attr('y', PAD).attr('height', H).attr('width', (d) => w * d.fill);
-  } else {
-    // New icons grow up from the baseline, removed ones shrink down; everything moves together (no stagger).
-    enter.selectAll('rect').attr('y', PAD + H).attr('height', 0);
-    enter.select('.fill').attr('width', (d) => w * d.fill);
-    all.select('.outline').transition().duration(ms).attr('y', PAD).attr('height', H);
-    all
-      .select<SVGRectElement>('.fill')
-      .transition()
-      .duration(ms)
-      .attr('y', PAD)
-      .attr('height', H)
-      .attr('width', (d) => w * d.fill);
-    exit.selectAll('rect').transition().duration(ms).attr('y', PAD + H).attr('height', 0);
+  const exit = joined.exit<Slot>().classed('exit', true).attr('data-icon', null);
+  if (ms === 0) exit.remove();
+  else {
+    exit.selectAll('rect').transition().duration(ms).ease(easeCubicOut).attr('y', ICON_H).attr('height', 0);
     exit.transition().duration(ms).remove();
   }
 
-  svg
-    .selectAll<SVGTextElement, number>('text.more')
-    .data(overflow ? [total - icons.length] : [])
-    .join('text')
-    .attr('class', 'more')
-    .attr('x', x(icons.length) + 2)
-    .attr('y', PAD + H - 5)
-    .attr('font-size', 11)
+  // Ellipsis, brace and label exist only while the blocks do not fit; they fade in and out.
+  const x1 = Math.max(8, lay.width);
+  const y0 = ICON_H + 4;
+  const brace = `M0,${y0} q0,6 6,6 L${x1 / 2 - 6},${y0 + 6} q6,0 6,6 q0,-6 6,-6 L${x1 - 6},${y0 + 6} q6,0 6,-6`;
+  const fade = (tag: 'text' | 'path', cls: string, show: boolean) => {
+    const sel = svg.selectAll<SVGElement, number>(`${tag}.${cls}`).data(show ? [1] : []);
+    const fresh = sel.enter().append(tag).attr('class', cls).attr('opacity', ms > 0 ? 0 : 1);
+    const merged = fresh.merge(sel as never) as unknown as Selection<SVGElement, number, SVGSVGElement, unknown>;
+    moving(merged, ms).attr('opacity', 1);
+    const gone = sel.exit();
+    if (ms === 0) gone.remove();
+    else gone.transition().duration(ms).ease(easeCubicOut).attr('opacity', 0).remove();
+    return merged;
+  };
+  fade('text', 'ellipsis', !lay.fits)
+    .attr('x', lay.ellipsisX + 2)
+    .attr('y', ICON_H - 6)
+    .attr('font-size', 14)
     .attr('fill', c.text)
-    .text((n) => `+${n}`);
+    .text('…');
+  const bracePath = fade('path', 'brace', !lay.fits).attr('fill', 'none').attr('stroke', c.brace);
+  moving(bracePath, ms).attr('d', brace);
+  fade('text', 'brace-label', !lay.fits)
+    .attr('x', x1 / 2)
+    .attr('y', y0 + 26)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', 12)
+    .attr('fill', c.text)
+    .text(lay.label);
 }
 
-/** 每台機器一個圖示：GPU 平台的台數是 ceil(gpus / gpusPerNode) 個 node，Mac／Spark 是台數。
- *  前 `expected` 個實心，到 `conservative` 為止虛線。gpus 不滿一個 node 時，圖示只填滿相應比例。
- *  數量改變時，用 d3-transition（transitionMs()）長出或縮回，前一個狀態以殘影保留一次轉場。
- *  D3 owns the SVG's children; React renders only the element. */
-export function Isotype(props: { expectedGpus: number; conservativeGpus: number | null; gpusPerNode: number; unit: 'gpu' | 'machine' }): JSX.Element {
-  const { expectedGpus, conservativeGpus, gpusPerNode, unit } = props;
+/** 每個 node（GPU）或每台（Mac／Spark）一個方塊；實心為預期，虛線為保守多出的。放不下時前 k 個、省略號、後 k 個，
+ *  下方一道大括號寫總數。`expected`／`conservative` 的單位：GPU 平台為張數，Mac 為台數。 */
+export function Isotype(props: IsotypeCounts): JSX.Element {
+  const { expected, conservative, unit, gpusPerNode } = props;
   const { token } = theme.useToken();
+  const tr = useT();
+  const [wrap, measured] = useWidth<HTMLDivElement>();
   const ref = useRef<SVGSVGElement>(null);
   const prev = useRef<string | null>(null);
-  const colors: Colors = { solid: token.colorPrimary, dashed: token.colorBorder, text: token.colorTextSecondary };
+  const lay = isotypeLayout({ expected, conservative, unit, gpusPerNode }, measured || FALLBACK_WIDTH, tr);
+  const colour = unit === 'machine' ? token.colorTextTertiary : token.colorPrimary;
+  const colors: Colors = { solid: colour, dashed: colour, brace: token.colorTextTertiary, text: token.colorTextSecondary };
+  const legend = tr(unit === 'machine' ? 'isotype.legend.machine' : 'isotype.legend.gpu', { perNode: gpusPerNode });
 
+  const layKey = JSON.stringify([lay.slots.map((s) => [s.index, s.fill, s.dashed]), lay.fits, lay.label, lay.width]);
   useEffect(() => {
-    const el = ref.current!;
-    const key = `${expectedGpus}|${conservativeGpus}|${gpusPerNode}|${unit}`;
-    // Animate only when the counts change (spec §8.3.1-4): first paint and theme changes apply at once.
-    const changed = prev.current !== null && prev.current !== key;
-    prev.current = key;
-    const { icons, total } = isotypeIcons(expectedGpus, conservativeGpus, gpusPerNode);
-    draw(el, icons, total, unit, colors, changed ? transitionMs() : 0, changed);
+    // Animate only when the layout changes: first paint and theme changes apply at once.
+    const changed = prev.current !== null && prev.current !== layKey;
+    prev.current = layKey;
+    draw(ref.current!, lay, unit, colors, changed ? transitionMs() : 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expectedGpus, conservativeGpus, gpusPerNode, unit, colors.solid, colors.dashed, colors.text]);
+  }, [layKey, unit, colors.solid, colors.dashed, colors.brace, colors.text]);
 
   useEffect(() => {
     const el = ref.current!;
@@ -140,5 +179,13 @@ export function Isotype(props: { expectedGpus: number; conservativeGpus: number 
     };
   }, []);
 
-  return <svg ref={ref} data-testid="isotype" />;
+  return (
+    <div ref={wrap} style={{ width: '100%', minWidth: 0 }}>
+      <Explain content={<div style={{ maxWidth: 320 }}>{legend}</div>}>
+        <span role="img" aria-label={legend} tabIndex={0} onClick={(e) => e.stopPropagation()} style={{ display: 'inline-block', cursor: 'help', maxWidth: '100%' }}>
+          <svg ref={ref} data-testid="isotype" />
+        </span>
+      </Explain>
+    </div>
+  );
 }

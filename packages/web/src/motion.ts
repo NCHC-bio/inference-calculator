@@ -7,3 +7,6 @@ export const EASE = 'cubic-bezier(0.215, 0.61, 0.355, 1)';
 export function transitionMs(): number {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : TRANSITION_MS;
 }
+
+/** d3's easeCubicOut, for d3-transition `.ease()` (d3-ease is not a direct dependency). */
+export const easeCubicOut = (k: number): number => 1 - (1 - k) ** 3;

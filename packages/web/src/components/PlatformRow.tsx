@@ -70,12 +70,6 @@ export function PlatformRow({ r, users, best, open, onToggle }: { r: PlatformRes
   let body: JSX.Element;
   if (expected.ok) {
     const consGpus = conservative.ok ? conservative.gpus : null;
-    const extraNodes = consGpus === null ? 0 : Math.max(0, Math.ceil(consGpus / perNode) - Math.ceil(expected.gpus / perNode));
-    const iconLabel = tr(plat.unit === 'machine' ? 'platforms.isotype.machine' : 'platforms.isotype.gpu', {
-      perNode,
-      expected: Math.ceil(expected.gpus / perNode),
-      extra: extraNodes,
-    });
     const countUnit = tr(plat.unit === 'machine' ? 'platforms.count.machine' : 'platforms.count.gpu');
     const under = !conservative.ok
       ? tr('platforms.conservativeNone', { unit: countUnit })
@@ -85,12 +79,8 @@ export function PlatformRow({ r, users, best, open, onToggle }: { r: PlatformRes
     body = (
       <>
         <Col xs={0} md={7}>
-          {/* The icons explain themselves on hover, tap and focus (spec §8.3.3); a tap does not toggle the row. */}
-          <Explain content={<div style={{ maxWidth: 320 }}>{iconLabel}</div>}>
-            <span role="img" aria-label={iconLabel} tabIndex={0} onClick={stop} style={{ display: 'inline-block', cursor: 'help' }}>
-              <Isotype expectedGpus={expected.gpus} conservativeGpus={consGpus} gpusPerNode={perNode} unit={plat.unit} />
-            </span>
-          </Explain>
+          {/* The icons explain themselves on hover, tap and focus (inside Isotype); a tap does not toggle the row. */}
+          <Isotype expected={expected.gpus} conservative={consGpus} gpusPerNode={perNode} unit={plat.unit} />
         </Col>
         <Col xs={12} md={3} style={{ textAlign: 'right' }}>
           <div data-testid="count" style={{ fontSize: 24, fontWeight: 800, lineHeight: 1 }}>
