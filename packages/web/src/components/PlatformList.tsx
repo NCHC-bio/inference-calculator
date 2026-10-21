@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons';
-import { Button, Collapse, Divider, type CollapseProps } from 'antd';
+import { App as AntApp, Button, Collapse, Divider, type CollapseProps } from 'antd';
 import { useRef, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useDeferredState, useMain } from '../compute/useResults';
@@ -13,6 +13,9 @@ import { Workbench } from './Workbench';
 
 type Item = NonNullable<CollapseProps['items']>[number];
 
+/** How long 復原 is offered after custom hardware is deleted. */
+export const UNDO_SEC = 5;
+
 /**
  * 平台列表（design §4 item 4）: one antd Collapse item per platform in bundle order, then custom hardware; a 「自建」
  * divider before the first self-hosted row; the add-hardware button last. Only the platform name toggles a row
@@ -25,9 +28,42 @@ export function PlatformList(): JSX.Element | null {
   const s = useDeferredState();
   const view = useMain();
   const wrap = useRef<HTMLDivElement>(null);
+  const undoSeq = useRef(0);
+  const { message } = AntApp.useApp();
   if (view.kind !== 'main') return null;
   const b = getBundle();
   const best = view.result.best;
+
+  /**
+   * Custom hardware is removed at once; a message offers 復原 for UNDO_SEC (user decision, v8 minor 5), which puts it
+   * back at its index with the count and open state it had.
+   */
+  const remove = (index: number) => {
+    const value = current.customPlatforms[index];
+    if (!value) return;
+    const key = `custom:${index}`;
+    const override = current.overrides[key];
+    const wasOpen = current.openRow === key;
+    dispatch({ type: 'removePlatform', index });
+    const mk = `undo-hardware-${++undoSeq.current}`;
+    const undo = () => {
+      dispatch({ type: 'restorePlatform', index, value, ...(override ? { override } : {}), wasOpen });
+      message.destroy(mk);
+    };
+    void message.open({
+      key: mk,
+      type: 'info',
+      duration: UNDO_SEC,
+      content: (
+        <span data-testid="undo-hardware">
+          <span>{tr('hw.removed', { name: value.name })}</span>
+          <Button type="link" size="small" onClick={undo}>
+            {tr('hw.undo')}
+          </Button>
+        </span>
+      ),
+    });
+  };
 
   const items: Item[] = [];
   let divider = false;
@@ -49,7 +85,7 @@ export function PlatformList(): JSX.Element | null {
     }
     const attrs = { 'data-testid': 'platform-row', 'data-row': r.row, 'data-best': String(best === r.row) };
     const onEdit = () => dispatch({ type: 'dialog', id: 'hardware', editingPlatform: info.custom });
-    const onDelete = () => info.custom !== null && dispatch({ type: 'removePlatform', index: info.custom });
+    const onDelete = () => info.custom !== null && remove(info.custom);
     if (r.kind === 'infeasible') {
       const extra = (
         <div className="row-extra">

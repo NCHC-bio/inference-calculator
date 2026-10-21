@@ -264,6 +264,35 @@ describe('PlatformList', () => {
     await waitFor(() => expect(rows().some((x) => x.dataset.row === 'custom:0')).toBe(false));
   });
 
+  it('deleting custom hardware offers 復原 for a few seconds; undo restores it at its index with its count (v8 minor 5)', async () => {
+    const s: CalcState = {
+      ...defaultState(getBundle()),
+      customPlatforms: [CUSTOM, { ...CUSTOM, name: 'Second GPU' }],
+      overrides: { 'custom:0': { gpus: 16 } },
+    };
+    visit(s);
+    renderList();
+    await userEvent.click(within(rowOf('custom:0')).getByRole('button', { name: '刪除' }));
+    expect(latest!.customPlatforms.map((p) => p.name)).toEqual(['Second GPU']);
+    await waitFor(() => expect(screen.getByText('已移除「Lab GPU」')).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: '復原' }));
+    expect(latest!.customPlatforms.map((p) => p.name)).toEqual(['Lab GPU', 'Second GPU']);
+    expect(latest!.overrides).toEqual({ 'custom:0': { gpus: 16 } });
+    await waitFor(() => expect(rows().at(-2)!.dataset.row).toBe('custom:0'));
+    expect(within(rowOf('custom:0')).getByText('Lab GPU')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText('已移除「Lab GPU」')).toBeNull());
+  });
+
+  it('deleting without undo: the hardware stays gone after the message closes', async () => {
+    visit({ ...defaultState(getBundle()), customPlatforms: [CUSTOM] });
+    renderList();
+    await userEvent.click(within(rowOf('custom:0')).getByRole('button', { name: '刪除' }));
+    await waitFor(() => expect(screen.getByText('已移除「Lab GPU」')).toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText('已移除「Lab GPU」')).toBeNull(), { timeout: 8000 });
+    expect(latest!.customPlatforms).toEqual([]);
+    expect(rows().some((x) => x.dataset.row === 'custom:0')).toBe(false);
+  }, 20_000);
+
   it('best marker sits on the best row', () => {
     const best = main(defaultState(getBundle())).result.best!;
     render(<App />);

@@ -307,6 +307,8 @@ const en = {
   'hw.added': 'Hardware added',
   'hw.updated': 'Hardware updated',
   'hw.full': 'At most {n} custom machines; delete one first',
+  'hw.removed': 'Removed “{name}”',
+  'hw.undo': 'Undo',
   'hw.issues': 'Invalid values:',
   'acc.title': 'Accuracy (calibrated with public measurements)',
   'acc.platform': 'Platform',

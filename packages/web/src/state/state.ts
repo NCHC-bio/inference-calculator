@@ -83,6 +83,8 @@ export type Action =
   | { type: 'addPlatform'; value: CustomPlatformInput }
   | { type: 'editPlatform'; index: number; value: CustomPlatformInput }
   | { type: 'removePlatform'; index: number }
+  /** Undo of removePlatform: back at `index`, with the row's count and open state when it had them (v8 minor 5). */
+  | { type: 'restorePlatform'; index: number; value: CustomPlatformInput; override?: Override; wasOpen?: boolean }
   | { type: 'openRow'; row: RowKey | null }
   | { type: 'pin'; pin: Omit<Pin, 'id'> }
   | { type: 'unpin'; id: number }
@@ -224,6 +226,16 @@ function shiftCustom<T>(rec: Record<RowKey, T>, removed: number): Record<RowKey,
   return out;
 }
 
+/** Re-key `custom:i` entries for a platform inserted at `at` (that index and higher shift up). */
+function unshiftCustom<T>(rec: Record<RowKey, T>, at: number): Record<RowKey, T> {
+  const out: Record<RowKey, T> = {};
+  for (const [k, v] of Object.entries(rec)) {
+    const i = customIndex(k);
+    out[i !== null && i >= at ? `custom:${i + 1}` : k] = v;
+  }
+  return out;
+}
+
 function shiftRow(row: RowKey | null, removed: number): RowKey | null {
   const i = row === null ? null : customIndex(row);
   if (i === null) return row;
@@ -298,6 +310,23 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
         overrides: shiftCustom(s.overrides, a.index),
         openRow: shiftRow(s.openRow, a.index),
         editingPlatform: ep === null || ep === a.index ? null : ep > a.index ? ep - 1 : ep,
+      };
+    }
+    case 'restorePlatform': {
+      const n = s.customPlatforms.length;
+      if (!Number.isInteger(a.index) || a.index < 0 || a.index > n || n >= CUSTOM_PLATFORMS_MAX || !validPlatform(a.value)) return s;
+      const key = `custom:${a.index}`;
+      const overrides = unshiftCustom(s.overrides, a.index);
+      if (a.override !== undefined && validOverride(a.override)) overrides[key] = a.override;
+      const i = s.openRow === null ? null : customIndex(s.openRow);
+      const openRow = a.wasOpen ? key : i !== null && i >= a.index ? `custom:${i + 1}` : s.openRow;
+      const ep = s.editingPlatform;
+      return {
+        ...s,
+        customPlatforms: [...s.customPlatforms.slice(0, a.index), a.value, ...s.customPlatforms.slice(a.index)],
+        overrides,
+        openRow,
+        editingPlatform: ep !== null && ep >= a.index ? ep + 1 : ep,
       };
     }
     case 'openRow':

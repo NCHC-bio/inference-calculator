@@ -120,6 +120,33 @@ describe('reduce', () => {
     expect(r.overrides).toEqual({ 'custom:0': { gpus: 2 }, 'custom:1': { gpus: 16, tp: 8 } });
     expect(r.openRow).toBeNull();
   });
+  it('restorePlatform puts a removed platform back at its index with its override and open state (v8 minor 5)', () => {
+    const s = run(
+      s0,
+      { type: 'addPlatform', value: gpu('A') },
+      { type: 'addPlatform', value: gpu('B') },
+      { type: 'addPlatform', value: gpu('C') },
+      { type: 'override', row: 'custom:1', value: { gpus: 4, tp: 2 } },
+      { type: 'override', row: 'custom:2', value: { gpus: 16, tp: 8 } },
+      { type: 'openRow', row: 'custom:1' },
+    );
+    const removed = reduce(b, s, { type: 'removePlatform', index: 1 });
+    const back = reduce(b, removed, { type: 'restorePlatform', index: 1, value: gpu('B'), override: { gpus: 4, tp: 2 }, wasOpen: true });
+    expect(back.customPlatforms.map((p) => p.name)).toEqual(['A', 'B', 'C']);
+    expect(back.overrides).toEqual(s.overrides);
+    expect(back.openRow).toBe('custom:1');
+    // Without override / open state: only the platform returns; another open row stays open (shifted).
+    const opened = reduce(b, removed, { type: 'openRow', row: 'custom:1' });
+    const plain = reduce(b, opened, { type: 'restorePlatform', index: 0, value: gpu('Z') });
+    expect(plain.customPlatforms.map((p) => p.name)).toEqual(['Z', 'A', 'C']);
+    expect(plain.overrides).toEqual({ 'custom:2': { gpus: 16, tp: 8 } });
+    expect(plain.openRow).toBe('custom:2');
+    // Invalid index, a full list or an invalid platform are ignored.
+    expect(reduce(b, removed, { type: 'restorePlatform', index: 5, value: gpu('Q') })).toEqual(removed);
+    const full = run(s0, ...Array.from({ length: CUSTOM_PLATFORMS_MAX }, (_, i): Action => ({ type: 'addPlatform', value: gpu(`P${i}`) })));
+    expect(reduce(b, full, { type: 'restorePlatform', index: 0, value: gpu('Q') })).toEqual(full);
+    expect(reduce(b, removed, { type: 'restorePlatform', index: 0, value: { ...gpu('Q'), memGB: -1 } })).toEqual(removed);
+  });
   it('editPlatform replaces the entry', () => {
     const s = run(s0, { type: 'addPlatform', value: gpu('A') }, { type: 'editPlatform', index: 0, value: gpu('Z') });
     expect(s.customPlatforms.map((p) => p.name)).toEqual(['Z']);

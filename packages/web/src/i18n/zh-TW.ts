@@ -310,6 +310,8 @@ const zhTW = {
   'hw.added': '已加入你的硬體',
   'hw.updated': '已更新硬體',
   'hw.full': '最多 {n} 台自訂硬體，請先刪除一台',
+  'hw.removed': '已移除「{name}」',
+  'hw.undo': '復原',
   'hw.issues': '數值不合法：',
   'acc.title': '準確度（以公開實測校正）',
   'acc.platform': '平台',
