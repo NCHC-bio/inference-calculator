@@ -532,6 +532,31 @@ describe('HF refetch on load (Ruling W1)', () => {
     expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent(b.models[defaultState(b).model]!.name);
   });
 
+  it('a network failure keeps the link and offers Retry or the default model (review I3)', async () => {
+    const { model, source } = importedFixture();
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 'network', message: 'Failed to fetch' });
+    history.replaceState(null, '', '/' + hfUrl(true));
+    render(<App />);
+    const retry = await screen.findByRole('button', { name: '重試' });
+    expect(screen.getByText('無法連線到 Hugging Face，暫時無法重新匯入 test-org/test-model；連結已保留')).toBeInTheDocument();
+    expect(new URLSearchParams(location.search).get('hf')).not.toBeNull();
+    expect(screen.getByTestId('answer-loading')).toBeInTheDocument();
+    fetchMock.mockResolvedValueOnce({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] });
+    await userEvent.click(retry);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
+    expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent('test-org/test-model');
+  });
+
+  it('after a network failure, 改用預設模型 falls back', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 'network', message: 'Failed to fetch' });
+    history.replaceState(null, '', '/' + hfUrl(true));
+    render(<App />);
+    await userEvent.click(await screen.findByRole('button', { name: '改用預設模型' }));
+    await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
+    expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent(b.models[defaultState(b).model]!.name);
+  });
+
   it('without a stored origin the HF drawer asks for it', async () => {
     history.replaceState(null, '', '/' + hfUrl(false));
     render(<App />);

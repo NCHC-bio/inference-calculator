@@ -1,6 +1,6 @@
 import { fetchHfModel, type HfFetchResult } from '@nchc/data/hf';
 import { HF_REPO_RE, type Origin } from '@nchc/schema';
-import { Alert, App as AntApp, Button, Form, Input, Spin, Typography } from 'antd';
+import { Alert, App as AntApp, Button, Form, Input, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useT, type MsgKey, type TFn } from '../../i18n';
 import type { Action, CalcState } from '../../state/state';
@@ -16,6 +16,7 @@ const ERR: Record<Failure['status'], MsgKey> = {
   network: 'hf.err.network',
 };
 const COUNTRY = /^[A-Z]{2}$/;
+const REFETCH_KEY = 'hf-refetch';
 
 /** The browser's fetch, typed for fetchHfModel (only huggingface.co sees the token). */
 const browserFetch = (url: string, init?: { headers?: Record<string, string> }) => fetch(url, init);
@@ -51,11 +52,14 @@ export async function importHf(
 /**
  * Ruling W1: an HF model from the URL (no `imported`) is fetched again at its stored sha with its stored origin; on
  * failure an error message and the default model. Without a stored origin the HF Drawer opens to ask for it.
+ * A network failure is transient: the model (and so the link in the address bar) is kept, and a notification offers
+ * Retry or the default model (review I3).
  */
 export function HfRefetch(): null {
   const tr = useT();
   const [s, dispatch] = useCalc();
-  const { message } = AntApp.useApp();
+  const { message, notification } = AntApp.useApp();
+  const [attempt, setAttempt] = useState(0);
   const pending = pendingHf(s);
   const repo = pending?.repo;
   const sha = pending?.sha;
@@ -74,14 +78,47 @@ export function HfRefetch(): null {
         dispatch(r.action);
         return;
       }
+      if (r.status === 'network') {
+        notification.error({
+          key: REFETCH_KEY,
+          title: tr('hf.refetchNetwork', { repo }),
+          description: r.message,
+          duration: 0,
+          actions: (
+            <Space>
+              <Button
+                size="small"
+                onClick={() => {
+                  notification.destroy(REFETCH_KEY);
+                  dispatch({ type: 'customModel', value: null });
+                }}
+              >
+                {tr('hf.refetch.default')}
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                onClick={() => {
+                  notification.destroy(REFETCH_KEY);
+                  setAttempt((a) => a + 1);
+                }}
+              >
+                {tr('hf.refetch.retry')}
+              </Button>
+            </Space>
+          ),
+        });
+        return;
+      }
       void message.error(tr('hf.refetchFail', { repo, message: `${tr(ERR[r.status])}（${r.message}）` }));
       dispatch({ type: 'customModel', value: null });
     });
     return () => {
       live = false;
+      notification.destroy(REFETCH_KEY);
     };
-    // tr / message only format the error; a language switch must not refetch.
-  }, [repo, sha, developer, country, dispatch]);
+    // tr / message / notification only report the error; a language switch must not refetch. `attempt` is Retry.
+  }, [repo, sha, developer, country, dispatch, attempt]);
   return null;
 }
 
