@@ -35,7 +35,8 @@ export function CiteModal(): JSX.Element {
       width={640}
       styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
       footer={
-        <Button type="primary" icon={<CopyOutlined />} onClick={() => void copy()}>
+        // Nothing to cite (no result yet, or an input error): there is nothing to copy (v8 minor 4).
+        <Button type="primary" icon={<CopyOutlined />} disabled={text.trim() === ''} onClick={() => void copy()}>
           {tr('cite.copy')}
         </Button>
       }

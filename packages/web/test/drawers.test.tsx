@@ -12,6 +12,7 @@ import { getBundle } from '../src/bundle';
 import { fmt } from '../src/components/answerText';
 import { AnswerLine } from '../src/components/AnswerLine';
 import { PlatformList } from '../src/components/PlatformList';
+import { CiteModal } from '../src/components/CiteModal';
 import { Sentence } from '../src/components/Sentence';
 import { AccuracyDrawer } from '../src/components/drawers/AccuracyDrawer';
 import { formatCommand, splitVerify } from '../src/components/drawers/CodeBlock';
@@ -566,5 +567,40 @@ describe('HF refetch on load (Ruling W1)', () => {
     // Closing without importing drops the model.
     fireEvent.click(d.closest('.ant-drawer')!.querySelector('.ant-drawer-close')!);
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
+  });
+});
+
+describe('CiteModal copy (v8 minor 4)', () => {
+  const modal = () => waitFor(() => {
+    const m = document.querySelector<HTMLElement>('.ant-modal');
+    expect(m).not.toBeNull();
+    return m!;
+  });
+
+  it('with nothing to cite the copy button is disabled', async () => {
+    // An HF model not yet refetched: no result, so no citation text.
+    renderWith(<CiteModal />, '?hf=test-org/test-model@abc1234');
+    openDialog({ type: 'dialog', id: 'cite' });
+    const m = await modal();
+    expect(within(m).getByTestId('cite-text').textContent).toBe('');
+    expect(within(m).getByRole('button', { name: /複製/ })).toBeDisabled();
+  });
+
+  it('a failed clipboard write shows an error, never 已複製', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    try {
+      renderWith(<CiteModal />);
+      openDialog({ type: 'dialog', id: 'cite' });
+      const m = await modal();
+      const copy = within(m).getByRole('button', { name: /複製/ });
+      expect(copy).toBeEnabled();
+      await userEvent.click(copy);
+      expect(writeText).toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByText('無法複製，請手動選取文字複製')).toBeInTheDocument());
+      expect(screen.queryByText('已複製')).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
