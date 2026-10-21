@@ -402,6 +402,8 @@ export type ShapeUsage = {
   share: { mem: number; bw: number; compute: number; ttft: number };
   tokPerSecPerUser: number;
   ttftSec: number;
+  /** Roofline coordinates of one decode step per GPU (peak and bandwidth are hardware, not multiplied by η). */
+  roofline: { peakTflopsPerGpu: number; memBwTBsPerGpu: number; intensityFlopPerByte: number; achievedTflopsPerGpu: number };
 };
 
 /**
@@ -436,6 +438,12 @@ export function shapeUsage(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, n
     },
     tokPerSecPerUser: c.tokPerSecPerUser,
     ttftSec: c.ttftSec,
+    roofline: {
+      peakTflopsPerGpu: r.flopsPerSec / r.tp / 1e12,
+      memBwTBsPerGpu: r.memBwBytesPerSec / r.tp / 1e12,
+      intensityFlopPerByte: c.step.flop / c.step.bytes,
+      achievedTflopsPerGpu: c.step.flop / c.step.stepSec / r.tp / 1e12,
+    },
   };
 }
 

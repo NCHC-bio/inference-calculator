@@ -29,6 +29,7 @@ const usage = (over: Partial<ShapeUsage> = {}): ShapeUsage => ({
   share: { mem: 0.3, bw: 0.8, compute: 0.1, ttft: 0.5 },
   tokPerSecPerUser: 20,
   ttftSec: 1.2,
+  roofline: { peakTflopsPerGpu: 100, memBwTBsPerGpu: 1, intensityFlopPerByte: 10, achievedTflopsPerGpu: 5 },
   ...over,
 });
 const kvCells = (c: HTMLElement) => c.querySelectorAll('[data-seg="kv"]').length;

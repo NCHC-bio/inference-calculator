@@ -583,3 +583,18 @@ describe('shapeUsage (spec §8.3.3 細節面板)', () => {
     expect(u.ttftSec).toBe(c.ttftSec);
   });
 });
+
+describe('shapeUsage roofline', () => {
+  it('roofline point lies under the roof', () => {
+    const shape = { tp: 8, replicas: 2 };
+    const u = shapeUsage(chatCtx, h200, shape, 100, 'expected');
+    const c = checkShape(chatCtx, h200, shape, 100, 'expected');
+    const r = h200.replicaFor(8, 'expected');
+    const rf = u.roofline;
+    expect(rf.peakTflopsPerGpu).toBeCloseTo(r.flopsPerSec / 8 / 1e12, 12);
+    expect(rf.memBwTBsPerGpu).toBeCloseTo(r.memBwBytesPerSec / 8 / 1e12, 12);
+    expect(rf.intensityFlopPerByte).toBeCloseTo(c.step.flop / c.step.bytes, 12);
+    expect(rf.achievedTflopsPerGpu).toBeGreaterThan(0);
+    expect(rf.achievedTflopsPerGpu).toBeLessThanOrEqual(Math.min(rf.peakTflopsPerGpu, rf.intensityFlopPerByte * rf.memBwTBsPerGpu));
+  });
+});

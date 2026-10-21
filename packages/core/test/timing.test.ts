@@ -405,3 +405,22 @@ describe('TTFT physical floor under load (final-review M6)', () => {
     expect(ttftSec(h200x8, llama70b, w, { includeComm: false, chunkTokens: 2048, perChunkExtraSec: 0.01 })).toBeCloseTo(base + 3 * 0.01, 12);
   });
 });
+
+describe('decodeStep flop and bytes reproduce its times (roofline data)', () => {
+  const mac: Replica = {
+    tp: 1, memBytes: 512e9, memBwBytesPerSec: 1.2e12, flopsPerSec: 100e12, etaBw: 0.86, etaCompute: 0.5, memUtil: 0.75,
+    allreduceLatencySec: 0, linkBwBytesPerSecPerDir: 0,
+  };
+  const close = (a: number, b: number) => expect(Math.abs(a - b) / b).toBeLessThan(1e-9);
+  it('GPU replica (fused chunked prefill)', () => {
+    const s = decodeStep(h200x8, llama70b, 1, chat, 8, { includeComm: false });
+    close(s.bytes / (h200x8.memBwBytesPerSec * h200x8.etaBw), s.bwSec);
+    close(s.flop / (h200x8.flopsPerSec * h200x8.etaCompute), s.computeSec);
+  });
+  it('MLX replica (separate prompt pass, expected value)', () => {
+    const s = decodeStep(mac, llama70b, 1, chat, 8, { prefillStepTokens: 2048 });
+    expect(s.prefillPassProb).toBeGreaterThan(0);
+    close(s.bytes / (mac.memBwBytesPerSec * mac.etaBw), s.bwSec);
+    close(s.flop / (mac.flopsPerSec * mac.etaCompute), s.computeSec);
+  });
+});
