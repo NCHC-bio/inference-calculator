@@ -518,6 +518,17 @@ export function resolveCustomPlatform(
         return s.value === null ? { ...u, text: `${label}；使用者未填` } : u;
       }
       const from = fromSourced(path, label, s, lecRef);
+      if (field.startsWith('vllmDefaults.')) {
+        // The template's derivation is about the template's own card; do not present it as this card's.
+        const tplHw = bundle.hardware[tplPlat.hardware];
+        const tplCard = tplHw ? `${tplHw.name} ${tplHw.memGB.value} GB` : tpl.platform;
+        return {
+          ...from,
+          status: 'estimate',
+          sourceIds: [...new Set([...from.sourceIds, ...tpl.evidence])],
+          text: `${label}；借用 ${tpl.platform} 的 vLLM 預設值（依 ${tplCard} 推得；你的卡記憶體不同時實際預設可能不同）；${borrowed}`,
+        };
+      }
       return { ...from, status: 'estimate', sourceIds: [...new Set([...from.sourceIds, ...tpl.evidence])], text: `${from.text}；${borrowed}` };
     },
   });

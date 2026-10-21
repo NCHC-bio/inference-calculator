@@ -134,4 +134,16 @@ describe('custom platforms', () => {
     expectInvalid(() => estimateRequirements(bundle, { ...query, customPlatforms: [{ ...h200Copy(), name }] }));
     expectInvalid(() => estimatePerformance(bundle, { ...query, platform: { ...h200Copy(), name: 'A B' }, gpus: 8 }));
   });
+
+  it('borrowed vLLM defaults are not presented as this own H200 derivation', () => {
+    const r = estimatePerformance(bundle, { ...query, platform: { ...h200Copy(), memGB: 48 }, gpus: 64 });
+    const tplId = bundle.customHardware.templates.vllm.platform;
+    const items = r.basis.filter((b) => b.path.includes('vllmDefaults'));
+    expect(items.length).toBeGreaterThan(0);
+    for (const b of items) {
+      expect(b.text, b.path).toContain('借用');
+      expect(b.text, b.path).toContain(tplId);
+      expect(b.text, b.path).not.toContain('H200 141 GB ≈ 131 GiB');
+    }
+  });
 });
