@@ -464,7 +464,7 @@
   accessed: 2026-10-20
   kind: official
 - id: gwdg-chat-ai
-  title: 'Chat AI: A Seamless Slurm-Native Solution for HPC-Based Services（GWDG，arXiv 2407.00110；§6.4 User Adoption：註冊 9,000 人、平日活躍約 400–500 人、截至 2024-07-30 累計逾 35 萬則訊息）'
+  title: 'Chat AI: A Seamless Slurm-Native Solution for HPC-Based Services（GWDG，arXiv 2407.00110，§6.4 User Adoption；引句見 docs/research/user-questions.md §3）'
   url: https://arxiv.org/abs/2407.00110
   accessed: 2026-10-21
   kind: paper
