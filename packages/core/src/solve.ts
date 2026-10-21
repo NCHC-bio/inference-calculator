@@ -220,7 +220,7 @@ export function queueingFor(
     waitSec,
     reason:
       `每步需處理約 ${Math.round(tokensPerStep)} token（解碼 ${genBatch} + 預填 ${Math.round(genBatch * r)}），` +
-      `超過 vLLM max_num_batched_tokens ${budget}：每副本最多 ${dMax} 人同時解碼，其餘 ${waiting} 人在伺服器排隊等預填，` +
+      `超過 vLLM max_num_batched_tokens ${budget}：每份模型最多 ${dMax} 人同時解碼，其餘 ${waiting} 人在伺服器排隊等預填，` +
       `平均多等約 ${wait} 秒（Little's law），已計入首字時間`,
   };
 }

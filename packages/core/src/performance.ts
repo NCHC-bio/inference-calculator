@@ -260,10 +260,10 @@ function failDetail(
   users: number,
   shape: Shape,
 ): string {
-  const where = `TP ${shape.tp} × ${shape.replicas} 個副本`;
-  if (c.why === 'mem') return `${where}記憶體最多放得下 ${c.capacityPerReplica * shape.replicas} 人的上下文，${users} 人超過了`;
-  if (c.why === 'ttft') return `${where}在 ${users} 人時首字約 ${c.ttftSec.toFixed(1)} 秒，超過要求的 ${speed.maxTtftSec} 秒`;
-  return `${where}在 ${users} 人時每人每秒約 ${c.tokPerSecPerUser.toFixed(1)} token，低於要求的 ${speed.minTokPerSec}`;
+  const where = shape.tp === 1 ? `每張卡各跑一份模型，共 ${shape.replicas} 份` : `每 ${shape.tp} 張卡合跑一份模型，共 ${shape.replicas} 份`;
+  if (c.why === 'mem') return `${where}，記憶體最多放得下 ${c.capacityPerReplica * shape.replicas} 人的上下文，${users} 人超過了`;
+  if (c.why === 'ttft') return `${where}，在 ${users} 人時首字約 ${c.ttftSec.toFixed(1)} 秒，超過要求的 ${speed.maxTtftSec} 秒`;
+  return `${where}，在 ${users} 人時每人每秒約 ${c.tokPerSecPerUser.toFixed(1)} token，低於要求的 ${speed.minTokPerSec}`;
 }
 
 /** Reason for the chosen t only (a forced t can fail on weights while a larger legal t fits): context, or its own weights. */

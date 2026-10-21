@@ -479,7 +479,7 @@ describe('queueing model: prefill queues behind vLLM max_num_batched_tokens, wai
     expect(c.step.stepSec).toBe(t919);
     expect(c.tokPerSecPerUser).toBe(1 / t919);
     expect(q.reason).toBe(
-      '每步需處理約 8194 token（解碼 920 + 預填 7274），超過 vLLM max_num_batched_tokens 8192：每副本最多 919 人同時解碼，' +
+      '每步需處理約 8194 token（解碼 920 + 預填 7274），超過 vLLM max_num_batched_tokens 8192：每份模型最多 919 人同時解碼，' +
         '其餘 1 人在伺服器排隊等預填，平均多等約 0.02 秒（Little\'s law），已計入首字時間',
     );
   });

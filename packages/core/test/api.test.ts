@@ -1096,8 +1096,8 @@ describe('verifyCommand with several replicas (review: one serve line took all N
     const cmd = verifyCommand(platform, { tp: 2, replicas: 3 }, m, w, 100, fp8);
     expect(cmd).toContain('--max-concurrency 34 --dataset-name random');
     expect(cmd).toContain('--num-prompts 340');
-    expect(cmd).toContain('共 3 個副本，每個副本分到 34 個同時生成的請求（100 ÷ 3，無條件進位）');
-    expect(cmd).toContain('每個 node 可放 4 個副本');
+    expect(cmd).toContain('共 3 份，每份模型分到 34 個同時生成的請求（100 ÷ 3，無條件進位）');
+    expect(cmd).toContain('每個 node 可放 4 份模型');
     expect(cmd.split('\n').filter((l) => l.includes('vllm serve '))).toEqual([
       expect.stringMatching(/^CUDA_VISIBLE_DEVICES=0,1 vllm serve microsoft\/phi-4 --tensor-parallel-size 2 /),
     ]);
@@ -1108,8 +1108,8 @@ describe('verifyCommand with several replicas (review: one serve line took all N
     const serve = cmd.split('\n').find((l) => l.includes('vllm serve '))!;
     expect(serve).toMatch(/ --port 8000$/);
     expect(cmd).toContain('vllm bench serve --port 8000 --model microsoft/phi-4 ');
-    expect(cmd).toContain('#   副本 2：CUDA_VISIBLE_DEVICES=2,3、--port 8001');
-    expect(cmd).toContain('#   副本 3：CUDA_VISIBLE_DEVICES=4,5、--port 8002');
+    expect(cmd).toContain('#   第 2 份：CUDA_VISIBLE_DEVICES=2,3、--port 8001');
+    expect(cmd).toContain('#   第 3 份：CUDA_VISIBLE_DEVICES=4,5、--port 8002');
     expect(cmd).toContain('--data-parallel-size');
   });
   it('--max-num-seqs is pinned only when a replica runs more requests than the vLLM default (review L10)', () => {
@@ -1126,7 +1126,7 @@ describe('verifyCommand with several replicas (review: one serve line took all N
     const cmd = verifyCommand(platform, { tp: 2, replicas: 1 }, m, w, 100, fp8);
     expect(cmd).toContain('--max-concurrency 100 ');
     expect(cmd).not.toContain('CUDA_VISIBLE_DEVICES');
-    expect(cmd).not.toContain('個副本，每個副本分到');
+    expect(cmd).not.toContain('份，每份模型分到');
   });
   it('Mac: several machines, each measured with its share', () => {
     const mac = resolvePlatform(bundle, 'mac-studio-m5u-512', 'fp8').platform;
@@ -1575,7 +1575,7 @@ describe('explain texts follow the current formulas (final-review M1, M2, M3, M7
     expect(t).toContain('t_step(D)');
   });
   it('capacity: KV in whole blocks (R37): vLLM roundUp(ctx, bs), sliding min(roundUp, window + bs − 1), MLX step 256, +1 block upper bound', () => {
-    const c = formulas.find((f) => f.startsWith('每副本可服務人數'))!;
+    const c = formulas.find((f) => f.startsWith('每份模型可服務人數'))!;
     expect(c).toContain('roundUp(上下文, bs)');
     expect(c).toContain('window + bs − 1');
     expect(c).toContain('256');

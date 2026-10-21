@@ -1277,13 +1277,13 @@ export function verifyCommand(
       : `# ${gLabel}（對話類：${users} 人都在生成）`,
     ...(R > 1
       ? [
-          `# 共 ${R} 個副本，每個副本分到 ${gRep} 個同時生成的請求（${g} ÷ ${R}，無條件進位），所以 --max-concurrency ${gRep}：` +
-            `只需啟動並量測其中一個副本，其餘副本相同；總吞吐約為單一副本 × ${R}`,
+          `# 共 ${R} 份，每份模型分到 ${gRep} 個同時生成的請求（${g} ÷ ${R}，無條件進位），所以 --max-concurrency ${gRep}：` +
+            `只需啟動並量測其中一份模型，其餘相同；總吞吐約為單一份模型 × ${R}`,
         ]
       : []),
     ...(prefixRep
       ? [
-          `# prefix_repetition：每個副本 ${residentRep} 個常駐${kind === 'agent' ? '工作階段' : '使用者'}各有一段 ${prefix} token 的固定前綴` +
+          `# prefix_repetition：每份模型 ${residentRep} 個常駐${kind === 'agent' ? '工作階段' : '使用者'}各有一段 ${prefix} token 的固定前綴` +
             `（輸入 ${workload.inputTokens} × 快取命中率 ${hit}，四捨五入），每個請求隨機取其中一段，再接 ${suffix} token 的隨機內容；` +
             `--max-concurrency ${gRep} 個同時生成。前綴快取要同時留住 ${residentRep} 段前綴才會命中，所以會用到估算的常駐記憶體`,
           '# 暖機：同一行 bench 指令先執行一次（相同的 --seed 產生相同的前綴），讓前綴進入快取，再執行第二次，以第二次的結果比對；' +
@@ -1368,16 +1368,16 @@ export function verifyCommand(
     R > 1
       ? [
           onNode > 1
-            ? `# 完整部署（每個 node ${onNode} 個副本）：每個副本各自的 GPU 與 port，前面加負載平衡；` +
-              `或改用單一 endpoint：啟動指令加 --data-parallel-size ${onNode}（vLLM 內部負載平衡；同時請求上限以每個副本計）`
-            : `# 完整部署：每個 node 只放得下 1 個副本，每個 node 各自以同一行指令啟動，前面加負載平衡`,
-          ...Array.from({ length: onNode - 1 }, (_, i) => `#   副本 ${i + 2}：CUDA_VISIBLE_DEVICES=${gpus(i + 1)}、--port ${8001 + i}`),
+            ? `# 完整部署（每個 node ${onNode} 份模型）：每份模型各自的 GPU 與 port，前面加負載平衡；` +
+              `或改用單一 endpoint：啟動指令加 --data-parallel-size ${onNode}（vLLM 內部負載平衡；同時請求上限以每份模型計）`
+            : `# 完整部署：每個 node 只放得下 1 份模型，每個 node 各自以同一行指令啟動，前面加負載平衡`,
+          ...Array.from({ length: onNode - 1 }, (_, i) => `#   第 ${i + 2} 份：CUDA_VISIBLE_DEVICES=${gpus(i + 1)}、--port ${8001 + i}`),
         ]
       : [];
   const lines = [
-    `# ${platform.name} ${platform.sub}：每個副本 ${shape.tp} 張 GPU` +
+    `# ${platform.name} ${platform.sub}：每份模型 ${shape.tp} 張 GPU` +
       (R > 1
-        ? `，共 ${R} 個副本。完整部署時每個 node 可放 ${perNode} 個副本，以 CUDA_VISIBLE_DEVICES 分配不同的 GPU、各用不同的 --port，前面加負載平衡`
+        ? `，共 ${R} 份。完整部署時每個 node 可放 ${perNode} 份模型，以 CUDA_VISIBLE_DEVICES 分配不同的 GPU、各用不同的 --port，前面加負載平衡`
         : ''),
     ...(note ? [`# ${note.value}`] : []),
     `# --gpu-memory-utilization ${memUtil} = 估算所用的記憶體可用比例（校正設定）；${lenNote}`,
@@ -1385,7 +1385,7 @@ export function verifyCommand(
       ? [
           `# --max-num-batched-tokens ${slidingMnbt} = 估算 sliding window 層 KV 所用的值：vLLM 每人穩態保留 min(roundUp(上下文, bs), window + bs − 1) 個 token` +
             '（整塊配置，window 外的整塊在每個 chunk 前釋放，Ruling R37）；' +
-            `進行中的 chunk（${platform.slidingInFlightTokens ?? slidingMnbt} token）每副本預留一次；啟動檢查以 1 人 cdiv(min(window − 1 + ${platform.slidingInFlightTokens ?? slidingMnbt}, max-model-len), bs) + 1 個 block 計`,
+            `進行中的 chunk（${platform.slidingInFlightTokens ?? slidingMnbt} token）每份模型預留一次；啟動檢查以 1 人 cdiv(min(window − 1 + ${platform.slidingInFlightTokens ?? slidingMnbt}, max-model-len), bs) + 1 個 block 計`,
           `# --async-scheduling = 估算所假設的排程方式：進行中的 token 數 = max_concurrent_batches（async scheduling、PP = 1：${platform.vllmDefaults?.maxConcurrentBatches ?? 2}）× max_num_batched_tokens，` +
             '釘住以免結果隨版本預設而變（國網部署是否開啟待確認，GitHub issue #13）',
         ]
@@ -1405,10 +1405,10 @@ export function verifyCommand(
     ...(seqs !== undefined
       ? [
           seqs < gRep
-            ? `# --max-num-seqs ${seqs}：每個副本同時生成 ${gRep} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；但 vLLM 要求 max_num_batched_tokens ≥ max_num_seqs` +
+            ? `# --max-num-seqs ${seqs}：每份模型同時生成 ${gRep} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；但 vLLM 要求 max_num_batched_tokens ≥ max_num_seqs` +
               `（v0.32.0 vllm/config/scheduler.py L328-L333），所以取上限 ${mnbt}。每步 token 上限本來就讓最多 ${queueing?.decodingMax ?? '不到上限'} 人同時解碼（排隊模型），` +
               '其餘在伺服器排隊，與估算相同'
-            : `# --max-num-seqs ${seqs}：每個副本同時生成 ${seqs} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；不加的話多出的請求會排隊，量不到估算的批次`,
+            : `# --max-num-seqs ${seqs}：每份模型同時生成 ${seqs} 個請求，超過此平台 vLLM 的預設 ${defSeqs}；不加的話多出的請求會排隊，量不到估算的批次`,
         ]
       : []),
     ...notes,
@@ -1480,7 +1480,7 @@ export function verifyFor(
     queue = checkShape(ctx, platform, shape, n, 'expected').queueing;
     addQueueingBasis(basis, bundle, resolved, true);
     verifyNote =
-      `預期不可行：${solved.detail}。以下驗證指令在${opts?.shape ? `你選的 TP ${shape.tp} × ${shape.replicas} 個副本` : `最大 TP（${shape.tp}）、1 個副本`}上重現此情境，` +
+      `預期不可行：${solved.detail}。以下驗證指令在${opts?.shape ? `你選的切法（TP ${shape.tp}，${shape.tp === 1 ? `每張卡各跑一份模型，共 ${shape.replicas} 份` : `每 ${shape.tp} 張卡合跑一份模型，共 ${shape.replicas} 份`}）` : `最大 TP（${shape.tp}）、1 份模型`}上重現此情境，` +
       '預期量測結果達不到目標或啟動失敗，可用來確認這個判斷' +
       (queue ? `；這個形狀在 ${n} 人時也會排隊（${queue.reason}）` : '');
   }
@@ -1916,21 +1916,21 @@ export function explain(bundle: Bundle, raw: ExplainInput): { basis: BasisItem[]
       '未快取 token = 輸入 × (1 − 快取命中率)，分成 ceil(未快取 token ÷ chunk) 段（vLLM：chunk = max_num_batched_tokens − (D − 1)；MLX：prefill_step_size；Ruling R38）；段 FLOPs = 段 token × (2 × 線性層參數 + 段平均位置的注意力 FLOPs)，最後一段另加 2 × lm_head 參數；' +
       '段位元組 = 權重重讀一次（MoE：段 token 觸及的專家）+ 到段結尾的 KV；段 TP 通訊 = 2 × 層數 次 all-reduce，訊息 = 段 token × hidden × 2 bytes。負載下（D ≥ 2）vLLM 每段至少 t_step(D)（與 decode 同一步），MLX 每段另加一次其他人的 decode forward（最終審查 M6）。' +
       '線性層參數 = 啟用參數 − embedding／lm_head [R-LEC A2, A5, B1, B6, B7, B8, B9, F3]（通訊 spec §5.4）',
-    '每副本可服務人數 = floor((記憶體 × memUtil − 權重位元組 − 進行中 chunk 的預留) ÷ 每序列 KV 位元組(上下文 = 輸入 + 輸出))。KV 以整塊配置（Ruling R37）：vLLM 的 full／MLA 層每人 roundUp(上下文, bs) 個 token，sliding window 層穩態 min(roundUp(上下文, bs), window + bs − 1)（bs = block_size；MLA 依 backend）；' +
-      'MLX 的 KVCache 每次擴充 256 個 token：full 層 roundUp(上下文, 256)，sliding 層 min(roundUp(上下文, 256), window)。vLLM 另在每副本預留一次 min(max_concurrent_batches × max_num_batched_tokens, 上下文) 個 token 的 sliding 層 KV（進行中的 chunk），' +
+    '每份模型可服務人數 = floor((記憶體 × memUtil − 權重位元組 − 進行中 chunk 的預留) ÷ 每序列 KV 位元組(上下文 = 輸入 + 輸出))。KV 以整塊配置（Ruling R37）：vLLM 的 full／MLA 層每人 roundUp(上下文, bs) 個 token，sliding window 層穩態 min(roundUp(上下文, bs), window + bs − 1)（bs = block_size；MLA 依 backend）；' +
+      'MLX 的 KVCache 每次擴充 256 個 token：full 層 roundUp(上下文, 256)，sliding 層 min(roundUp(上下文, 256), window)。vLLM 另在每份模型預留一次 min(max_concurrent_batches × max_num_batched_tokens, 上下文) 個 token 的 sliding 層 KV（進行中的 chunk），' +
       '並在 1 人的上限（full 層 cdiv(上下文, bs) 個 block；sliding 層 cdiv(min(window − 1 + 進行中 token, 上下文), bs) + 1 個 block）放不下時拒絕啟動；MLX 沒有預留（spec §5.1）',
     'KV cache 每元素位元組：平台的推論引擎有固定值時用它（MLX = 2，fp16／bf16），否則用量化格式的值（Ruling R32）',
     '峰值算力一律採 dense 值，不用 with sparsity 標示值 [R-LEC C2]',
     ctx.kind === 'agent'
       ? '研究助理類：佔用記憶體的工作階段 = N，同時生成 = max(1, ceil(N × 同時生成比例))（spec §8.3.3）'
       : '對話類：同時生成 = 佔用記憶體 = N（spec §8.3.3）',
-    '配置：每副本 t ∈ 合法 TP（t ≤ 每 node 卡數、注意力頭可整除），GPU 總數 = 副本數 × t，取最少者（spec §10.2）',
+    '配置：每份模型 t ∈ 合法 TP（t ≤ 每 node 卡數、注意力頭可整除），GPU 總數 = 份數 × t，取最少者（spec §10.2）',
   ];
   if (ctx.includeComm !== false) {
     formulas.push('通訊時間 = 2 × 層數 × (all-reduce 延遲 + 2(p − 1)/p × 本步 token 數 × hidden × 2 bytes ÷ 單向 NVLink 頻寬)，p = TP；本步 token 數 = B + 預填干擾 token [R-LEC F3]（spec §5.4）');
   }
   formulas.push(
-    "排隊（vLLM）：每副本 B 個生成中的請求，D 人同時解碼時每步需要 D × (1 + 未快取 token ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 未快取 token))) 人同時解碼；B > D_max 時其餘 B − D_max 人排隊，Little's law：λ = D_max ÷ (輸出 × t_step(D_max))，W = (B − D_max) ÷ λ；TTFT = 預填時間 + W，每人速度 = 1 ÷ t_step(D_max)。封閉迴路、確定性流體近似，W 是下限；MLX 沒有這個上限（Ruling R36，spec §5.2；Little 1961；docs/research/vllm-tp-kv-precision.md §7.5）",
+    "排隊（vLLM）：每份模型 B 個生成中的請求，D 人同時解碼時每步需要 D × (1 + 未快取 token ÷ 輸出) 個 token，每步上限 max_num_batched_tokens，所以最多 D_max = max(1, floor(上限 × 輸出 ÷ (輸出 + 未快取 token))) 人同時解碼；B > D_max 時其餘 B − D_max 人排隊，Little's law：λ = D_max ÷ (輸出 × t_step(D_max))，W = (B − D_max) ÷ λ；TTFT = 預填時間 + W，每人速度 = 1 ÷ t_step(D_max)。封閉迴路、確定性流體近似，W 是下限；MLX 沒有這個上限（Ruling R36，spec §5.2；Little 1961；docs/research/vllm-tp-kv-precision.md §7.5）",
     ...queued.map(({ platform, q }) => `${platform} 會排隊：${q.reason}`),
   );
   if (!capacity) formulas.push('峰值功耗 = GPU 數 × TDP（上限，不是實際耗電；TDP 未查證時不計算）[R-LEC D1]');
