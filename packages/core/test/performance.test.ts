@@ -138,6 +138,22 @@ describe('estimatePerformance', () => {
     if (p.shape === null) expect(p.splits).toEqual([]);
   });
 
+  it('a tp override that fails on weights explains itself', () => {
+    let hit: ReturnType<typeof estimatePerformance> | null = null;
+    for (const m of Object.values(bundle.models)) {
+      const q = { ...defaults, model: m.id, quant: nativeQuant(m.id) };
+      const base = estimatePerformance(bundle, { ...q, platform: 'nano4-h200', gpus: 8 });
+      if (base.splits.length < 2 || base.splits[0]!.why !== 'weights' || base.splits.every((s) => s.why === 'weights')) continue;
+      hit = estimatePerformance(bundle, { ...q, platform: 'nano4-h200', gpus: 8, tp: base.splits[0]!.shape.tp });
+      break;
+    }
+    if (!hit) throw new Error('no model whose smallest TP fails on weights while a larger one fits');
+    expect(hit.ok).toBe(false);
+    expect(hit.why).toBe('weights');
+    expect(hit.detail).toBeTruthy();
+    expect(hit.verifyNote ?? '').not.toContain('：。');
+  });
+
   it('machines count per machine', () => {
     const p = estimatePerformance(bundle, {
       ...defaults,

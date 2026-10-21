@@ -12,6 +12,7 @@ import {
   addCommBasis,
   addQueueingBasis,
   ctxForPlatform,
+  powerFor,
   prepare,
   quantFields,
   resolvePlatform,
@@ -25,12 +26,16 @@ import { CoreInputError, parseInput } from './errors';
 import {
   MAX_GPUS,
   capacityWhy,
+  contextDetail,
+  singleUserWhy,
   checkShape,
   legalTpOptions,
   maxConcurrent,
   progress,
   shapeProfile,
   shapeUsage,
+  type Ctx,
+  type ResolvedPlatform,
   type Shape,
   type ShapeUsage,
   type Queueing,
@@ -144,7 +149,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
   } else if (check.why !== null) {
     why =
       check.why === 'context' || check.why === 'weights'
-        ? (capacityWhy(ctx, platform, gpus, 'expected') ?? { why: check.why, detail: '' })
+        ? chosenWhy(ctx, platform, shape, check.why, gpus, unit)
         : { why: check.why, detail: failDetail(check, ctx.speed, users, shape) };
   }
 
@@ -160,14 +165,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
   addQueueingBasis(basis, bundle, resolved, shape !== null);
   addCommBasis(basis, ctx, resolved.commBasis, [shape]);
 
-  let powerKw: number | null = null;
-  let powerNote: string | undefined;
-  if (why) powerNote = '沒有可行配置，未計算功耗';
-  else {
-    basis.add(resolved.tdpBasis);
-    if (platform.tdpW === null) powerNote = '功耗未查證';
-    else powerKw = (gpus * platform.tdpW) / 1000;
-  }
+  const { powerKw, powerNote } = powerFor(basis, resolved, why === null, gpus);
 
   const v = withWarnings(
     verifyFor(
@@ -222,4 +220,10 @@ function failDetail(
   if (c.why === 'mem') return `${where}記憶體最多放得下 ${c.capacityPerReplica * shape.replicas} 人的上下文，${users} 人超過了`;
   if (c.why === 'ttft') return `${where}在 ${users} 人時首字約 ${c.ttftSec.toFixed(1)} 秒，超過要求的 ${speed.maxTtftSec} 秒`;
   return `${where}在 ${users} 人時每人每秒約 ${c.tokPerSecPerUser.toFixed(1)} token，低於要求的 ${speed.minTokPerSec}`;
+}
+
+/** Reason for the chosen t only (a forced t can fail on weights while a larger legal t fits): context, or its own weights. */
+function chosenWhy(ctx: Ctx, platform: ResolvedPlatform, shape: Shape, why: Why, gpus: number, unit: string): { why: Why; detail: string } {
+  if (why === 'context') return { why, detail: contextDetail(ctx) };
+  return singleUserWhy(ctx, platform, [shape.tp], 'expected', `${gpus} ${unit}`) ?? { why, detail: `TP ${shape.tp} 放不下模型權重` };
 }

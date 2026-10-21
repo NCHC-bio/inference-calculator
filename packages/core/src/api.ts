@@ -485,6 +485,23 @@ export function addQueueingBasis(
 }
 
 /**
+ * Peak power gpus × TDP [R-LEC D1] for a feasible result (adds the TDP to `basis`); a note instead when infeasible or
+ * the TDP is unverified.
+ * Internal: used by performance.ts; not re-exported from index.ts.
+ */
+export function powerFor(
+  basis: BasisCollector,
+  resolved: { platform: ApiPlatform; tdpBasis: BasisItem },
+  ok: boolean,
+  gpus: number,
+): { powerKw: number | null; powerNote?: string } {
+  if (!ok) return { powerKw: null, powerNote: '沒有可行配置，未計算功耗' };
+  basis.add(resolved.tdpBasis);
+  if (resolved.platform.tdpW === null) return { powerKw: null, powerNote: '功耗未查證' };
+  return { powerKw: (gpus * resolved.platform.tdpW) / 1000 };
+}
+
+/**
  * Add the link bandwidth / all-reduce latency only when a chosen shape actually communicates (finding 7).
  * Internal: used by performance.ts; not re-exported from index.ts.
  */
@@ -1374,12 +1391,7 @@ export function estimateRequirements(bundle: Bundle, raw: RequirementInput): Req
     addQueueingBasis(basis, bundle, resolved, expected.ok);
     // Basis lists only values used (finding 7): TDP when power is computed (or reported unverified)
     // for a feasible result; link bandwidth / all-reduce latency when a chosen shape has tp > 1.
-    if (!expected.ok) res.powerNote = '沒有可行配置，未計算功耗';
-    else {
-      basis.add(resolved.tdpBasis);
-      if (platform.tdpW === null) res.powerNote = '功耗未查證';
-      else res.powerKw = (expected.gpus * platform.tdpW) / 1000;
-    }
+    Object.assign(res, powerFor(basis, resolved, expected.ok, expected.ok ? expected.gpus : 0));
     addCommBasis(basis, ctx, resolved.commBasis, [
       expected.ok ? expected.shape : null,
       conservative.ok ? conservative.shape : null,
