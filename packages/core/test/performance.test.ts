@@ -139,6 +139,19 @@ describe('estimatePerformance', () => {
     if (p.shape === null) expect(p.splits).toEqual([]);
   });
 
+  it('no legal split fits in the GPUs given: ok false, why tp, no usage or curve', () => {
+    // No catalog model x platform reaches this case (every platform allows TP 1), so build it: tpOptions [2, 4, 8], 1 GPU.
+    const base = bundle.platforms['nano4-h200']!;
+    const tweaked: Bundle = { ...bundle, platforms: { ...bundle.platforms, 'tp-min-2': { ...base, id: 'tp-min-2', tpOptions: [2, 4, 8] } } };
+    const p = estimatePerformance(tweaked, { ...defaults, platform: 'tp-min-2', gpus: 1 });
+    expect(p.splits).toEqual([]);
+    expect(p.shape).toBeNull();
+    expect(p.ok).toBe(false);
+    expect(p.why).toBe('tp');
+    expect(p.usage).toBeNull();
+    expect(p.speedCurve).toBeNull();
+  });
+
   it('a tp override that fails on weights explains itself', () => {
     let hit: ReturnType<typeof estimatePerformance> | null = null;
     for (const m of Object.values(bundle.models)) {
