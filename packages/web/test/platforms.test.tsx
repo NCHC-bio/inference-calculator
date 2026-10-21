@@ -286,6 +286,34 @@ describe('PlatformList', () => {
     await waitFor(() => expect(screen.queryByText('已移除「Lab GPU」')).toBeNull());
   });
 
+  it('復原 after the list shrank puts the hardware at the end (fix round C)', async () => {
+    visit({ ...defaultState(getBundle()), customPlatforms: [CUSTOM, { ...CUSTOM, name: 'Second GPU' }] });
+    renderList();
+    await userEvent.click(within(rowOf('custom:1')).getByRole('button', { name: '刪除' }));
+    await userEvent.click(within(rowOf('custom:0')).getByRole('button', { name: '刪除' }));
+    expect(latest!.customPlatforms).toEqual([]);
+    const msg = await screen.findByText('已移除「Second GPU」');
+    await userEvent.click(within(msg.closest('[data-testid="undo-hardware"]') as HTMLElement).getByRole('button', { name: '復原' }));
+    expect(latest!.customPlatforms.map((p) => p.name)).toEqual(['Second GPU']);
+  });
+
+  it('復原 when the list is full again says so instead of doing nothing (fix round C)', async () => {
+    const full = Array.from({ length: CUSTOM_PLATFORMS_MAX }, (_, i) => ({ ...CUSTOM, name: `Lab ${i}` }));
+    visit({ ...defaultState(getBundle()), customPlatforms: full });
+    let send: (a: import('../src/state/state').Action) => void = () => {};
+    function Sender() {
+      send = useCalc()[1];
+      return null;
+    }
+    renderStore(<><PlatformList /><Probe /><Sender /></>);
+    await userEvent.click(within(rowOf('custom:0')).getByRole('button', { name: '刪除' }));
+    act(() => send({ type: 'addPlatform', value: { ...CUSTOM, name: 'Newcomer' } }));
+    expect(latest!.customPlatforms).toHaveLength(CUSTOM_PLATFORMS_MAX);
+    await userEvent.click(await screen.findByRole('button', { name: '復原' }));
+    await waitFor(() => expect(screen.getByText(`最多 ${CUSTOM_PLATFORMS_MAX} 台自訂硬體，請先刪除一台`)).toBeInTheDocument());
+    expect(latest!.customPlatforms.map((p) => p.name)).not.toContain('Lab 0');
+  });
+
   it('deleting without undo: the hardware stays gone after the message closes', async () => {
     visit({ ...defaultState(getBundle()), customPlatforms: [CUSTOM] });
     renderList();

@@ -141,8 +141,14 @@ describe('reduce', () => {
     expect(plain.customPlatforms.map((p) => p.name)).toEqual(['Z', 'A', 'C']);
     expect(plain.overrides).toEqual({ 'custom:2': { gpus: 16, tp: 8 } });
     expect(plain.openRow).toBe('custom:2');
-    // Invalid index, a full list or an invalid platform are ignored.
-    expect(reduce(b, removed, { type: 'restorePlatform', index: 5, value: gpu('Q') })).toEqual(removed);
+    // An index past the end (the list shrank meanwhile) is clamped to the end, its override and open state with it
+    // (fix round C).
+    const late = reduce(b, removed, { type: 'restorePlatform', index: 5, value: gpu('Q'), override: { gpus: 3 }, wasOpen: true });
+    expect(late.customPlatforms.map((p) => p.name)).toEqual(['A', 'C', 'Q']);
+    expect(late.overrides['custom:2']).toEqual({ gpus: 3 });
+    expect(late.openRow).toBe('custom:2');
+    // A non-integer / negative index, a full list or an invalid platform are ignored.
+    expect(reduce(b, removed, { type: 'restorePlatform', index: -1, value: gpu('Q') })).toEqual(removed);
     const full = run(s0, ...Array.from({ length: CUSTOM_PLATFORMS_MAX }, (_, i): Action => ({ type: 'addPlatform', value: gpu(`P${i}`) })));
     expect(reduce(b, full, { type: 'restorePlatform', index: 0, value: gpu('Q') })).toEqual(full);
     expect(reduce(b, removed, { type: 'restorePlatform', index: 0, value: { ...gpu('Q'), memGB: -1 } })).toEqual(removed);

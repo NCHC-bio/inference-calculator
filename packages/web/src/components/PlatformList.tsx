@@ -29,6 +29,8 @@ export function PlatformList(): JSX.Element | null {
   const view = useMain();
   const wrap = useRef<HTMLDivElement>(null);
   const undoSeq = useRef(0);
+  const live = useRef(current);
+  live.current = current;
   const { message } = AntApp.useApp();
   if (view.kind !== 'main') return null;
   const b = getBundle();
@@ -47,8 +49,13 @@ export function PlatformList(): JSX.Element | null {
     dispatch({ type: 'removePlatform', index });
     const mk = `undo-hardware-${++undoSeq.current}`;
     const undo = () => {
-      dispatch({ type: 'restorePlatform', index, value, ...(override ? { override } : {}), wasOpen });
       message.destroy(mk);
+      // Read at click time: other hardware may have been added since (fix round C).
+      if (live.current.customPlatforms.length >= CUSTOM_PLATFORMS_MAX) {
+        void message.warning(tr('hw.full', { n: CUSTOM_PLATFORMS_MAX }));
+        return;
+      }
+      dispatch({ type: 'restorePlatform', index, value, ...(override ? { override } : {}), wasOpen });
     };
     void message.open({
       key: mk,
