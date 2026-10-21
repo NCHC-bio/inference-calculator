@@ -77,3 +77,15 @@ concurrency:
 # is never clamped; it only lengthens --max-model-len (vLLM sizes the KV pool from --gpu-memory-utilization).
 benchmark:
   maxModelLenMarginTokens: { value: 256, unit: tokens, status: estimate, basis: '量測到的重新斷詞誤差最大 187 token（只有變短，未見變長；以 v0.10.0 的流程量測，v0.32.0 的 bench 會重試讓長度相符，漂移只會更小），取同量級向上取整為 256 作為變長方向的保險：v0.32.0 遇到 prompt + max_tokens 超過 max_model_len 時會把 max_tokens 截短，量到的輸出就不是指定長度；不影響記憶體估算', evidence: [bench-retokenize-drift, vllm-bench-random-dataset, vllm-serving-validate-input], verified: 2026-10-20 }
+
+# 人數漏斗（spec 2026-10-21 §5.5、§6.1）：只知道註冊總人數時，換算尖峰同時人數。
+# λ = 總人數 × dailyActiveShare × requestsPerActivePerDay × peakHourShare ÷ 3600；同時數 = λ × 服務時間。
+# 數值取自 docs/research/user-questions.md §3；GWDG 為學術 HPC 聊天服務（只有平日使用），套用到其他機構是外推。
+funnel:
+  # GWDG 註冊約 9,000 人、平日活躍約 400–500 人（約 4.4–5.6%），論文 §6.4 直接報告，取 5%。
+  dailyActiveShare: { value: 0.05, status: measured, source: gwdg-chat-ai, verified: 2026-10-21 }
+  # 論文只報告累計訊息數（逾 35 萬則，至 2024-07-30）與平日活躍人數，沒有直接報告每人每日則數；此為本專案由兩者推算。
+  # 取樣期間以論文圖 5 的起點 2024-02-22 起算約 159 天（約 113 個工作日）；累計訊息可能含 API 流量，故是約略值。
+  requestsPerActivePerDay: { value: 7, status: derived, formula: '350,000 則訊息 ÷ 約 113 個工作日 ÷ 約 450 位平日活躍者 ≈ 6.9，取整為 7', inputs: [gwdg-chat-ai], verified: 2026-10-21 }
+  # 規劃工具頁寫最忙一小時佔每日流量 10–20%，研究整理（user-questions.md §3 結論）取 15–20%。該頁是 secondary 來源，不能當 measured。
+  peakHourShare: { value: 0.2, status: estimate, basis: '已發表的區間為 10–20%（規劃工具頁，secondary）、研究整理取 15–20%；取區間上限 20%，使尖峰偏保守（同時人數偏多）。沒有學術機構聊天服務的實測尖峰小時佔比', evidence: [rate-limit-planner, gwdg-chat-ai], verified: 2026-10-21 }

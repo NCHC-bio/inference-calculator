@@ -111,7 +111,8 @@ export const ModelOverrideSchema = z
   });
 export type ModelOverride = z.input<typeof ModelOverrideSchema>;
 
-const WorkloadInputSchema = z.union([
+/** Internal: used by funnel.ts; not re-exported from index.ts. */
+export const WorkloadInputSchema = z.union([
   z.string().min(1),
   z
     .strictObject({
@@ -123,7 +124,8 @@ const WorkloadInputSchema = z.union([
     .strict(),
 ]);
 
-const SpeedInputSchema = z.union([
+/** Internal: used by funnel.ts; not re-exported from index.ts. */
+export const SpeedInputSchema = z.union([
   z.string().min(1),
   z.strictObject({ minTokPerSec: z.number().positive().max(1e6), maxTtftSec: z.number().positive().max(1e6) }).strict(),
 ]);
@@ -966,24 +968,17 @@ export function withWarnings(v: { verifyCommand: string; verifyNote?: string }, 
   return { ...v, verifyCommand: [...warnings.map((w) => `# ${w.text}`), v.verifyCommand].join('\n') };
 }
 
-/** Resolve quant, workload, speed and concurrency rule into a solver Ctx (model given). */
-function prepareCommon(
+/**
+ * Resolve a workload (preset or preset + user overrides) and a speed standard (preset or custom) to numbers, adding
+ * each used value to `basis` (user values as fromUser). Internal: shared with funnel.ts; not re-exported from index.ts.
+ */
+export function resolveWorkloadSpeed(
   bundle: Bundle,
-  model: Model,
-  input: {
-    quant: string;
-    workload: z.infer<typeof WorkloadInputSchema>;
-    speed: z.infer<typeof SpeedInputSchema>;
-    includeComm?: boolean | undefined;
-  },
+  workloadInput: z.infer<typeof WorkloadInputSchema>,
+  speedInput: z.infer<typeof SpeedInputSchema>,
   basis: BasisCollector,
-): { ctx: Ctx; quant: Quantization; res: QuantResolution } {
-  assertModelMath(model);
-  const res = resolveQuant(bundle, model, input.quant);
-  const q = res.quant;
-  const sizing = weightSizing(model, res, basis);
-
-  const wIn = typeof input.workload === 'string' ? { base: input.workload } : input.workload;
+): { kind: Bundle['workloads'][string]['kind']; workload: WorkloadIn; speed: Ctx['speed'] } {
+  const wIn = typeof workloadInput === 'string' ? { base: workloadInput } : workloadInput;
   const wl = lookup(bundle.workloads, wIn.base, '負載');
   const wp = `workloads.${wl.id}`;
   const field = (
@@ -1006,8 +1001,8 @@ function prepareCommon(
   };
 
   let speed: Ctx['speed'];
-  if (typeof input.speed === 'string') {
-    const sp = lookup(bundle.speedPresets, input.speed, '速度標準');
+  if (typeof speedInput === 'string') {
+    const sp = lookup(bundle.speedPresets, speedInput, '速度標準');
     basis.add(
       fromSourced(`speedPresets.${sp.id}.minTokensPerSec`, `${sp.name}：每人最低 token/s`, sp.minTokensPerSec),
       fromSourced(`speedPresets.${sp.id}.maxTtftSec`, `${sp.name}：首字最長等待`, sp.maxTtftSec, 'A2'),
@@ -1015,14 +1010,35 @@ function prepareCommon(
     speed = { minTokPerSec: sp.minTokensPerSec.value, maxTtftSec: sp.maxTtftSec.value };
   } else {
     basis.add(
-      fromUser('speed.minTokPerSec', '每人最低 token/s', input.speed.minTokPerSec),
-      fromUser('speed.maxTtftSec', '首字最長等待（秒）', input.speed.maxTtftSec, 'A2'),
+      fromUser('speed.minTokPerSec', '每人最低 token/s', speedInput.minTokPerSec),
+      fromUser('speed.maxTtftSec', '首字最長等待（秒）', speedInput.maxTtftSec, 'A2'),
     );
-    speed = { ...input.speed };
+    speed = { ...speedInput };
   }
+  return { kind: wl.kind, workload, speed };
+}
+
+/** Resolve quant, workload, speed and concurrency rule into a solver Ctx (model given). */
+function prepareCommon(
+  bundle: Bundle,
+  model: Model,
+  input: {
+    quant: string;
+    workload: z.infer<typeof WorkloadInputSchema>;
+    speed: z.infer<typeof SpeedInputSchema>;
+    includeComm?: boolean | undefined;
+  },
+  basis: BasisCollector,
+): { ctx: Ctx; quant: Quantization; res: QuantResolution } {
+  assertModelMath(model);
+  const res = resolveQuant(bundle, model, input.quant);
+  const q = res.quant;
+  const sizing = weightSizing(model, res, basis);
+
+  const { kind, workload, speed } = resolveWorkloadSpeed(bundle, input.workload, input.speed, basis);
 
   const cr = bundle.concurrency;
-  if (wl.kind === 'agent') {
+  if (kind === 'agent') {
     basis.add(
       fromSourced('concurrency.agentRule', '研究助理類人數解讀', cr.agentRule),
       fromSourced('concurrency.agentGeneratingShare', '同時在生成的比例', cr.agentGeneratingShare),
@@ -1037,7 +1053,7 @@ function prepareCommon(
     // Default; ctxForPlatform replaces it per platform (Ruling R32).
     kvBytesPerElem: q.kvBytesPerElem.value,
     workload,
-    kind: wl.kind,
+    kind,
     speed,
     agentShare: cr.agentGeneratingShare.value,
     includeComm: input.includeComm ?? true,

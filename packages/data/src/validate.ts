@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import {
-  BenchmarkRuleSchema, BundleSchema, CalibrationPointSchema, CalibrationProfileSchema, ConcurrencyRuleSchema, HardwareSchema,
+  BenchmarkRuleSchema, FunnelSchema, BundleSchema, CalibrationPointSchema, CalibrationProfileSchema, ConcurrencyRuleSchema, HardwareSchema,
   CustomHardwareSchema, MetaSchema, ModelSchema, PlatformSchema, PolicySchema, QuantizationSchema, SourceSchema, SpeedPresetSchema,
   WorkloadSchema, SkippedCalibrationPointSchema, CalibrationGapSchema, type Bundle, type CalibrationPoint, type Hardware, type Model, type Platform, type Quantization,
 } from '@nchc/schema';
@@ -110,6 +110,7 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
 
   let concurrency: z.infer<typeof ConcurrencyRuleSchema> | undefined;
   let benchmark: z.infer<typeof BenchmarkRuleSchema> | undefined;
+  let funnel: z.infer<typeof FunnelSchema> | undefined;
   const wl = doc('workloads');
   collections.workloads = [];
   collections.speedPresets = [];
@@ -120,13 +121,14 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     }
   };
   if (wl) {
-    if (!isObj(wl.data)) err(wl.file, 'workloads', 'workloads.yaml must be a mapping with workloads, speedPresets, concurrency, benchmark');
+    if (!isObj(wl.data)) err(wl.file, 'workloads', 'workloads.yaml must be a mapping with workloads, speedPresets, concurrency, benchmark, funnel');
     else {
-      strictTop({ file: wl.file, data: wl.data }, 'workloads', ['workloads', 'speedPresets', 'concurrency', 'benchmark']);
+      strictTop({ file: wl.file, data: wl.data }, 'workloads', ['workloads', 'speedPresets', 'concurrency', 'benchmark', 'funnel']);
       addList('workloads', wl.file, wl.data.workloads, WorkloadSchema);
       addList('speedPresets', wl.file, wl.data.speedPresets, SpeedPresetSchema);
       concurrency = parseOne(wl.file, 'concurrency', wl.data.concurrency, ConcurrencyRuleSchema);
       benchmark = parseOne(wl.file, 'benchmark', wl.data.benchmark, BenchmarkRuleSchema);
+      funnel = parseOne(wl.file, 'funnel', wl.data.funnel, FunnelSchema);
     }
   }
 
@@ -398,6 +400,7 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
   if (customHardware && chDoc) checkSources(chDoc.file, 'customHardware', customHardware);
   if (concurrency && wl) checkSources(wl.file, 'concurrency', concurrency);
   if (benchmark && wl) checkSources(wl.file, 'benchmark', benchmark);
+  if (funnel && wl) checkSources(wl.file, 'funnel', funnel);
 
   // ---- 4: model file name = id ----
   for (const m of collections.models) {
@@ -470,14 +473,14 @@ export function validateConfig(raw: RawConfig): { bundle?: Bundle; issues: Valid
     }
   }
 
-  if (issues.some((i) => i.level === 'error') || !meta || !policy || !concurrency || !benchmark || !customHardware) return { issues };
+  if (issues.some((i) => i.level === 'error') || !meta || !policy || !concurrency || !benchmark || !funnel || !customHardware) return { issues };
 
   const record = (c: Collection) => Object.fromEntries(collections[c].map((i) => [i.id, i.value]));
   const assembled = {
     meta, policy,
     sources: record('sources'), hardware: record('hardware'), platforms: record('platforms'),
     quantization: record('quantization'), models: record('models'), workloads: record('workloads'),
-    speedPresets: record('speedPresets'), calibration: record('calibration'), concurrency, benchmark,
+    speedPresets: record('speedPresets'), calibration: record('calibration'), concurrency, benchmark, funnel,
     calibrationPoints: record('calibrationPoints'),
     skippedCalibrationPoints: record('skippedCalibrationPoints'), calibrationGaps: record('calibrationGaps'),
     customHardware,

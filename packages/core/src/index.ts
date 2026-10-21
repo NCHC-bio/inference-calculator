@@ -66,3 +66,5 @@ export {
   type SweepInput,
   type SweepPoint,
 } from './performance';
+/** Peak concurrent users from the total registered users (spec 2026-10-21 §5.5). */
+export { peakConcurrentFromTotal, type FunnelInput, type FunnelResult } from './funnel';

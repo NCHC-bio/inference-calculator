@@ -3,7 +3,7 @@ import { SourceSchema } from './provenance';
 import {
   HardwareSchema, PlatformSchema, QuantizationSchema, ModelSchema, WorkloadSchema,
   SpeedPresetSchema, CalibrationProfileSchema, ConcurrencyRuleSchema, CalibrationPointSchema,
-  MetaSchema, PolicySchema, SkippedCalibrationPointSchema, CalibrationGapSchema, BenchmarkRuleSchema, CustomHardwareSchema,
+  MetaSchema, PolicySchema, SkippedCalibrationPointSchema, CalibrationGapSchema, BenchmarkRuleSchema, CustomHardwareSchema, FunnelSchema,
 } from './domain';
 
 /** Bundle: every collection is a Record keyed by id; `concurrency`, `benchmark` and `policy` are single objects. */
@@ -20,6 +20,7 @@ export const BundleSchema = z.strictObject({
   calibration: z.record(z.string(), CalibrationProfileSchema),
   concurrency: ConcurrencyRuleSchema,
   benchmark: BenchmarkRuleSchema,
+  funnel: FunnelSchema,
   calibrationPoints: z.record(z.string(), CalibrationPointSchema),
   skippedCalibrationPoints: z.record(z.string(), SkippedCalibrationPointSchema),
   calibrationGaps: z.record(z.string(), CalibrationGapSchema),

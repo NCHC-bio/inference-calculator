@@ -424,6 +424,14 @@ export const BenchmarkRuleSchema = z.strictObject({
 });
 export type BenchmarkRule = z.infer<typeof BenchmarkRuleSchema>;
 
+/** Funnel defaults: total registered users -> peak concurrent users (workloads.yaml `funnel`, spec 2026-10-21 §5.5). */
+export const FunnelSchema = z.strictObject({
+  dailyActiveShare: unitFrac,
+  requestsPerActivePerDay: posNum,
+  peakHourShare: unitFrac,
+});
+export type Funnel = z.infer<typeof FunnelSchema>;
+
 export const MetaSchema = z.strictObject({ dataVersion: z.iso.date() });
 export type Meta = z.infer<typeof MetaSchema>;
 
