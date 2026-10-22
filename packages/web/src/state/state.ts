@@ -48,7 +48,9 @@ export type Pin = {
   hasUser: boolean;
   warnings: ResultWarning[];
 };
-export type DialogId = 'basis' | 'cite' | 'verify' | 'accuracy' | 'funnel' | 'workload' | 'speed' | 'hf' | 'manualModel' | 'hardware';
+/** Every dialog the store can open; the reducer ignores any other id, so the type is derived from this one list. */
+export const DIALOGS = ['basis', 'cite', 'verify', 'accuracy', 'funnel', 'workload', 'speed', 'hf', 'manualModel', 'hardware', 'myModels'] as const;
+export type DialogId = (typeof DIALOGS)[number];
 export type BasisFilter = 'est' | 'all';
 export type CalcState = {
   lang: Lang;
@@ -105,7 +107,6 @@ export const CUSTOM_PLATFORMS_MAX = 8;
 export const CUSTOM_MODEL_ID = 'custom';
 /** Tensor-parallel sizes a replica may use within one node (spec: TP ∈ {1,2,4,8}). */
 const TP_SIZES = [1, 2, 4, 8];
-const DIALOGS: readonly DialogId[] = ['basis', 'cite', 'verify', 'accuracy', 'funnel', 'workload', 'speed', 'hf', 'manualModel', 'hardware'];
 const HF_REPO = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/;
 const HF_REVISION = /^[\w.-]{1,100}$/;
 
@@ -348,7 +349,7 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
     case 'clearPins':
       return { ...s, pins: [] };
     case 'dialog': {
-      if (a.id !== null && !DIALOGS.includes(a.id)) return s;
+      if (a.id !== null && !(DIALOGS as readonly string[]).includes(a.id)) return s;
       const basisFilter = a.basisFilter === 'est' || a.basisFilter === 'all' ? a.basisFilter : s.basisFilter;
       const editingPlatform = a.editingPlatform !== undefined ? a.editingPlatform : a.id === null ? null : s.editingPlatform;
       const hfQuery = a.id === 'hf' ? (typeof a.hfQuery === 'string' ? a.hfQuery.trim() : s.hfQuery) : '';

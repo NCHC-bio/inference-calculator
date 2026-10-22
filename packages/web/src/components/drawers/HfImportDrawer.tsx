@@ -7,6 +7,8 @@ import { useT, type MsgKey, type TFn } from '../../i18n';
 import type { Action, CalcState } from '../../state/state';
 import { useCalc } from '../../state/store';
 import { reportModelUrl } from '../../reportModel';
+import { endImportProgress, reportImportStep, startImportProgress } from '../../state/importProgress';
+import { ImportProgress } from '../ImportProgress';
 import { CalcDrawer } from './CalcDrawer';
 import { CustomModelWarning } from './CustomModelWarning';
 
@@ -18,8 +20,12 @@ const ERR: Record<Failure['status'], MsgKey> = {
   unparsable: 'hf.err.unparsable',
   network: 'hf.err.network',
   gguf: 'hf.err.gguf',
+  'not-language-model': 'hf.err.notLlm',
 };
+/** The offline notice belongs to the pending import: dropped when it is (effect cleanup). */
 const REFETCH_KEY = 'hf-refetch';
+/** A failure notice outlives the import it reports (the model falls back, the effect re-runs): only the user closes it. */
+const FAIL_KEY = 'hf-import-failed';
 
 /** The browser's fetch, typed for fetchHfModel (only huggingface.co sees the token). */
 const browserFetch = (url: string, init?: { headers?: Record<string, string> }) => fetch(url, init);
@@ -39,11 +45,15 @@ export async function importHf(
   opts: { token?: string; revision?: string },
 ): Promise<{ ok: true; action: Action } | Failure> {
   // No origin: a user-imported model is not origin-checked and gets the custom-model warning (Ruling W12).
+  // Each step is reported (state/importProgress) so the answer says what is happening.
+  startImportProgress(repo);
   const r = await fetchHfModel(repo, {
     fetch: browserFetch,
+    onProgress: reportImportStep,
     ...(opts.token ? { token: opts.token } : {}),
     ...(opts.revision ? { revision: opts.revision } : {}),
   });
+  endImportProgress();
   if (!r.ok) return r;
   return {
     ok: true,
@@ -110,7 +120,34 @@ export function HfRefetch(): null {
         });
         return;
       }
-      void message.error(tr('hf.refetchFail', { repo, message: `${tr(ERR[r.status])}（${r.message}）` }));
+      // Every failure stays until the user closes it (a toast vanished before it could be read). An import that could
+      // not be read is a calculator bug, so its notice keeps the pre-filled bug report.
+      const bug = r.status === 'unparsable' || r.status === 'gguf';
+      notification.error({
+        key: FAIL_KEY,
+        title: tr('hf.refetchFail', { repo, message: tr(ERR[r.status], { task: r.task ?? '' }) }),
+        // A bug lists what was missing, others their detail; "not a language model" is said in full by its title.
+        ...(r.status !== 'not-language-model'
+          ? { description: <span style={{ overflowWrap: 'anywhere' }}>{bug && r.missing?.length ? tr('hf.missing', { list: r.missing.join(tr('hf.listSep')) }) : r.message}</span> }
+          : {}),
+        duration: 0,
+        ...(bug
+          ? {
+              actions: (
+                <Button
+                  size="small"
+                  icon={<GithubOutlined />}
+                  href={reportModelUrl(r.repo ?? repo, r.sha, r.message, 'error')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="hf-report"
+                >
+                  {tr('hf.report')}
+                </Button>
+              ),
+            }
+          : {}),
+      });
       dispatch({ type: 'customModel', value: null });
     });
     return () => {
@@ -132,7 +169,7 @@ function ErrorView({ err, repo, tr }: { err: Failure; repo: string; tr: TFn }) {
   const bug = err.status === 'unparsable' || err.status === 'gguf';
   const description = (
     <>
-      {err.missing && err.missing.length > 0
+      {err.missing && err.missing.length > 0 && err.status !== 'not-language-model'
         ? <div style={{ overflowWrap: 'anywhere' }}>{tr('hf.missing', { list: err.missing.join(sep) })}</div>
         : <div style={{ overflowWrap: 'anywhere' }}>{err.message}</div>}
       {bug && (
@@ -153,7 +190,7 @@ function ErrorView({ err, repo, tr }: { err: Failure; repo: string; tr: TFn }) {
     </>
   );
   return (
-    <Alert data-testid="hf-error" type="error" showIcon className="fade-in" style={{ marginBottom: 12 }} title={tr(ERR[err.status])} description={description} />
+    <Alert data-testid="hf-error" type="error" showIcon className="fade-in" style={{ marginBottom: 12 }} title={tr(ERR[err.status], { task: err.task ?? '' })} description={description} />
   );
 }
 
@@ -209,6 +246,7 @@ function Body({ run }: { run: Run }): JSX.Element {
       <CustomModelWarning />
       {pending && <Alert type="info" showIcon style={{ marginBottom: 12 }} title={tr('hf.reload', { repo: pending.repo })} />}
       {err && <ErrorView err={err} repo={lastRepo} tr={tr} />}
+      {busy && lastRepo && <ImportProgress repo={lastRepo} />}
       <Form<Values>
         name="hfImport"
         layout="vertical"

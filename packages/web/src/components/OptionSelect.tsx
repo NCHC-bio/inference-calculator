@@ -28,6 +28,8 @@ type Props = {
   custom?: { desc: string; selected: boolean; onPick: () => void };
   /** Shown when the search matches nothing; `close` closes the menu (e.g. before opening a dialog). */
   notFound?: (search: string, close: () => void) => ReactNode;
+  /** Rendered below the option list; `close` closes the menu (e.g. before opening a dialog). */
+  popupFooter?: (close: () => void) => ReactNode;
 };
 
 /**
@@ -78,6 +80,7 @@ export function OptionSelect({
   popupHeader,
   custom,
   notFound,
+  popupFooter,
 }: Props): JSX.Element {
   const tr = useT();
   const hoverNone = useHoverNone();
@@ -118,11 +121,12 @@ export function OptionSelect({
       optionRender={(o) => <OptionLabel opt={o.data} on={hoverNone || o.data.value === active || o.data.value === shown} />}
       notFoundContent={notFound ? notFound(search.trim(), () => openChange(false)) : undefined}
       popupRender={
-        popupHeader
+        popupHeader || popupFooter
           ? (menu: ReactElement) => (
               <>
                 {popupHeader}
                 {menu}
+                {popupFooter?.(() => openChange(false))}
               </>
             )
           : undefined

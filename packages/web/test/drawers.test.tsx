@@ -727,13 +727,20 @@ describe('HF refetch on load (Ruling W1)', () => {
     expect(state().overrides).toEqual({});
   });
 
-  it('a failed refetch shows an error and falls back to the default model', async () => {
+  it('a failed import falls back to the default model and its reason stays until the user closes it', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 'not-found', message: 'model API HTTP 404' });
     history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
-    await waitFor(() => expect(document.querySelector('.ant-message-error')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('.ant-notification-notice')).not.toBeNull());
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
     expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent(b.models[defaultState(b).model]!.name);
+    // The fallback re-runs the import effect: the reason must survive it (it used to vanish at once).
+    await new Promise((r) => setTimeout(r, 1500));
+    const notice = document.querySelector('.ant-notification-notice')!;
+    expect(notice).toHaveTextContent('無法匯入 test-org/test-model：找不到這個模型');
+    expect(notice).toHaveTextContent('model API HTTP 404');
+    fireEvent.click(notice.querySelector('.ant-notification-notice-close')!);
+    await waitFor(() => expect(document.querySelector('.ant-notification-notice')).toBeNull());
   });
 
   it('a network failure keeps the link and offers Retry or the default model (review I3)', async () => {
@@ -742,7 +749,7 @@ describe('HF refetch on load (Ruling W1)', () => {
     history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
     const retry = await screen.findByRole('button', { name: '重試' });
-    expect(screen.getByText('無法連線到 Hugging Face，暫時無法重新匯入 test-org/test-model；連結已保留')).toBeInTheDocument();
+    expect(screen.getByText('無法連線到 Hugging Face，暫時無法匯入 test-org/test-model；連結已保留')).toBeInTheDocument();
     expect(new URLSearchParams(location.search).get('hf')).not.toBeNull();
     expect(screen.getByTestId('answer-loading')).toBeInTheDocument();
     fetchMock.mockResolvedValueOnce({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] });
@@ -767,7 +774,7 @@ describe('HF refetch on load (Ruling W1)', () => {
     render(<App />);
     const d = await drawer();
     expect(within(d).getByLabelText(/Hugging Face 模型/)).toHaveValue('test-org/test-model');
-    expect(within(d).getByText('網址中的模型 test-org/test-model 需要授權才能重新匯入，請貼上你的 Hugging Face token。')).toBeInTheDocument();
+    expect(within(d).getByText('test-org/test-model 需要授權才能匯入，請貼上你的 Hugging Face token。')).toBeInTheDocument();
     expect(within(d).getByLabelText(/Hugging Face token/)).toBeInTheDocument();
     // Closing without importing drops the model.
     fireEvent.click(d.closest('.ant-drawer')!.querySelector('.ant-drawer-close')!);

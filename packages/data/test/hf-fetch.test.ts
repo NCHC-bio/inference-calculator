@@ -122,6 +122,16 @@ describe('fetchHfModel failures (issue #17)', () => {
     expect(urls.some((u) => u.includes('someone/model-GGUF') && u.endsWith('/config.json'))).toBe(false);
   });
 
+  it('a repo that is not a language model (its task says so) is reported as such, not as missing fields', async () => {
+    const fn: HfFetchDeps['fetch'] = async (url) => {
+      if (url.includes('expand[]=pipeline_tag')) return res(200, JSON.stringify({ pipeline_tag: 'image-feature-extraction' }));
+      if (url.includes('/api/models/')) return res(200, api({ siblings: [{ rfilename: 'config.json' }, { rfilename: 'weights.pth' }] }));
+      return res(200, JSON.stringify({ model: { decoder_config: { depth: 4 } } }));
+    };
+    const r = await fetchHfModel('someone/earth-encoder', { fetch: fn, origin: ORIGIN });
+    expect(r).toMatchObject({ ok: false, status: 'not-language-model', task: 'image-feature-extraction' });
+  });
+
   it('a GGUF-only repo whose card names no base model fails (nothing to read the architecture from)', async () => {
     const fn: HfFetchDeps['fetch'] = async () => res(200, api({ siblings: [{ rfilename: 'm-Q4_K_M.gguf' }] }));
     expect(await fetchHfModel('someone/model-GGUF', { fetch: fn, origin: ORIGIN })).toMatchObject({ ok: false, status: 'gguf', baseModels: [] });

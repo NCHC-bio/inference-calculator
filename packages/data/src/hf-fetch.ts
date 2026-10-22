@@ -21,6 +21,15 @@ export type HfFetchResponse = {
 
 export type HfBaseSpec = { repo: string; origin?: Origin };
 
+/**
+ * The steps of an import, in order: the model API (sha, parameter count, file list), config.json, a ModelOpt
+ * hf_quant_config.json, the checkpoint's weight-file sizes (revision API + safetensors index), the base model's parameter
+ * count (a packed quantized checkpoint), a GGUF repo's base model, and reading the architecture. Steps a model does
+ * not need are skipped.
+ */
+export const HF_STEPS = ['model-info', 'config', 'quant-config', 'checkpoint-size', 'base-params', 'gguf-base', 'parse'] as const;
+export type HfStep = (typeof HF_STEPS)[number];
+
 export type HfFetchDeps = {
   fetch: (url: string, init?: { headers?: Record<string, string> }) => Promise<HfFetchResponse>;
   token?: string;
@@ -33,6 +42,8 @@ export type HfFetchDeps = {
   origin?: Origin;
   /** ISO date written to `verified` / `accessed`; defaults to today. */
   today?: string;
+  /** Called as each step starts, so a caller can tell the user what is happening (HF_STEPS). */
+  onProgress?: (step: HfStep, repo: string) => void;
   /** Estimates already made by the caller (a GGUF repo read through its base model). */
   estimates?: Array<{ feature: EstimatedFeature; detail: string }>;
   /**
@@ -41,6 +52,16 @@ export type HfFetchDeps = {
    */
   resolveBase?: (cardBases: string[]) => { base?: HfBaseSpec; error?: string };
 };
+
+/**
+ * Hugging Face tasks (pipeline_tag) of models that generate text, the calculator's subject (LLM inference). A repo
+ * tagged with another task (an image encoder, a speech recogniser, …) that has no language-model config is reported as
+ * not a language model rather than as an importer bug.
+ */
+export const TEXT_GENERATION_TASKS: ReadonlySet<string> = new Set([
+  'text-generation', 'text2text-generation', 'image-text-to-text', 'video-text-to-text', 'audio-text-to-text',
+  'any-to-any', 'visual-question-answering', 'conversational',
+]);
 
 export type HfFetchResult =
   | {
@@ -54,7 +75,9 @@ export type HfFetchResult =
      * `unparsable`: a field no estimate can do without is missing, an importer bug (CLAUDE.md "Goal for imported
      * models"); `gguf`: a GGUF-only repo whose model card names no base model to read the architecture from.
      */
-    status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network' | 'gguf';
+    status: 'denied' | 'not-found' | 'invalid' | 'unparsable' | 'network' | 'gguf' | 'not-language-model';
+    /** not-language-model: the repo's Hugging Face task (pipeline_tag), e.g. image-feature-extraction. */
+    task?: string;
     /** One readable reason, each problem named once. */
     message: string;
     /** Every field that could not be read, each once. */
@@ -123,6 +146,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
 
   try {
     const at = deps.revision ? `/revision/${deps.revision}` : '';
+    deps.onProgress?.('model-info', repo);
     const apiRes = await get(`${HF}/api/models/${repo}${at}?expand[]=safetensors&expand[]=sha&expand[]=cardData&expand[]=siblings`, 'model API');
     if (!apiRes.ok) throw httpFail(apiRes, 'model API');
     const api = (await json(apiRes, 'model API', false)) as {
@@ -150,6 +174,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
         });
       }
       const { revision: _r, resolveBase: _b, ...rest } = deps;
+      deps.onProgress?.('gguf-base', base);
       return fetchHfModel(base, {
         ...rest,
         estimates: [...(deps.estimates ?? []), {
@@ -160,6 +185,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     }
 
     // config.json at the same commit the API reported, so source and values match.
+    deps.onProgress?.('config', repo);
     const cfgRes = await get(`${HF}/${repo}/resolve/${sha}/config.json`, 'config.json');
     if (!cfgRes.ok) throw httpFail(cfgRes, 'config.json');
     const config = await json(cfgRes, 'config.json', true);
@@ -168,6 +194,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     let hfQuantConfig: unknown;
     const listed = (api.siblings ?? []).some((s) => s.rfilename === 'hf_quant_config.json');
     if (listed && !quantizationConfig(config)) {
+      deps.onProgress?.('quant-config', repo);
       const hqRes = await get(`${HF}/${repo}/resolve/${sha}/hf_quant_config.json`, 'hf_quant_config.json');
       if (!hqRes.ok) throw httpFail(hqRes, 'hf_quant_config.json');
       hfQuantConfig = await json(hqRes, 'hf_quant_config.json', true);
@@ -184,6 +211,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
       return null;
     };
     if (quantizationConfig(config, hfQuantConfig)) {
+      deps.onProgress?.('checkpoint-size', repo);
       const revRes = await get(`${HF}/api/models/${repo}/revision/${sha}?blobs=true`, 'revision API');
       if (!revRes.ok) throw httpFail(revRes, 'revision API');
       const rev = (await json(revRes, 'revision API', false)) as { siblings?: unknown };
@@ -212,6 +240,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     let baseParams: { repo: string; total: number } | undefined;
     const baseRepo = cardBases[0];
     if (quantizationConfig(config, hfQuantConfig) && baseRepo !== undefined && HF_REPO_RE.test(baseRepo)) {
+      deps.onProgress?.('base-params', baseRepo);
       try {
         const res = await deps.fetch(`${HF}/api/models/${baseRepo}?expand[]=safetensors`, init);
         const total = res.ok ? ((await res.json()) as { safetensors?: { total?: unknown } }).safetensors?.total : undefined;
@@ -221,6 +250,7 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
 
     const today = deps.today ?? new Date().toISOString().slice(0, 10);
     const license = api.cardData?.license_name ?? api.cardData?.license;
+    deps.onProgress?.('parse', repo);
     const { model, missing, notes } = parseHfConfig(repo, sha, config, api.safetensors?.total ?? null, {
       origin: deps.origin ?? UNCHECKED_ORIGIN,
       ...(resolved?.base ? { base: resolved.base } : {}),
@@ -233,6 +263,19 @@ export async function fetchHfModel(repo: string, deps: HfFetchDeps): Promise<HfF
     });
     if (!model || ckptMissing.length > 0) {
       const all = [...new Set([...ckptMissing, ...missing])];
+      // Not a language model at all (its task says so): say that, not "missing fields".
+      if (!model) {
+        try {
+          const res = await deps.fetch(`${HF}/api/models/${repo}?expand[]=pipeline_tag`, init);
+          const task = res.ok ? ((await res.json()) as { pipeline_tag?: unknown }).pipeline_tag : undefined;
+          if (typeof task === 'string' && !TEXT_GENERATION_TASKS.has(task)) {
+            return {
+              ok: false, status: 'not-language-model', task, repo, sha, missing: all,
+              message: `${repo} is not a language model (Hugging Face task: ${task}); the calculator sizes LLM inference`,
+            };
+          }
+        } catch { /* fall through to the importer error */ }
+      }
       return { ok: false, status: 'unparsable', message: `missing: ${all.join(', ')}`, missing: all, repo, sha };
     }
     const source: Source = {

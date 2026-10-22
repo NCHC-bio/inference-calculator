@@ -23,7 +23,7 @@ let send: (a: Action) => void = () => {};
 function Probe() {
   const [s, dispatch] = useCalc();
   send = dispatch;
-  return <output data-testid="probe">{JSON.stringify({ dialog: s.dialog, hfQuery: s.hfQuery, workload: s.workload, speed: s.speed })}</output>;
+  return <output data-testid="probe">{JSON.stringify({ dialog: s.dialog, hfQuery: s.hfQuery, workload: s.workload, speed: s.speed, customModel: s.customModel })}</output>;
 }
 const probe = () => JSON.parse(screen.getByTestId('probe').textContent!) as { dialog: string | null; hfQuery: string };
 const renderSentence = () => renderStore(<><Sentence /><Probe /></>);
@@ -192,15 +192,17 @@ describe('Sentence', () => {
     expect(screen.getByTestId('sentence')).toBeInTheDocument();
   }, 15_000);
 
-  it('model not found offers import and manual entry; import pre-fills the HF dialog', async () => {
+  it('model not found offers import and manual entry; a typed owner/name imports at once, no dialog to confirm it', async () => {
     renderSentence();
     const u = userEvent.setup();
     await u.click(screen.getByLabelText('模型'));
     await u.type(screen.getByLabelText('模型'), 'meta-llama/foo');
     await waitFor(() => expect(screen.getByText('找不到這個模型？')).toBeVisible(), { timeout: 10_000 });
     expect(within(menu()).getByRole('button', { name: /手動輸入架構/ })).toBeInTheDocument();
+    // The hint under the list says the search also takes a Hugging Face owner/name (nobody could guess it).
+    expect(within(menu()).getByTestId('model-hint')).toHaveTextContent('輸入 Hugging Face 的 owner/name');
     await u.click(within(menu()).getByRole('button', { name: /匯入 meta-llama\/foo/ }));
-    await waitFor(() => expect(probe()).toMatchObject({ dialog: 'hf', hfQuery: 'meta-llama/foo' }));
+    await waitFor(() => expect(probe()).toMatchObject({ dialog: null, customModel: { kind: 'hf', repo: 'meta-llama/foo', sha: 'main' } }));
   }, 15_000);
 
   it('a not-found search that is not owner/name imports without a pre-fill; manual entry opens its dialog', async () => {

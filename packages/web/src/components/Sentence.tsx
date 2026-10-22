@@ -4,9 +4,11 @@ import { useId, useMemo, useRef, useState, type JSX, type ReactNode } from 'reac
 import { getBundle } from '../bundle';
 import { useDeferredState, useModelNotes, type ModelNotesView } from '../compute/useResults';
 import { unitWord, useLang, useT, type Lang, type TFn } from '../i18n';
+import { myModelKey, useMyModels } from '../state/myModels';
 import { CUSTOM_MODEL_ID, USERS_MAX, quantChoices, workloadId, type Action, type CalcState } from '../state/state';
 import { useCalc } from '../state/store';
 import { fmt } from './answerText';
+import { currentAsMyModel, myModelAction } from './drawers/MyModelsDrawer';
 import { OptionSelect, type Opt } from './OptionSelect';
 import { rowInfo } from './PlatformRow';
 
@@ -105,6 +107,9 @@ function TierNote({ workload }: { workload: string }) {
 const HF_REPO_LIKE = /^[\w.-]+\/[\w.-]+$/;
 
 /** Search matched no model: import from Hugging Face (pre-filled when it looks like `owner/name`) or enter by hand. */
+/** Option values of the user's own models (never a bundle id: ids are kebab-case). */
+const MY_PREFIX = '__my__:';
+
 function ModelNotFound({ search, close, dispatch }: { search: string; close: () => void; dispatch: (a: Action) => void }) {
   const tr = useT();
   const repo = HF_REPO_LIKE.test(search) ? search : '';
@@ -116,7 +121,13 @@ function ModelNotFound({ search, close, dispatch }: { search: string; close: () 
     <div style={{ padding: 8, whiteSpace: 'normal' }}>
       <div style={{ marginBottom: 6 }}>{tr('model.notFound')}</div>
       <Space wrap>
-        <Button size="small" icon={<CloudDownloadOutlined />} onClick={() => open({ type: 'dialog', id: 'hf', hfQuery: repo })}>
+        {/* A typed owner/name imports at once (the answer shows it loading; a gated repo opens the Drawer for a token);
+            without one the Drawer asks for the repo. */}
+        <Button
+          size="small"
+          icon={<CloudDownloadOutlined />}
+          onClick={() => open(repo ? { type: 'customModel', value: { kind: 'hf', repo, sha: 'main' } } : { type: 'dialog', id: 'hf', hfQuery: '' })}
+        >
           {repo ? tr('model.importRepo', { repo }) : tr('model.importHf')}
         </Button>
         <Button size="small" icon={<FormOutlined />} onClick={() => open({ type: 'dialog', id: 'manualModel' })}>
@@ -158,13 +169,29 @@ export function Sentence(): JSX.Element {
 
   const workloads = useMemo(() => ofRecord(b.workloads, (w) => w.description), [b]);
   const speeds = useMemo(() => ofRecord(b.speedPresets, (p) => p.description), [b]);
+  const mine = useMyModels();
   const models = useMemo<Opt[]>(() => {
-    const list: Opt[] = Object.entries(b.models).map(([value, m]) => ({ value, label: m.name, desc: modelDesc(notes, value, deferred, tr, lang) }));
     const c = s.customModel;
+    const current = currentAsMyModel(c);
+    const currentKey = current ? myModelKey(current) : null;
+    // The user's own models first (state/myModels), except the current one, which is the field's value below.
+    const own: Opt[] = mine
+      .filter((m) => myModelKey(m) !== currentKey)
+      .map((m) => ({
+        value: `${MY_PREFIX}${myModelKey(m)}`,
+        label: m.name || tr('opt.custom'),
+        desc: m.kind === 'hf' ? tr('my.desc.hf', { repo: m.repo, sha: m.sha.slice(0, 7) }) : tr('my.desc.manual'),
+      }));
+    const list: Opt[] = [...own, ...Object.entries(b.models).map(([value, m]) => ({ value, label: m.name, desc: modelDesc(notes, value, deferred, tr, lang) }))];
     // The custom model is the current value: listed so the field shows its name instead of the internal id.
     if (c) list.push({ value: CUSTOM_MODEL_ID, label: c.kind === 'hf' ? c.repo : (c.value.name ?? tr('opt.custom')) });
     return list;
-  }, [b, notes, deferred, tr, lang, s.customModel]);
+  }, [b, notes, deferred, tr, lang, s.customModel, mine]);
+  const pickModel = (id: string) => {
+    if (!id.startsWith(MY_PREFIX)) return dispatch({ type: 'model', id });
+    const m = mine.find((x) => myModelKey(x) === id.slice(MY_PREFIX.length));
+    if (m) dispatch(myModelAction(m));
+  };
   const quants = useMemo<Opt[]>(
     () =>
       quantChoices(b, s.model, s.customModel).map((id) => {
@@ -217,10 +244,29 @@ export function Sentence(): JSX.Element {
           popupWidth={340}
           showSearch
           ariaLabel={tr('aria.model')}
-          onChange={(id) => dispatch({ type: 'model', id })}
+          onChange={pickModel}
           onOpenChange={setModelOpen}
           popupHeader={<TierNote workload={workloadId(s.workload)} />}
           notFound={(search, close) => <ModelNotFound search={search} close={close} dispatch={dispatch} />}
+          popupFooter={(close) => (
+            // Always shown: nobody can guess the search also takes a Hugging Face owner/name (the import entry).
+            <div data-testid="model-hint" style={{ padding: '8px 12px', borderTop: '1px solid rgba(127,127,127,0.2)', whiteSpace: 'normal' }}>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>{tr('model.hint')}</Typography.Text>
+              {mine.length > 0 && (
+                <div style={{ marginTop: 4 }}>
+                  <Typography.Link
+                    data-testid="my-models-manage"
+                    onClick={() => {
+                      close();
+                      dispatch({ type: 'dialog', id: 'myModels' });
+                    }}
+                  >
+                    {tr('my.manage', { n: mine.length })}
+                  </Typography.Link>
+                </div>
+              )}
+            </div>
+          )}
         />
         {tr('sentence.model.post')}
       </span>{' '}
