@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>國網推論算力計算機 v10 demo</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/antd@5.29.3/dist/reset.css">
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dayjs@1.11.13/dayjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/antd@5.29.3/dist/antd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ant-design/icons@5.6.1/dist/index.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<style>
+  html,body{margin:0}
+  body{transition:background-color var(--dur) var(--ease),color var(--dur) var(--ease)}
+  /* v10：國網 logo 是白底黑字點陣圖；淺色用 multiply 去掉白底，深色反相後用 screen 去掉黑底（紅點保持紅色） */
+  .nchc{display:inline-flex;align-items:center;gap:10px;color:inherit}
+  .nchc-logo{mix-blend-mode:multiply;transition:filter var(--dur) var(--ease)}
+  [data-theme=dark] .nchc-logo{filter:invert(1) hue-rotate(180deg);mix-blend-mode:screen}
+  :root{--ease:cubic-bezier(.215,.61,.355,1);--dur:.4s}
+  .sent{font-size:19px;line-height:2.5}
+  .sent .ant-input-number-input{font-weight:700!important;font-size:17px!important}
+  .sent .clause{white-space:nowrap}
+  .tw{transition:all var(--dur) var(--ease)}
+  .fade-in{animation:fadeIn var(--dur) var(--ease) both}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}}
+  .grow-in{animation:growIn var(--dur) var(--ease) both;transform-origin:50% 100%;transform-box:fill-box}
+  @keyframes growIn{from{transform:scaleY(0);opacity:0}}
+  .iso rect,.iso path,.iso text{transition:all var(--dur) var(--ease)}
+  .chart path,.chart circle,.chart line,.chart rect,.chart text{transition:all var(--dur) var(--ease)}
+  .reveal{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows var(--dur) var(--ease),opacity var(--dur) var(--ease)}
+  .reveal.on{grid-template-rows:1fr;opacity:1}
+  .reveal>div{overflow:hidden}
+  .rows>.ant-collapse-item{position:relative;z-index:1}
+  .rows>.ant-collapse-item>.ant-collapse-header{align-items:center!important;flex-wrap:wrap;row-gap:6px}
+  .rows>.ant-collapse-item>.ant-collapse-header>.ant-collapse-header-text{flex:0 0 150px!important}
+  .rows>.ant-collapse-item>.ant-collapse-header>.ant-collapse-extra{flex:1 1 300px;min-width:0;margin-left:8px}
+  .best-marker{position:absolute;left:0;right:0;pointer-events:none;z-index:0;border-left:3px solid;border-radius:8px;transition:top var(--dur) var(--ease),height var(--dur) var(--ease),opacity var(--dur) var(--ease)}
+  .tip{cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px}
+  .typing-cursor{display:inline-block;width:2px;height:1em;vertical-align:-0.15em;animation:blink 1s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+  .wb{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"top top" "exp why" "curves curves" "foot foot";gap:14px 28px;align-items:start}
+  .wb-charts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 28px}
+  .wb-top{grid-area:top;display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
+  .wb-foot{grid-area:foot}
+  .wb-h{font-weight:700;font-size:13px;margin-bottom:6px}
+  @media (max-width:760px){.wb{grid-template-columns:minmax(0,1fr);grid-template-areas:"top" "exp" "why" "curves" "foot"}.wb-charts{grid-template-columns:minmax(0,1fr)}}
+  .opt-desc{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows var(--dur) var(--ease),opacity var(--dur) var(--ease)}
+  .opt-desc>span{overflow:hidden}
+  .ant-select-item-option-active .opt-desc,.ant-select-item-option-selected .opt-desc{grid-template-rows:1fr;opacity:1}
+  @media (hover:none){.opt-desc{grid-template-rows:1fr;opacity:1}}
+  @media (max-width:640px){.rows>.ant-collapse-item>.ant-collapse-header>.ant-collapse-extra{flex-basis:100%;margin-left:0}.sent{font-size:17px}}
+  .cmp-charts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px 28px;margin-top:14px}
+  @media (max-width:760px){.cmp-charts{grid-template-columns:minmax(0,1fr)}}
+  .cmp-tip{position:absolute;top:6px;pointer-events:none;font-size:12px;line-height:1.6;padding:6px 8px;border-radius:6px;white-space:nowrap;transition:left .12s linear,opacity .2s}
+  .ref-x{transition:transform var(--dur) var(--ease)}
+  .cmp-line{transition:background var(--dur) var(--ease)}
+  @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function(){
+const {useState,useEffect,useLayoutEffect,useMemo,useRef}=React;
+const {ConfigProvider,theme,App:AntApp,Card,Segmented,InputNumber,Select,Typography,Tag,Button,Space,Popover,Tooltip,Progress,Divider,Drawer,Modal,Input,Form,Collapse,Table,Flex,Checkbox,Dropdown}=antd;
+const {InfoCircleOutlined,CopyOutlined,ShareAltOutlined,PlusOutlined,HourglassOutlined,CloseCircleOutlined,CheckCircleOutlined,EditOutlined,DeleteOutlined,CloudDownloadOutlined,FormOutlined,PushpinOutlined,ThunderboltOutlined,BulbOutlined,ArrowUpOutlined,ArrowDownOutlined,CodeOutlined,LineChartOutlined,SwapOutlined,DownOutlined,GithubOutlined,BugOutlined,ExportOutlined,SunOutlined,MoonOutlined,DesktopOutlined}=icons;
+const html=htm.bind(React.createElement);
+const {Text,Paragraph,Link}=Typography;
+const reduced=()=>window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const fmt=(n,d=0)=>Number(n).toLocaleString('zh-TW',{maximumFractionDigits:d,minimumFractionDigits:d});
+const niceStep=(span,n)=>{const raw=Math.max(1e-9,span/n),p=Math.pow(10,Math.floor(Math.log10(raw))),k=raw/p;return (k<=1?1:k<=2?2:k<=5?5:10)*p;};
+const fmtS=s=>s<10?fmt(s,1)+' 秒':fmt(s)+' 秒';
+
+// ================= 假資料（demo 只展示 UI，數字不是計算結果） =================
+const BASE_PL=[
+  {k:'h200n4',nm:'H200',sub:'nano4',g:'nchc',unit:'gpu',gpn:8,mem:141,bw:4.8,tf:989,tdp:700},
+  {k:'h100n5',nm:'H100',sub:'nano5',g:'nchc',unit:'gpu',gpn:8,mem:80,bw:3.35,tf:989,tdp:700},
+  {k:'h200n5',nm:'H200',sub:'nano5',g:'nchc',unit:'gpu',gpn:8,mem:141,bw:4.8,tf:989,tdp:700},
+  {k:'gb200',nm:'GB200',sub:'nano4',g:'nchc',unit:'gpu',gpn:4,mem:186,bw:8,tf:2500,tdp:null,est:true},
+  {k:'macstudio',nm:'Mac Studio',sub:'M5 Ultra 512GB',g:'self',unit:'machine',gpn:1,mem:512,bw:0.82,tf:70,tdp:270,est:true},
+  {k:'spark',nm:'DGX Spark',sub:'GB10 128GB',g:'self',unit:'machine',gpn:1,mem:128,bw:0.27,tf:100,tdp:240,est:true},
+  {k:'mini64',nm:'Mac mini',sub:'M5 Pro 64GB',g:'self',unit:'machine',gpn:1,mem:64,bw:0.27,tf:30,tdp:null,est:true},
+  {k:'mini32',nm:'Mac mini',sub:'M6 32GB',g:'self',unit:'machine',gpn:1,mem:32,bw:0.15,tf:20,tdp:null,est:true},
+];
+const BASE_MODELS=[
+  {id:'gemma12',nm:'Gemma 4 12B',P:12,kv:0.05,tier:1},
+  {id:'oss20',nm:'gpt-oss-20b',P:21,act:3.6,kv:0.03,tier:1},
+  {id:'muse30',nm:'Muse-Glimmer-30B',P:30,kv:0.08,tier:2},
+  {id:'gemma31',nm:'Gemma 4 31B',P:31,kv:0.1,tier:2},
+  {id:'llama70',nm:'Llama-3.3-70B-Instruct-FP8',P:70,kv:0.16,tier:3},
+  {id:'oss120',nm:'gpt-oss-120b',P:117,act:5.1,kv:0.07,tier:3},
+  {id:'mistral128',nm:'Mistral Medium 3.5 128B',P:128,kv:0.2,tier:4},
+];
+const QUANT={bf16:{nm:'BF16',b:2,d:'16 位元，原始精度'},fp8:{nm:'FP8',b:1,d:'8 位元，記憶體減半、品質幾乎不變'},int4:{nm:'INT4',b:0.5,d:'4 位元，記憶體再減半，品質略降'}};
+const WL={
+  chat:{nm:'一般對話問答',inT:1020,outT:129,hit:0,share:1,d:'一問一答，例如寫信、查資料',demo:'可以的！以下是改善研究計畫摘要的三個建議：第一，開頭先點出研究問題的重要性；第二，具體寫出方法與資料來源；第三，用一句話總結預期貢獻。'},
+  doc:{nm:'長文件問答',inT:12035,outT:343,hit:0,share:1,d:'把報告或法規交給 AI 再提問',demo:'根據您提供的《個人資料保護法》第 6 條與第 15 條，研究機構蒐集健康資料時，須符合學術研究目的並經去識別化處理。'},
+  assist:{nm:'研究助理',inT:126180,outT:252,hit:0.957,share:0.033,d:'AI 一步步幫你跑分析、寫程式、看結果',demo:'第 3 群細胞高度表現 CD3E、CD8A 與 GZMB，推測為細胞毒性 T 細胞。建議以 UMAP 檢視其與第 5 群的相對位置，再做軌跡分析確認分化關係。'},
+};
+const SPEED={smooth:{nm:'流暢',tps:20,ttft:5,d:'每人每秒至少 20 字，5 秒內開始回覆'},ok:{nm:'可接受',tps:8,ttft:15,d:'每人每秒至少 8 字，15 秒內開始回覆'}};
+const TIER_NOTE={chat:'小型模型即可（如 Gemma 4 12B、gpt-oss-20b）',doc:'中型、長上下文模型（如 Muse-Glimmer-30B、Gemma 4 31B）',assist:'大型模型（如 Mistral Medium 3.5；預算有限時用 Muse-Glimmer-30B）'};
+const BASIS=[
+  {t:'研究助理：同時在生成的比例 3.3%',st:'estimate',v:'0.033',src:'TraceLab Table 7'},
+  {t:'流暢：首字 5 秒內',st:'estimate',v:'5 秒',src:'計算機預設值'},
+  {t:'流暢：每人每秒 20 字',st:'estimate',v:'20',src:'Level1Techs 論壇'},
+  {t:'H200 頻寬效率 η',st:'estimate',v:'0.62',src:'InferenceX 校正'},
+  {t:'GB200 每 node 卡數',st:'unverified',v:'4',src:'系統組待確認'},
+  {t:'GB200 TDP',st:'unverified',v:'—',src:'NVIDIA 未公布單卡 TDP'},
+  {t:'all-reduce 延遲',st:'estimate',v:'8 µs',src:'第三方實測'},
+  {t:'H200 記憶體 141 GB',st:'official',v:'141 GB',src:'NVIDIA 規格書'},
+  {t:'H200 頻寬 4.8 TB/s',st:'official',v:'4.8 TB/s',src:'NVIDIA 規格書'},
+  {t:'研究助理每步讀入 126,180 token',st:'measured',v:'126,180',src:'TraceLab Table 8'},
+  {t:'快取命中率 95.7%',st:'measured',v:'0.957',src:'TraceLab Table 11'},
+  {t:'Llama 3.3 70B 參數量',st:'official',v:'70.6 B',src:'Hugging Face config'},
+];
+const ST={official:['官方','blue'],measured:['實測','green'],derived:['推算','cyan'],estimate:['推估','orange'],unverified:['未查證','red'],user:['自訂','geekblue']};
+
+// mock：t 張合跑一份模型、共 floor(c/t) 份；速度隨每份模型同時生成的人數下降，記憶體放不下就不可行
+function mockShapes(p,m,q,w,c){
+  const W=m.P*QUANT[q].b, kvU=(w.inT+w.outT)*m.kv/1000*(w.hit?0.35:1);
+  const ts=[1,2,4,8].filter(t=>t<=p.gpn&&t<=c&&t*p.mem*0.9>W*1.05);
+  return ts.map(t=>({t,r:Math.floor(c/t),W,kvU,usable:t*p.mem*0.9}));
+}
+function evalShape(p,m,q,w,s,u,spd){
+  const gen=n=>w.share>=1?n:Math.max(1,Math.ceil(n*w.share));
+  const ur=Math.ceil(u/s.r), gr=gen(ur);
+  const memMax=Math.floor((s.usable-s.W)/s.kvU)*s.r;
+  const K=s.t*p.bw*1000*0.25;
+  const tps=K/(s.W+gr*s.kvU*0.5);
+  const newTok=w.inT*(1-w.hit);
+  const ttft=newTok*2*m.P*1e9/(s.t*p.tf*1e12*0.35)+0.15+0.01*gr;
+  const genLim=Math.floor((K/spd.tps-s.W)/(s.kvU*0.5));
+  const spMax=ttft>spd.ttft||genLim<1?0:(w.share>=1?genLim:Math.floor(genLim/w.share))*s.r;
+  const max=Math.max(0,Math.min(memMax,spMax));
+  const memUse=(s.W+ur*s.kvU)/s.usable;
+  const why=u>memMax?'mem':ttft>spd.ttft?'ttft':tps<spd.tps?'bw':null;
+  return {s,u,tps,ttft,max,memMax,why,ok:!why,ur,
+    share:{mem:Math.min(1.2,memUse),bw:Math.min(1,0.55+gr*0.02),compute:Math.min(1,0.05+gr*0.01),ttft:ttft/spd.ttft},
+    mem:{W:s.W,kv:Math.min(ur,memMax/s.r)*s.kvU,kvU:s.kvU,usable:s.usable,users:ur}};
+}
+function perf(p,m,q,w,spd,c,u,pickT){
+  if(!c||c<1)return {ok:false,why:'none'};
+  const shapes=mockShapes(p,m,q,w,c);
+  if(!shapes.length&&mockShapes(p,m,q,w,p.gpn).length)return {ok:false,why:'mem',detail:`${fmt(c)} ${unitOf(p)}放不下模型，需要更多卡`};
+  if(!shapes.length)return {ok:false,why:'weights',detail:`模型權重 ${fmt(m.P*QUANT[q].b)} GB，${p.unit=='machine'?'單台':'一個 node 內'}放不下`};
+  const all=shapes.map(s=>evalShape(p,m,q,w,s,u,spd));
+  let best=pickT?all.find(e=>e.s.t==pickT):null;
+  if(!best)best=pickBest(all);
+  return Object.assign({},best,{splits:all,c});
+}
+// 預設切法：記憶體夠所有人用的切法中每人最快的一個（加卡時速度只升不降，曲線會變平）
+function pickBest(all){return [...all].sort((a,b)=>(b.u<=b.memMax)-(a.u<=a.memMax)||b.tps-a.tps||a.s.t-b.s.t)[0];}
+function suggest(p,m,q,w,spd,u){
+  for(let c=1;c<=20000;c=c<64?c+1:Math.ceil(c*1.05)){const r=perf(p,m,q,w,spd,c,u);if(r.why=='weights')return {ok:false,why:'weights',detail:r.detail};if(r.ok)return {ok:true,c,r};}
+  return {ok:false,why:'ttft',detail:`首字要等超過 ${fmt(spd.ttft)} 秒，加卡也無法改善`};
+}
+const WHY={weights:'模型放不下',mem:'記憶體不夠所有人用',ttft:'首字等太久',bw:'每人速度不夠',none:'—'};
+// 切法的白話說法：t 張卡合跑一份模型（張量平行），共 r 份，各自服務不同使用者
+const splitTxt=(t,r,unit)=>unit=="台"?`每台各跑一份模型，共 ${r} 份`:t==1?`每張卡各跑一份模型，共 ${r} 份`:`每 ${t} 張卡合跑一份模型，共 ${r} 份`;
+const SPLIT_HELP="一份模型可以用幾張卡合起來跑（張量平行），也可以複製成好幾份，各自服務不同的使用者。合跑的卡越多，每人越快；份數越多，能同時服務的人越多。";
+const unitOf=p=>p.unit=='machine'?'台':'張';
+
+// ================= 共用小元件 =================
+function useTween(v,ms=400){const [x,setX]=useState(v);const cur=useRef(v);
+  useEffect(()=>{if(reduced()||!isFinite(v)||!isFinite(cur.current)){cur.current=v;setX(v);return;}
+    const a=cur.current,t0=performance.now();let raf;
+    const step=t=>{const k=Math.min(1,(t-t0)/ms),e=1-Math.pow(1-k,3),c=a+(v-a)*e;cur.current=c;setX(c);if(k<1)raf=requestAnimationFrame(step);};
+    raf=requestAnimationFrame(step);return ()=>cancelAnimationFrame(raf);},[v]);
+  return x;}
+function TNum({v,d=0,suffix=''}){const x=useTween(v);return html`<span>${fmt(x,d)}${suffix}</span>`;}
+function useWidth(){const ref=useRef(null);const [w,setW]=useState(0);
+  useLayoutEffect(()=>{const el=ref.current;if(!el)return;const ro=new ResizeObserver(e=>setW(e[0].contentRect.width));ro.observe(el);setW(el.getBoundingClientRect().width);return ()=>ro.disconnect();},[]);
+  return [ref,w];}
+// 說明：hover 顯示（觸控點擊、鍵盤焦點也可）；內容保持短，長內容放 Drawer
+function Tip({content,title,children,width=280}){
+  return html`<${Popover} trigger=${['hover','click','focus']} title=${title} content=${html`<div style=${{maxWidth:width}}>${content}</div>`}>
+    <span className="tip" role="button" tabIndex=${0}>${children}</span><//>`;}
+// 指令用 code block：等寬、保留換行，右上角複製；過長時只在框內橫向捲動
+function CodeBlock({code}){const {token}=theme.useToken();
+  return html`<div style=${{position:'relative',margin:'6px 0 4px'}}>
+    <pre style=${{margin:0,padding:'12px 44px 12px 14px',background:token.colorFillTertiary,border:'1px solid '+token.colorBorderSecondary,borderRadius:token.borderRadiusLG,
+      fontFamily:token.fontFamilyCode,fontSize:12.5,lineHeight:1.7,overflowX:'auto',whiteSpace:'pre',color:token.colorText}}><code>${code}</code></pre>
+    <${Text} copyable=${{text:code,tooltips:['複製','已複製']}} style=${{position:'absolute',top:8,right:10}}/>
+  </div>`;}
+function StatusTag({st}){return html`<${Tag} color=${ST[st][1]} style=${{marginInlineEnd:6}}>${ST[st][0]}<//>`;}
+
+// ================= 機器圖示：放不下時 ▢▢ … ▢▢ 加大括號 × N =================
+function Isotype({exp,cons,p}){
+  const {token}=theme.useToken();const [ref,W]=useWidth();
+  const mac=p.unit=='machine';
+  const n=mac?Math.max(exp,cons||0):Math.ceil(Math.max(exp,cons||0)/p.gpn);
+  const nExp=mac?exp:exp/p.gpn;
+  const iw=mac?20:12,ih=mac?13:22,gap=mac?4:4,per=iw+gap,H=24;
+  const col=mac?token.colorTextTertiary:token.colorPrimary;
+  const avail=Math.max(per*3,W||300);
+  const fits=n*per<=avail;
+  let slots;
+  if(fits)slots=Array.from({length:n},(_,i)=>({i,x:i*per}));
+  else{const k=Math.max(1,Math.floor((avail-22)/per/2));
+    slots=[...Array.from({length:k},(_,i)=>({i,x:i*per})),...Array.from({length:k},(_,j)=>({i:n-k+j,x:k*per+22+j*per}))];}
+  const totalW=fits?n*per:slots[slots.length-1].x+per;
+  const fillOf=i=>Math.max(0,Math.min(1,nExp-i));
+  const extra=cons&&cons>exp;
+  const label=mac?`× ${fmt(exp)} 台${extra?`（保守 ${fmt(cons)}）`:''}`:`× ${fmt(Math.ceil(exp/p.gpn))} node・${fmt(exp)} 張${extra?`（保守 ${fmt(cons)}）`:''}`;
+  const helpTxt=mac?'每個方塊 = 1 台；實心為預期需要，虛線為保守估計多出的台數':`每個方塊 = 1 個 node（${p.gpn} 張 GPU）；未滿一個 node 時只填滿用到的比例；實心為預期，虛線為保守估計多出的部分`;
+  const y0=H+4,x1=Math.max(8,totalW-gap);
+  const brace=`M0,${y0} q0,6 6,6 L${x1/2-6},${y0+6} q6,0 6,6 q0,-6 6,-6 L${x1-6},${y0+6} q6,0 6,-6`;
+  return html`<div ref=${ref} style=${{width:'100%',minWidth:0}}>
+    <${Tip} content=${helpTxt}>
+      <svg className="iso" width=${totalW} height=${fits?H:H+30} style=${{display:'block',overflow:'visible'}} aria-label=${label}>
+        ${slots.map(s=>{const f=fillOf(s.i);const dashed=f<=0;return html`<g key=${s.i} className="grow-in">
+          <rect x=${s.x} y=${H-ih} width=${iw} height=${ih} rx="2" fill="none" stroke=${col} strokeDasharray=${dashed?'3 2':null}/>
+          ${f>0&&html`<rect x=${s.x} y=${H-ih*f} width=${iw} height=${ih*f} rx="2" fill=${col}/>`}</g>`;})}
+        ${!fits&&html`<text x=${slots[slots.length/2-1].x+per+2} y=${H-6} fontSize="14" fill=${token.colorTextSecondary}>…</text>`}
+        ${!fits&&html`<path className="fade-in" d=${brace} fill="none" stroke=${token.colorTextTertiary}/>`}
+        ${!fits&&html`<text className="fade-in" x=${x1/2+6} y=${y0+26} textAnchor="middle" fontSize="12" fill=${token.colorTextSecondary}>${label}</text>`}
+      </svg><//></div>`;}
+
+// ================= 打字示範：等首字（沙漏），再以速度出字；換速度時從目前進度接續 =================
+function Typing({text,tps,ttft}){
+  const {token}=theme.useToken();const [n,setN]=useState(0);const [wait,setWait]=useState(true);
+  // 進度逐格累加：速度改變時從目前進度以新速度接續，不重置
+  const sp=useRef({tps,ttft});sp.current={tps,ttft};
+  useEffect(()=>{if(reduced()){setN(text.length);setWait(false);return;}
+    const s={waited:0,pos:0,hold:0,last:performance.now()};
+    const id=setInterval(()=>{const now=performance.now(),dt=(now-s.last)/1000;s.last=now;const {tps,ttft}=sp.current;
+      if(s.waited<Math.min(ttft,6)){s.waited+=dt;setWait(true);return;}setWait(false);
+      if(s.pos<text.length){s.pos=Math.min(text.length,s.pos+dt*tps);setN(Math.floor(s.pos));return;}
+      s.hold+=dt;if(s.hold>1.5){s.waited=0;s.pos=0;s.hold=0;setN(0);}},50);
+    return ()=>clearInterval(id);},[text]);
+  return html`<div style=${{background:token.colorFillTertiary,borderRadius:token.borderRadiusLG,padding:'10px 12px',minHeight:88,lineHeight:1.7}}>
+    ${wait&&n==0?html`<${Text} type="secondary" className="fade-in"><${HourglassOutlined} spin/> 等待第一個字…<//>`:html`<span>${text.slice(0,n)}<span className="typing-cursor" style=${{background:token.colorPrimary}}></span></span>`}</div>`;}
+
+// ================= 單軸小圖（D3 風格，純 SVG，路徑以 CSS 過渡） =================
+function LineChart({pts,xLabel,yLabel,marks,zones,onPick,xFmt=v=>fmt(v)}){
+  const {token}=theme.useToken();const [ref,W]=useWidth();
+  const w=Math.max(200,W),h=190,L=48,R=12,T=12,B=40;
+  const xs=pts.map(p=>p.x),xmax=Math.max(...xs),xmin=Math.min(...xs);
+  const yStep=niceStep(Math.max(30,...pts.map(p=>p.y||0))*1.1,4);
+  const ymax=Math.ceil(Math.max(30,...pts.map(p=>p.y||0))*1.1/yStep)*yStep;
+  const yTicks=Array.from({length:Math.round(ymax/yStep)+1},(_,i)=>i*yStep);
+  const xStep=niceStep(xmax-xmin,w<320?4:6);
+  const xTicks=[];for(let v=Math.ceil(xmin/xStep)*xStep;v<=xmax+1e-9;v+=xStep)xTicks.push(v);
+  const X=v=>L+(v-xmin)/(xmax-xmin||1)*(w-L-R),Y=v=>T+(1-Math.min(v,ymax)/ymax)*(h-T-B);
+  const d=pts.filter(p=>p.y>0).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+','+Y(p.y).toFixed(1)).join(' ');
+  return html`<div ref=${ref} style=${{width:'100%'}}>
+    <svg className="chart" width=${w} height=${h} style=${{display:'block',cursor:onPick?'pointer':'default'}}
+      onClick=${e=>{if(!onPick)return;const r=e.currentTarget.getBoundingClientRect();const v=xmin+(e.clientX-r.left-L)/(w-L-R)*(xmax-xmin);onPick(Math.max(1,Math.round(v)));}}>
+      ${zones.map(z=>html`<rect key=${z.nm} x=${L} y=${Y(z.hi)} width=${w-L-R} height=${Math.max(0,Y(z.lo)-Y(z.hi))} fill=${z.c} opacity="0.5"/>`)}
+      ${zones.filter(z=>Y(z.lo)-Y(z.hi)>=14).map(z=>html`<text key=${z.nm+'t'} x=${w-R-4} y=${Y(z.hi)+12} textAnchor="end" fontSize="10" fill=${token.colorTextTertiary}>${z.nm}</text>`)}
+      ${yTicks.map(v=>html`<g key=${'y'+v}><line x1=${L} y1=${Y(v)} x2=${w-R} y2=${Y(v)} stroke=${token.colorBorderSecondary}/>
+        <text x=${L-6} y=${Y(v)+4} textAnchor="end" fontSize="11" fill=${token.colorTextTertiary}>${fmt(v)}</text></g>`)}
+      ${xTicks.map(v=>html`<g key=${'x'+v}><line x1=${X(v)} y1=${h-B} x2=${X(v)} y2=${h-B+4} stroke=${token.colorBorder}/>
+        <text x=${X(v)} y=${h-B+16} textAnchor="middle" fontSize="11" fill=${token.colorTextTertiary}>${xFmt(v)}</text></g>`)}
+      <line x1=${L} y1=${T} x2=${L} y2=${h-B} stroke=${token.colorBorder}/>
+      <line x1=${L} y1=${h-B} x2=${w-R} y2=${h-B} stroke=${token.colorBorder}/>
+      <path d=${d} fill="none" stroke=${token.colorPrimary} strokeWidth="2"/>
+      ${marks.map(mk=>html`<g key=${mk.k}>
+        <line x1=${X(mk.x)} y1=${T} x2=${X(mk.x)} y2=${h-B} stroke=${mk.c||token.colorTextTertiary} strokeDasharray=${mk.dash?'4 3':null}/>
+        ${mk.y!=null&&html`<circle cx=${X(mk.x)} cy=${Y(mk.y)} r="5" fill=${mk.c||token.colorPrimary}/>`}
+        <text x=${X(mk.x)+4} y=${T+10} fontSize="11" fill=${mk.c||token.colorTextSecondary}>${mk.label}</text></g>`)}
+      <text x=${(w+L)/2} y=${h-4} textAnchor="middle" fontSize="11" fill=${token.colorTextSecondary}>${xLabel}</text>
+      <text transform=${`translate(12,${(T+h-B)/2}) rotate(-90)`} textAnchor="middle" fontSize="11" fill=${token.colorTextSecondary}>${yLabel}</text>
+    </svg></div>`;}
+
+// ================= 試算區（展開一列） =================
+function Workbench({p,ctx,c,auto,sug,setCount,onApply,onVerify}){
+  const {token}=theme.useToken();const [pickT,setPickT]=useState(null);
+  const {m,q,w,spd,u,models}=ctx;
+  const r=perf(p,m,q,w,spd,c,u,pickT);
+  if(!r.s)return html`<${Text} type="danger">${r.detail||WHY[r.why]}<//>`;
+  const unit=unitOf(p);
+  // 建議動作
+  const chips=[];
+  if(!r.ok){
+    if(q!='int4'){const a=perf(p,m,'int4',w,spd,c,u);if(a.ok)chips.push({k:'q',t:`改用 INT4：每人 ${fmt(a.tps)} 字/秒`,apply:{q:'int4'}});}
+    if(ctx.sp=='smooth'){const a=perf(p,m,q,w,SPEED.ok,c,u);if(a.ok)chips.push({k:'s',t:`速度改為「可接受」`,apply:{sp:'ok'}});}
+    if(r.max>0)chips.push({k:'u',t:`人數降到 ${fmt(r.max)}`,apply:{u:r.max}});
+    const smaller=[...models].filter(x=>x.P<m.P).sort((a,b)=>b.P-a.P).find(x=>perf(p,x,q,w,spd,c,u).ok);
+    if(smaller)chips.push({k:'m',t:`改用 ${smaller.nm}`,apply:{mid:smaller.id}});
+    if(sug.ok)chips.push({k:'c',t:`改回建議的 ${fmt(sug.c)} ${unit}`,apply:{auto:true}});
+  }else if(!auto&&sug.ok&&c>sug.c){
+    if(r.max>u)chips.push({k:'u',t:`還能再多 ${fmt(r.max-u)} 人`,apply:{u:r.max}});
+    const bigger=[...models].filter(x=>x.tier>m.tier).sort((a,b)=>b.tier-a.tier).find(x=>perf(p,x,q,w,spd,c,u).ok);
+    if(bigger)chips.push({k:'m',t:`可改跑更高等級的 ${bigger.nm}`,apply:{mid:bigger.id}});
+  }
+  const zones=[{nm:'流暢',lo:SPEED.smooth.tps,hi:999,c:token.colorSuccessBg},{nm:'可接受',lo:SPEED.ok.tps,hi:SPEED.smooth.tps,c:token.colorWarningBg},{nm:'卡頓',lo:0,hi:SPEED.ok.tps,c:token.colorErrorBg}];
+  const cMax=Math.max(8,(sug.ok?sug.c:c)*4,c*1.5);
+  const cardPts=Array.from({length:40},(_,i)=>{const x=Math.max(1,Math.round(1+i*(cMax-1)/39));const e=perf(p,m,q,w,spd,x,u);return {x,y:e.s&&u<=e.memMax?e.tps:0};});
+  const uMax=Math.max(4,Math.ceil(Math.max(r.max,u)*1.4));
+  const userPts=Array.from({length:30},(_,i)=>{const x=Math.max(1,Math.round(1+i*(uMax-1)/29));const e=evalShape(p,m,q,w,r.s,x,spd);return {x,y:x<=e.memMax?e.tps:0};});
+  const bars=[['記憶體',r.share.mem,'模型與所有使用者上下文佔用的記憶體'],['頻寬',r.share.bw,'每產生一個字要讀取的資料量佔頻寬的比例'],['算力',r.share.compute,'讀入與生成所需的計算量佔算力的比例'],['首字',r.share.ttft,'首字等待時間佔你要求上限的比例']];
+  const mx=Math.max(...bars.map(b=>b[1]));
+  const H=({children})=>html`<div className="wb-h">${children}</div>`;
+  const recT=pickBest(r.splits).s.t;
+  return html`<div className="wb">
+    <div className="wb-top">
+      <${Text} type="secondary" style=${{fontSize:12}}>${fmt(c)} ${unit} ${p.nm}・${fmt(u)} 人同時使用・<${Tip} content=${SPLIT_HELP}>${splitTxt(r.s.t,r.s.r,unit)}<//><//>    </div>
+    <section style=${{gridArea:'exp'}}>
+      <${H}>體驗<//>
+      <${Typing} text=${w.demo} tps=${r.tps} ttft=${r.ttft}/>
+      <${Flex} gap=${16} wrap="wrap" style=${{marginTop:10}}>
+        <span>每人 <b><${TNum} v=${r.tps}/></b> 字/秒 <${Text} type="secondary">（目標 ${spd.tps}）<//></span>
+        <span>首字 <b><${TNum} v=${r.ttft} d=${1}/></b> 秒 <${Text} type="secondary">（上限 ${spd.ttft}）<//></span>
+        <span>最多同時 <b><${TNum} v=${r.max}/></b> 人</span>
+      <//>
+      ${chips.length>0&&html`<div className="fade-in" style=${{marginTop:12}}>
+        <${Text} type="secondary" style=${{fontSize:12}}><${BulbOutlined}/> ${r.ok?'多出來的資源可以：':'想用這些卡達標，可以：'}<//>
+        <${Flex} gap=${8} wrap="wrap" style=${{marginTop:6}}>${chips.map(ch=>html`<${Button} key=${ch.k} size="small" style=${{whiteSpace:'normal',height:'auto',textAlign:'left'}} onClick=${()=>onApply(ch.apply)}>${ch.t}<//>`)}<//></div>`}
+    </section>
+    <section style=${{gridArea:'curves',minWidth:0}}>
+      <div className="wb-charts">
+        <div style=${{minWidth:0}}>
+          <${H}>${unit}數 → 每人速度 <${Text} type="secondary" style=${{fontSize:12,fontWeight:400}}>點圖上任一處，直接設定${unit}數<//><//>
+          <${LineChart} pts=${cardPts} xLabel=${`${unit=="張"?"GPU 張數":"機器台數"}（${unit}）・${fmt(u)} 人同時使用`} yLabel="每人速度（字/秒）" zones=${zones}
+            marks=${[...(sug.ok?[{k:'s',x:sug.c,label:'建議',dash:true}]:[]),{k:'c',x:c,y:r.tps,label:'目前',c:token.colorPrimary}]} onPick=${v=>setCount(v)}/>
+        </div>
+        <div style=${{minWidth:0}}>
+          <${H}>人數 → 每人速度 <${Text} type="secondary" style=${{fontSize:12,fontWeight:400}}>在目前 ${fmt(c)} ${unit}下<//><//>
+          <${LineChart} pts=${userPts} xLabel=${`同時使用人數（人）・${fmt(c)} ${unit}`} yLabel="每人速度（字/秒）" zones=${zones}
+            marks=${[{k:'u',x:u,y:r.tps,label:'目前',c:token.colorPrimary},...(r.max>0?[{k:'m',x:r.max,label:'上限',dash:true,c:token.colorError}]:[])]}/>
+        </div>
+      </div>
+    </section>
+    <section style=${{gridArea:'why',minWidth:0}}>
+      <${H}>原因<//>
+      ${bars.map(b=>html`<${Flex} key=${b[0]} align="center" gap=${8}>
+        <${Tip} content=${b[2]}><${Text} style=${{width:44,display:'inline-block',fontSize:12,fontWeight:b[1]==mx?700:400}} type=${b[1]==mx?'danger':'secondary'}>${b[0]}<//><//>
+        <${Progress} status="normal" percent=${Math.round(Math.min(1,b[1])*100)} size="small" strokeColor=${b[1]==mx?token.colorError:undefined} style=${{flex:1,margin:0}}/><//>`)}
+      <div style=${{marginTop:10}}><${Text} type="secondary" style=${{fontSize:12}}>記憶體組成（一份模型所用的卡）<//>
+        <${MemBar} mem=${r.mem}/></div>
+      <${Flex} align="center" gap=${8} wrap="wrap" style=${{marginTop:10}}>
+        <${Text} type="secondary" style=${{fontSize:12}}><${Tip} content=${SPLIT_HELP}>切法<//><//>
+        <${Select} size="small" style=${{flex:'1 1 240px',minWidth:0,maxWidth:'100%'}} popupMatchSelectWidth=${false} value=${r.s.t} onChange=${v=>setPickT(v)}
+          options=${r.splits.map(e=>({value:e.s.t,label:`${splitTxt(e.s.t,e.s.r,unit)}：${fmt(e.tps)} 字/秒、首字 ${fmt(e.ttft,1)} 秒、上限 ${fmt(e.max)} 人${e.s.t==recT?'（建議）':''}`}))}/>
+      <//>
+      ${p.tdp&&html`<${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:8}}><${ThunderboltOutlined}/> 峰值功耗約 <${TNum} v=${c*p.tdp/1000} d=${1}/> kW<//>`}
+      ${!p.tdp&&html`<${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:8}}><${ThunderboltOutlined}/> <${Tip} content="廠商未公布單卡 TDP，無法估算">功耗未查證<//><//>`}
+    </section>
+    <div className="wb-foot">
+      <${Collapse} ghost size="small" items=${[{key:'x',collapsible:'header',label:html`<${Text} type="secondary" style=${{fontSize:12}}>更多圖表（Roofline，專家用）<//>`,
+        extra:html`<${Button} type="link" size="small" style=${{padding:0,height:'auto'}} icon=${html`<${CodeOutlined}/>`}
+          onClick=${e=>{e.stopPropagation();onVerify({m,t:r.s.t,ur:r.ur,conc:Math.max(1,Math.ceil(u/r.s.r)),w});}}>驗證指令<//>`,
+        children:html`<${Roofline} p=${p} r=${r}/>`}]}/>
+    </div>
+  </div>`;}
+
+// 專家圖：很少用，收在「更多圖表」後面
+function Roofline({p,r}){const {token}=theme.useToken();const [ref,W]=useWidth();const w=Math.max(220,W),h=210,L=56,R=28,T=12,B=42;
+  // 單位：算術強度 FLOP/byte × 頻寬 TB/s = TFLOPS；兩軸皆對數
+  const ridge=p.tf/p.bw;const ai=Math.max(2,Math.min(ridge*3,4+r.ur*2));
+  const perfAt=a=>Math.min(p.tf,a*p.bw);
+  const x0=0,x1=Math.ceil(Math.log10(ridge*8)),y0=Math.floor(Math.log10(perfAt(1)*0.8)),y1=Math.ceil(Math.log10(p.tf*1.2));
+  const lx=v=>L+(Math.log10(v)-x0)/(x1-x0)*(w-L-R),ly=v=>T+(1-(Math.log10(v)-y0)/(y1-y0))*(h-T-B);
+  const xT=Array.from({length:x1-x0+1},(_,i)=>Math.pow(10,x0+i)),yT=Array.from({length:y1-y0+1},(_,i)=>Math.pow(10,y0+i));
+  const pt=perfAt(ai)*0.6;
+  return html`<div ref=${ref}><svg className="chart" width=${w} height=${h} style=${{display:'block'}}>
+    ${yT.map(v=>html`<g key=${'y'+v}><line x1=${L} y1=${ly(v)} x2=${w-R} y2=${ly(v)} stroke=${token.colorBorderSecondary}/>
+      <text x=${L-6} y=${ly(v)+4} textAnchor="end" fontSize="11" fill=${token.colorTextTertiary}>${fmt(v)}</text></g>`)}
+    ${xT.map(v=>html`<g key=${'x'+v}><line x1=${lx(v)} y1=${h-B} x2=${lx(v)} y2=${h-B+4} stroke=${token.colorBorder}/>
+      <text x=${lx(v)} y=${h-B+16} textAnchor="middle" fontSize="11" fill=${token.colorTextTertiary}>${fmt(v)}</text></g>`)}
+    <line x1=${L} y1=${T} x2=${L} y2=${h-B} stroke=${token.colorBorder}/>
+    <line x1=${L} y1=${h-B} x2=${w-R} y2=${h-B} stroke=${token.colorBorder}/>
+    <path d=${`M${lx(1)},${ly(perfAt(1))} L${lx(ridge)},${ly(p.tf)} L${lx(Math.pow(10,x1))},${ly(p.tf)}`} fill="none" stroke=${token.colorTextSecondary} strokeWidth="2"/>
+    <text x=${w-R-4} y=${ly(p.tf)-6} textAnchor="end" fontSize="11" fill=${token.colorTextTertiary}>算力上限 ${fmt(p.tf)} TFLOPS</text>
+    <text x=${lx(2)} y=${ly(perfAt(2))-8} fontSize="11" fill=${token.colorTextTertiary}>頻寬 ${fmt(p.bw,2)} TB/s</text>
+    <circle cx=${lx(ai)} cy=${ly(pt)} r="5" fill=${token.colorPrimary}/>
+    <text x=${lx(ai)+8} y=${ly(pt)+4} fontSize="11" fill=${token.colorTextSecondary}>目前</text>
+    <text x=${(w+L)/2} y=${h-4} textAnchor="middle" fontSize="11" fill=${token.colorTextSecondary}>算術強度（FLOP/byte，對數）</text>
+    <text transform=${`translate(12,${(T+h-B)/2}) rotate(-90)`} textAnchor="middle" fontSize="11" fill=${token.colorTextSecondary}>每張卡可達算力（TFLOPS，對數）</text>
+  </svg><${Text} type="secondary" style=${{fontSize:11}}>點在斜線下方＝受頻寬限制；在水平線下方＝受算力限制。<//></div>`;}
+
+function MemBar({mem}){const {token}=theme.useToken();const [ref,W]=useWidth();const w=Math.max(200,W);
+  const sc=v=>v/mem.usable*w;const cells=Math.min(mem.users,60);const cw=sc(mem.kv)/Math.max(1,cells);
+  return html`<div ref=${ref}><svg className="chart" width=${w} height="16" style=${{display:'block'}}>
+    <rect x="0" y="0" width=${w} height="16" rx="4" fill=${token.colorFillSecondary}/>
+    <rect x="0" y="0" width=${sc(mem.W)} height="16" rx="4" fill=${token.purple||'#722ed1'}/>
+    ${Array.from({length:cells},(_,i)=>html`<rect key=${i} className="grow-in" x=${sc(mem.W)+i*cw+0.5} y="1" width=${Math.max(0.5,cw-1)} height="14" fill=${mem.W+mem.kv>mem.usable?token.colorError:token.colorPrimary}/>`)}
+  </svg>
+  <${Text} type="secondary" style=${{fontSize:11}}>紫：模型 ${fmt(mem.W)} GB；藍：每人上下文 ${fmt(mem.kvU,1)} GB × ${fmt(mem.users)} 人；灰：剩餘<//></div>`;}
+
+// ================= 平台列表 =================
+// 建議值改變時數字從舊值滾動到新值；使用者自己輸入時不滾動
+function CountCtl({p,auto,c,sug,onAuto,onSet}){
+  const tw=useTween(c);const shown=auto?Math.round(tw):c;
+  return html`<${Space.Compact} size="small" onClick=${e=>e.stopPropagation()}>
+    <${Button} type=${auto?'primary':'default'} onClick=${onAuto}>建議<//>
+    <${InputNumber} min=${1} max=${100000} value=${shown} style=${{width:118}} addonAfter=${unitOf(p)} onChange=${v=>v&&onSet(Math.round(v))}/>
+  <//>`;}
+
+function RowExtra({p,ctx,st,sug,onAuto,onSet,onEdit,onDelete,inCmp,onCmp}){
+  const {token}=theme.useToken();
+  const auto=st.auto;const c=auto?(sug.ok?sug.c:1):st.c;
+  const r=perf(p,ctx.m,ctx.q,ctx.w,ctx.spd,c,ctx.u);
+  const capMax=r.s?r.max:0;
+  return html`<div onClick=${e=>e.stopPropagation()} style=${{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'6px 14px',width:'100%'}}>
+    <div style=${{flex:'1 1 120px',minWidth:0}}>${r.s&&html`<${Isotype} exp=${c} cons=${auto&&sug.ok?Math.ceil(c*1.25):null} p=${p}/>`}</div>
+    <${CountCtl} p=${p} auto=${auto} c=${c} sug=${sug} onAuto=${onAuto} onSet=${onSet}/>
+    <div style=${{flex:'0 1 170px',minWidth:140}}>
+      ${r.s&&html`<${Tip} content="目前人數 / 這些機器在你要求的速度下最多能同時服務的人數">
+        <div><${Progress} status="normal" percent=${capMax?Math.min(100,ctx.u/capMax*100):100} showInfo=${false} size="small" strokeColor=${ctx.u>capMax?token.colorError:undefined} style=${{margin:0}}/>
+        <${Text} type="secondary" style=${{fontSize:12}}>同時 <${TNum} v=${ctx.u}/> / <${TNum} v=${capMax}/> 人<//></div><//>`}
+    </div>
+    <${Tooltip} title="不用展開，勾選後直接畫進下方的比較圖"><${Checkbox} checked=${inCmp} onChange=${onCmp} style=${{whiteSpace:'nowrap'}}>比較<//><//>
+    ${p.custom&&html`<${Space} size=${4}><${Button} size="small" type="text" icon=${html`<${EditOutlined}/>`} onClick=${onEdit}/><${Button} size="small" type="text" danger icon=${html`<${DeleteOutlined}/>`} onClick=${onDelete}/><//>`}
+    <div className=${'reveal'+(!auto?' on':'')} style=${{flexBasis:'100%'}}><div>
+      ${!auto&&r.s&&html`<${Text} style=${{fontSize:13}}>
+        ${r.ok?html`<${CheckCircleOutlined} style=${{color:token.colorSuccess}}/>`:html`<${CloseCircleOutlined} style=${{color:token.colorError}}/>`}
+        ${' '}每人 <b><${TNum} v=${r.tps}/></b> 字/秒・首字 <b><${TNum} v=${r.ttft} d=${1}/></b> 秒
+        ${!r.ok&&html`<${Text} type="danger">（${WHY[r.why]}）<//>`}
+        ${sug.ok&&html`<${Text} type="secondary" style=${{fontSize:12}}>　建議 ${fmt(sug.c)} ${unitOf(p)}：${fmt(sug.r.tps)} 字/秒<//>`}<//>`}
+    </div></div>
+  </div>`;}
+
+function PlatformList({ctx,rows,setRows,platforms,openKey,setOpenKey,bestKey,inCmp,onCmp,onApply,onVerify,onAddHw,onEditHw,onDeleteHw}){
+  const {token}=theme.useToken();const wrap=useRef(null);const [mk,setMk]=useState({top:0,height:0,on:false});
+  const items=[];let divider=false;
+  platforms.forEach(p=>{
+    const sug=suggest(p,ctx.m,ctx.q,ctx.w,ctx.spd,ctx.u);
+    const st=rows[p.k]||{auto:true};
+    const c=st.auto?(sug.ok?sug.c:1):st.c;
+    const feasibleShape=sug.ok||(!st.auto&&perf(p,ctx.m,ctx.q,ctx.w,ctx.spd,c,ctx.u).s);
+    if(p.g!='nchc'&&!divider){divider=true;items.push({key:'div',showArrow:false,collapsible:'disabled',label:html`<${Divider} plain orientation="left" style=${{margin:0,fontSize:12}}>自建<//>`,className:'div-item'});}
+    const name=html`<div><div style=${{fontWeight:700}}>${p.nm} ${p.custom&&html`<${Tag} color="geekblue" style=${{marginLeft:4}}>自訂<//>`}</div><${Text} type="secondary" style=${{fontSize:12}}>${p.sub}<//></div>`;
+    if(!feasibleShape){
+      items.push({key:p.k,className:'pk-'+p.k,showArrow:false,collapsible:'icon',label:name,
+        extra:html`<div onClick=${e=>e.stopPropagation()} className="fade-in" style=${{display:'flex',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:8,width:'100%'}}>
+          <${Tip} content=${sug.detail}><${Tag} color="error" icon=${html`<${CloseCircleOutlined}/>`}>${WHY[sug.why]}<//><//>
+          <${Tooltip} title="勾選後在比較裡標出它為什麼不行"><${Checkbox} checked=${inCmp(p)} onChange=${()=>onCmp(p)}>比較<//><//></div>`});
+      return;}
+    items.push({key:p.k,className:'pk-'+p.k,collapsible:'header',label:name,
+      extra:html`<${RowExtra} p=${p} ctx=${ctx} st=${st} sug=${sug}
+        onAuto=${()=>setRows(Object.assign({},rows,{[p.k]:{auto:true}}))}
+        onSet=${v=>setRows(Object.assign({},rows,{[p.k]:{auto:false,c:v}}))}
+        onEdit=${()=>onEditHw(p)} onDelete=${()=>onDeleteHw(p)} inCmp=${inCmp(p)} onCmp=${()=>onCmp(p)}/>`,
+      children:html`<${Workbench} p=${p} ctx=${ctx} c=${c} auto=${st.auto} sug=${sug}
+        setCount=${v=>setRows(Object.assign({},rows,{[p.k]:{auto:false,c:v}}))} onApply=${a=>onApply(a,p)} onVerify=${onVerify}/>`});
+  });
+  useLayoutEffect(()=>{const el=wrap.current&&bestKey&&wrap.current.querySelector('.pk-'+bestKey+' > .ant-collapse-header');
+    const upd=()=>{const n=el?(()=>{const a=wrap.current.getBoundingClientRect(),b=el.getBoundingClientRect();return {top:Math.round(b.top-a.top),height:Math.round(b.height),on:true};})():{top:0,height:0,on:false};
+      setMk(x=>x.top==n.top&&x.height==n.height&&x.on==n.on?x:n);};
+    upd();const ro=new ResizeObserver(upd);ro.observe(wrap.current);return ()=>ro.disconnect();});
+  return html`<div ref=${wrap} style=${{position:'relative'}}>
+    <div className="best-marker" style=${{top:mk.top,height:mk.height,opacity:mk.on?1:0,borderColor:token.colorPrimary,background:token.colorFillTertiary}}></div>
+    <${Collapse} className="rows" accordion ghost activeKey=${openKey} onChange=${k=>setOpenKey(Array.isArray(k)?k[0]:k)} items=${items}/>
+    <${Button} type="dashed" block icon=${html`<${PlusOutlined}/>`} style=${{marginTop:8}} onClick=${onAddHw}>找不到你的硬體？新增硬體<//>
+  </div>`;}
+
+// ================= 方案比較（v9）=================
+// 每條線 = 一個方案。所有方案回答同一題（句子裡的人數與速度要求）；線上沒指定的欄位跟著句子與該列目前數量走。
+// 類別色：資料視覺化規範已驗證的前 5 色（相鄰配對色盲可辨），加上字母 A–E 直接標在線上，不只靠顏色。
+const SERIES={light:['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4'],dark:['#3987e5','#d95926','#199e70','#c98500','#d55181']};
+const DarkCtx=React.createContext(false);
+const ThemeCtx=React.createContext({mode:'system',setMode:()=>{}});
+const GITHUB='https://github.com/NCHC-bio/inference-calculator';
+const ISERVICE='https://iservice.nchc.org.tw/nchc_service/index.php';
+const MODES={system:['跟隨系統',DesktopOutlined],light:['淺色',SunOutlined],dark:['深色',MoonOutlined]};
+function ThemeButton(){const {mode,setMode}=React.useContext(ThemeCtx);const Ic=MODES[mode][1];const [menu,setMenu]=useState(false);const [tip,setTip]=useState(false);
+  return html`<${Dropdown} trigger=${['click']} placement="bottomRight" open=${menu} onOpenChange=${o=>{setMenu(o);if(o)setTip(false);}} menu=${{selectable:true,selectedKeys:[mode],onClick:({key})=>setMode(key),
+      items:Object.entries(MODES).map(([k,[l,I]])=>({key:k,label:l,icon:html`<${I}/>`}))}}>
+    <${Tooltip} title=${'外觀：'+MODES[mode][0]} open=${tip&&!menu} onOpenChange=${setTip}><${Button} type="text" size="small" aria-label=${'外觀：'+MODES[mode][0]} icon=${html`<${Ic}/>`}/><//>
+  <//>`;}
+const LINES_MAX=5,LETTERS='ABCDE';
+const CTX_LEN={8000:'8k',32000:'32k',128000:'128k'};
+const fmtP=m=>m.act?`${fmt(m.P)}B（每字只用 ${fmt(m.act,1)}B）`:`${fmt(m.P)}B`;
+const ctxTxt=n=>CTX_LEN[n]||fmt(n);
+
+function resolveLine(L,env){
+  const {platforms,models,ctx,rowCount}=env;
+  const p=platforms.find(x=>x.k==L.pk);if(!p)return null;
+  const m=(L.mid&&models.find(x=>x.id==L.mid))||ctx.m;
+  const q=L.q||ctx.q;
+  const baseW=L.wk?WL[L.wk]:ctx.w;
+  const w=L.inT?Object.assign({},baseW,{inT:L.inT}):baseW;
+  const c=L.c||rowCount(p);
+  const r=perf(p,m,q,w,ctx.spd,c,ctx.u);
+  return {L,p,m,q,w,c,r,st:!r.s?'nofit':r.ok?'ok':'fail',est:!!(p.est||p.custom||m.custom)};
+}
+
+function StatusChip({x}){const {token}=theme.useToken();
+  if(x.st=='ok')return html`<${Tag} color="success" icon=${html`<${CheckCircleOutlined}/>`} style=${{marginInlineEnd:0}}>達標<//>`;
+  if(x.st=='nofit')return html`<${Tip} content=${x.r.detail||'記憶體放不下這個模型'}><${Tag} color="default" icon=${html`<${CloseCircleOutlined}/>`} style=${{marginInlineEnd:0}}>放不下<//><//>`;
+  return html`<${Tip} content=${x.r.max>0?`在你的人數下${WHY[x.r.why]}；人數降到 ${fmt(x.r.max)} 以下才達標`:`就算只有 1 人也${WHY[x.r.why]}`}><${Tag} color="error" icon=${html`<${CloseCircleOutlined}/>`} style=${{marginInlineEnd:0}}>不達標：${WHY[x.r.why]}<//><//>`;}
+
+// 方案名稱：第一行機台與數量，第二行模型、精度、用途；和句子不同（被這條線換掉）的欄位加粗
+function LineName({x,color,letter}){
+  const L=x.L,B=(on,t)=>on?html`<b>${t}</b>`:t;
+  return html`<${Flex} gap=${8} align="start" style=${{minWidth:0}}>
+    <span style=${{flex:'0 0 auto',display:'inline-flex',alignItems:'center',gap:4,marginTop:2}}>
+      <svg width="22" height="10" aria-hidden="true"><line x1="1" y1="5" x2="21" y2="5" stroke=${color} strokeWidth="3" strokeLinecap="round" strokeDasharray=${x.est?'5 3':null}/></svg>
+      <b>${letter}</b></span>
+    <div style=${{minWidth:0}}>
+      <div>${x.p.nm} ${x.p.sub} × ${B(!!L.c,`${fmt(x.c)} ${unitOf(x.p)}`)} ${x.est&&html`<${Tag} color="orange" style=${{borderStyle:'dashed',marginInlineStart:4}}>推估<//>`}</div>
+      <${Text} type="secondary" style=${{fontSize:12}}>${B(!!L.mid,x.m.nm)}・${B(!!L.q,QUANT[x.q].nm)}${(L.wk||L.inT)?html`・${B(!!L.wk,x.w.nm)}${L.inT?html`・<b>讀入 ${ctxTxt(x.w.inT)}</b>`:''}`:''}<//>
+    </div><//>`;}
+
+// 「換一項比較」：複製這條線、只改一項，卡數固定（同機台同卡數比模型／精度／用途）
+function variantMenu(x,env){
+  const {models,platforms,rowCount}=env;const unit=unitOf(x.p);
+  const step=x.p.unit=='gpu'?x.p.gpn:1;
+  const counts=[...new Set([Math.max(1,Math.floor(x.c/2)),x.c+step,x.c*2])].filter(v=>v!=x.c);
+  return [
+    {key:'m',label:'換模型',children:models.filter(m=>m.id!=x.m.id).map(m=>({key:'m:'+m.id,label:`${m.nm}（${fmtP(m)}）`}))},
+    {key:'q',label:'換精度',children:[...Object.entries(QUANT).filter(([k])=>k!=x.q).map(([k,v])=>({key:'q:'+k,label:`${v.nm}：${v.d}`})),{type:'divider'},{key:'q:*',label:'其他精度各加一條'}]},
+    {key:'w',label:'換用途',children:Object.entries(WL).filter(([k,v])=>v.nm!=x.w.nm).map(([k,v])=>({key:'w:'+k,label:v.nm}))},
+    {key:'i',label:'換每次讀入長度',children:Object.keys(CTX_LEN).map(Number).filter(v=>v!=x.w.inT).map(v=>({key:'i:'+v,label:`${ctxTxt(v)} token`}))},
+    {key:'c',label:'換數量',children:counts.map(v=>({key:'c:'+v,label:`${fmt(v)} ${unit}${v<x.c?'（預算減半）':''}`}))},
+    {key:'p',label:'換機台',children:platforms.filter(p=>p.k!=x.p.k).map(p=>({key:'p:'+p.k,label:`${p.nm} ${p.sub}（${fmt(rowCount(p))} ${unitOf(p)}）`}))},
+  ];}
+
+// 多線圖：共用 hover 十字線（滑鼠移動或觸控點擊）；路徑點數固定，換條件時以 CSS 過渡
+function MultiChart({series,x0,x1,log,xLabel,yLabel,band,refX,hx,setHx,tipFmt,yMin0=true}){
+  const {token}=theme.useToken();const [ref,W]=useWidth();
+  const w=Math.max(220,W),h=210,L=46,R=24,T=16,B=40;
+  const tf=log?Math.log10:(v=>v);
+  const X=v=>L+(tf(v)-tf(x0))/((tf(x1)-tf(x0))||1)*(w-L-R);
+  const inv=px=>{const t=Math.max(0,Math.min(1,(px-L)/(w-L-R)));const v=tf(x0)+t*(tf(x1)-tf(x0));return log?Math.pow(10,v):v;};
+  const ys=series.flatMap(s=>s.pts.map(p=>p.y)).concat(band?[band.y*1.3]:[]);
+  const yStep=niceStep(Math.max(1,...ys)*1.08,4),ymax=Math.ceil(Math.max(1,...ys)*1.08/yStep)*yStep;
+  const Y=v=>T+(1-Math.min(v,ymax)/ymax)*(h-T-B);
+  const yTicks=Array.from({length:Math.round(ymax/yStep)+1},(_,i)=>i*yStep);
+  let xTicks=[];
+  if(log){for(let k=0;Math.pow(10,k)<=x1;k++)for(const a of (w<380?[1]:[1,2,5])){const v=a*Math.pow(10,k);if(v>=x0&&v<=x1)xTicks.push(v);}}
+  else{const st=niceStep(x1-x0,w<380?4:6);for(let v=Math.ceil(x0/st)*st;v<=x1+1e-9;v+=st)xTicks.push(v);}
+  const path=pts=>pts.map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+','+Y(p.y).toFixed(1)).join(' ');
+  const move=e=>{const r=e.currentTarget.getBoundingClientRect();setHx(inv(e.clientX-r.left));};
+  // 「最多 N」文字彼此太近時只留圓點（數字在表格裡都有），避免重疊
+  const capOk=new Set();let lastX=-1e9;
+  [...series].filter(s=>s.cap).sort((a,b)=>a.cap.x-b.cap.x).forEach(s=>{const px=X(s.cap.x);if(px-lastX>=64&&px<=w-R-20){capOk.add(s.key);lastX=px;}});
+  // 線尾字母：依高度排序後至少相隔 12px，不互相壓住
+  const endY={};let prevY=-1e9;
+  [...series].filter(s=>s.end).sort((a,b)=>Y(a.end.y)-Y(b.end.y)).forEach(s=>{const y=Math.max(Y(s.end.y)+4,prevY+12);endY[s.key]=y;prevY=y;});
+  const hv=hx!=null&&hx>=x0&&hx<=x1?hx:null;
+  const rows=hv!=null?series.map(s=>({s,v:s.at(hv)})):[];
+  const tipLeft=hv!=null?Math.min(Math.max(0,X(hv)+10),Math.max(0,w-170)):0;
+  return html`<div ref=${ref} style=${{width:'100%',position:'relative'}}>
+    <svg className="chart" width=${w} height=${h} style=${{display:'block',touchAction:'pan-y'}} onPointerMove=${move} onPointerDown=${move} onPointerLeave=${e=>{if(e.pointerType=='mouse')setHx(null);}}>
+      ${band&&html`<rect x=${L} y=${band.dir=='above'?Y(ymax):Y(band.y)} width=${w-L-R} height=${Math.max(0,band.dir=='above'?Y(band.y)-Y(ymax):Y(0)-Y(band.y))} fill=${token.colorSuccessBg} opacity="0.7"/>`}
+      ${yTicks.map(v=>html`<g key=${'y'+v}><line x1=${L} y1=${Y(v)} x2=${w-R} y2=${Y(v)} stroke=${token.colorBorderSecondary}/>
+        <text x=${L-6} y=${Y(v)+4} textAnchor="end" fontSize="11" fill=${token.colorTextTertiary}>${fmt(v)}</text></g>`)}
+      ${xTicks.map(v=>html`<g key=${'x'+v}><line x1=${X(v)} y1=${h-B} x2=${X(v)} y2=${h-B+4} stroke=${token.colorBorder}/>
+        <text x=${X(v)} y=${h-B+16} textAnchor="middle" fontSize="11" fill=${token.colorTextTertiary}>${fmt(v)}</text></g>`)}
+      <line x1=${L} y1=${T} x2=${L} y2=${h-B} stroke=${token.colorBorder}/>
+      <line x1=${L} y1=${h-B} x2=${w-R} y2=${h-B} stroke=${token.colorBorder}/>
+      ${band&&html`<line x1=${L} y1=${Y(band.y)} x2=${w-R} y2=${Y(band.y)} stroke=${token.colorSuccess} strokeDasharray="4 3"/>`}
+      ${refX&&refX.x>=x0&&refX.x<=x1&&html`<g className="ref-x" style=${{transform:`translateX(${X(refX.x)}px)`}}><line x1="0" y1=${T} x2="0" y2=${h-B} stroke=${token.colorText} strokeDasharray="2 3"/>
+        <text x=${X(refX.x)>w-90?-4:4} y=${T-4} textAnchor=${X(refX.x)>w-90?'end':'start'} fontSize="11" fontWeight="700" fill=${token.colorText}>${refX.label}</text></g>`}
+      ${series.map(s=>html`<g key=${s.key} className="fade-in">
+        <path d=${path(s.pts)} fill="none" stroke=${s.color} strokeWidth="2" strokeLinejoin="round" strokeDasharray=${s.dash?'6 4':null}/>
+        ${s.end&&html`<text x=${X(s.end.x)+5} y=${endY[s.key]} fontSize="11" fontWeight="700" fill=${token.colorText}>${s.letter}</text>`}
+        ${s.cap&&html`<g><circle cx=${X(s.cap.x)} cy=${Y(s.cap.y)} r="4" fill=${token.colorBgContainer} stroke=${s.color} strokeWidth="2"/>
+          ${capOk.has(s.key)&&html`<text x=${X(s.cap.x)} y=${Y(s.cap.y)+16} textAnchor="middle" fontSize="10.5" fill=${token.colorTextSecondary}>${s.cap.label}</text>`}</g>`}
+        ${s.dot&&html`<circle cx=${X(s.dot.x)} cy=${Y(s.dot.y)} r="5" fill=${s.color} stroke=${token.colorBgContainer} strokeWidth="2"/>`}
+      </g>`)}
+      ${hv!=null&&html`<line x1=${X(hv)} y1=${T} x2=${X(hv)} y2=${h-B} stroke=${token.colorTextTertiary}/>`}
+      ${rows.filter(r=>r.v!=null).map(r=>html`<circle key=${'h'+r.s.key} cx=${X(hv)} cy=${Y(r.v)} r="4" fill=${r.s.color} stroke=${token.colorBgContainer} strokeWidth="2"/>`)}
+      <text x=${(w+L)/2} y=${h-4} textAnchor="middle" fontSize="11" fill=${token.colorTextSecondary}>${xLabel}</text>
+      <text transform=${`translate(12,${(T+h-B)/2}) rotate(-90)`} textAnchor="middle" fontSize="11" fill=${token.colorTextSecondary}>${yLabel}</text>
+    </svg>
+    <div className="cmp-tip" style=${{left:tipLeft,opacity:hv!=null?1:0,background:token.colorBgElevated,boxShadow:token.boxShadowSecondary,color:token.colorText}}>
+      ${hv!=null&&html`<div><div style=${{color:token.colorTextSecondary}}>${tipFmt.x(hv)}</div>
+        ${rows.map(r=>html`<div key=${r.s.key}><span style=${{display:'inline-block',width:8,height:8,borderRadius:2,background:r.s.color,marginRight:6}}></span><b>${r.s.letter}</b> ${r.v==null?html`<span style=${{color:token.colorTextTertiary}}>${r.s.gone||'—'}</span>`:tipFmt.y(r.v)}</div>`)}</div>`}
+    </div>
+  </div>`;}
+
+function CompareCard({lines,env,onRemove,onVariant,onClear}){
+  const {token}=theme.useToken();const dark=React.useContext(DarkCtx);const pal=SERIES[dark?'dark':'light'];
+  const [ref,W]=useWidth();const narrow=W>0&&W<640;
+  const [hx,setHx]=useState(null);const [hc,setHc]=useState(null);
+  const shown=useRef(lines);if(lines.length)shown.current=lines;
+  const xs=shown.current.map(L=>resolveLine(L,env)).filter(Boolean);
+  const {u,spd}=env.ctx;
+  const color=x=>pal[x.L.slot],letter=x=>LETTERS[x.L.slot];
+  const live=xs.filter(x=>x.r.s);
+  // 人數軸：對數刻度，涵蓋你的人數與各方案上限，少人數（3–8 人）也看得清楚
+  const uMax=Math.max(10,u*3,...live.map(x=>Math.min(x.r.memMax,x.r.max*1.6||0)));
+  const ev=(x,n)=>{const k=Math.max(1,Math.round(n));return k>x.r.memMax?null:evalShape(x.p,x.m,x.q,x.w,x.r.s,k,spd);};
+  const userSeries=key=>live.map(x=>{const end=Math.min(uMax,x.r.memMax);if(end<1)return null;
+    const pts=Array.from({length:40},(_,i)=>{const n=Math.pow(10,Math.log10(end)*i/39);const e=ev(x,n);return {x:n,y:e?e[key]:0};});
+    const atU=u<=end?ev(x,u):null;
+    const capN=x.r.max>0&&x.r.max<=uMax?x.r.max:null;const capE=capN&&ev(x,capN);
+    return {key:x.L.id,idx:x.L.slot,color:color(x),letter:letter(x),dash:x.est,pts,end:pts[pts.length-1],
+      dot:atU?{x:u,y:atU[key]}:null,
+      cap:key=='tps'&&capE?{x:capN,y:capE.tps,label:`最多 ${fmt(capN)}`}:null,
+      at:n=>{const e=n<=end?ev(x,n):null;return e?e[key]:null;},gone:'記憶體已滿'};}).filter(Boolean);
+  const sTps=userSeries('tps'),sTtft=userSeries('ttft');
+  // 卡數圖：只在方案用了不同硬體量時出現；以台計的機器單位不同，不放進來
+  const gpu=live.filter(x=>x.p.unit=='gpu');
+  const showHw=new Set(gpu.map(x=>x.p.k+':'+x.c)).size>=2;
+  const machines=live.filter(x=>x.p.unit!='gpu');
+  const cMax=Math.max(8,...gpu.map(x=>x.c*2));
+  const hwSeries=gpu.map(x=>{const at=c=>{const r=perf(x.p,x.m,x.q,x.w,spd,Math.round(c),u);return r.s&&u<=r.memMax?r.tps:null;};
+    let c0=1;while(c0<cMax&&at(c0)==null)c0++;
+    const pts=Array.from({length:30},(_,i)=>{const c=c0+(cMax-c0)*i/29;return {x:c,y:at(c)||0};});
+    return {key:x.L.id,idx:x.L.slot,color:color(x),letter:letter(x),dash:x.est,pts,end:pts[pts.length-1],dot:at(x.c)!=null?{x:x.c,y:at(x.c)}:null,at:c=>c<c0?null:at(c),gone:`少於 ${fmt(c0)} 張放不下`};});
+  const nTtft=xs.filter(x=>x.r.why=='ttft').length,nSpd=xs.filter(x=>x.r.why=='bw').length;
+  const hot=k=>html`<${Tag} color="error" className="fade-in" style=${{marginInlineStart:6,fontWeight:400}}>${k=='ttft'?nTtft:nSpd} 個方案卡在這<//>`;
+  const H=({children})=>html`<div className="wb-h">${children}</div>`;
+  const sub=t=>html`<${Text} type="secondary" style=${{fontSize:12,fontWeight:400}}>${t}<//>`;
+  const variantBtn=x=>html`<${Dropdown} trigger=${['click']} disabled=${lines.length>=LINES_MAX} menu=${{items:variantMenu(x,env),onClick:({key})=>onVariant(x,key)}}>
+    <${Button} size="small" icon=${html`<${SwapOutlined}/>`}>換一項比較 <${DownOutlined}/><//><//>`;
+  const actions=x=>html`<${Space} size=${4}>
+    ${lines.length>=LINES_MAX?html`<${Tooltip} title=${`最多 ${LINES_MAX} 條線，先刪掉一條`}>${variantBtn(x)}<//>`:variantBtn(x)}
+    <${Button} size="small" type="text" aria-label="移除" icon=${html`<${DeleteOutlined}/>`} onClick=${()=>onRemove(x.L.id)}/><//>`;
+  const num=(x,f)=>x.st=='nofit'?html`<${Text} type="secondary">—<//>`:f();
+  const nw={whiteSpace:'nowrap'};
+  const metrics=[
+    {k:'tps',t:'每人速度',f:x=>html`<span style=${nw}><${TNum} v=${x.r.tps}/> 字/秒</span>`},
+    {k:'ttft',t:'首字',f:x=>html`<span style=${nw}><${TNum} v=${x.r.ttft} d=${1}/> 秒</span>`},
+    {k:'max',t:'最多人數',f:x=>x.st=='fail'&&x.r.max==0?html`<${Text} type="danger" style=${nw}>達不到<//>`:html`<span style=${nw}><${TNum} v=${x.r.max}/> 人</span>`},
+  ];
+  const kw=x=>x.p.tdp?html`<span style=${nw}><${TNum} v=${x.c*x.p.tdp/1000} d=${1}/> kW</span>`:html`<${Tip} content="廠商未公布功耗，無法估算"><${Text} type="secondary" style=${nw}>未查證<//><//>`;
+  const columns=[
+    {title:'方案',key:'n',render:(_,x)=>html`<${LineName} x=${x} color=${color(x)} letter=${letter(x)}/>`},
+    {title:'結論',key:'s',render:(_,x)=>html`<${StatusChip} x=${x}/>`},
+    ...metrics.map(m=>({title:html`<span style=${nw}>${m.t}</span>`,key:m.k,align:'right',render:(_,x)=>num(x,()=>m.f(x))})),
+    {title:html`<span style=${nw}>模型大小</span>`,key:'P',render:(_,x)=>html`<${Tip} content="參數越多通常能力越強；MoE 模型每個字只用一部分參數，所以較快"><span style=${nw}>${fmtP(x.m)}</span><//>`},
+    {title:'功耗',key:'kw',align:'right',render:(_,x)=>kw(x)},
+    {title:'',key:'a',render:(_,x)=>actions(x)},
+  ];
+  const cards=html`<div>${xs.map(x=>html`<div key=${x.L.id} className="fade-in cmp-line" style=${{borderLeft:`4px solid ${color(x)}`,padding:'8px 10px',marginBottom:8,background:token.colorFillQuaternary,borderRadius:6}}>
+    <${LineName} x=${x} color=${color(x)} letter=${letter(x)}/>
+    <div style=${{margin:'6px 0'}}><${StatusChip} x=${x}/></div>
+    <${Flex} gap=${14} wrap="wrap" style=${{fontSize:13}}>
+      ${metrics.map(m=>html`<span key=${m.k}><${Text} type="secondary" style=${{fontSize:12}}>${m.t} <//><b>${num(x,()=>m.f(x))}</b></span>`)}
+      <span><${Text} type="secondary" style=${{fontSize:12}}>模型 <//>${fmtP(x.m)}</span>
+      <span><${Text} type="secondary" style=${{fontSize:12}}>kW <//>${kw(x)}</span><//>
+    <div style=${{marginTop:6}}>${actions(x)}</div></div>`)}</div>`;
+  const tipU={x:n=>`同時 ${fmt(n)} 人`};
+  return html`<div className=${'reveal'+(lines.length?' on':'')} inert=${!lines.length}><div>
+    <${Card} size="small" style=${{marginTop:12}} title=${html`<span><${LineChartOutlined}/> 方案比較<//>`} extra=${html`<a onClick=${onClear}>清除<//>`}>
+      <div ref=${ref}>
+      <${Text} type="secondary" style=${{fontSize:12,display:'block',marginBottom:8}}>
+        所有方案回答同一題：同時 <b>${fmt(u)}</b> 人、每人至少 ${fmt(spd.tps)} 字/秒、首字 ${fmt(spd.ttft)} 秒內。加粗的欄位是這條線換掉的，其餘跟上方句子一致。虛線＝用到推估值。<//>
+      ${narrow?cards:html`<${Table} size="small" pagination=${false} scroll=${{x:'max-content'}} rowKey=${x=>x.L.id} dataSource=${xs} columns=${columns}/>`}
+      <${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:6}}>想加方案：在平台列勾「比較」，或按「換一項比較」複製一條線、只改一項（數量不變）。<//>
+      <div className="cmp-charts">
+        <div style=${{minWidth:0}}>
+          <${H}>人數 → 每人速度 ${sub(`綠色區＝達標（${fmt(spd.tps)} 字/秒以上）`)}${nSpd>0&&nSpd>=nTtft?hot('spd'):null}<//>
+          <${MultiChart} series=${sTps} x0=${1} x1=${uMax} log=${true} hx=${hx} setHx=${setHx}
+            xLabel="同時在線人數（對數刻度）" yLabel="每人速度（字/秒）" refX=${{x:u,label:`你的 ${fmt(u)} 人`}}
+            band=${{y:spd.tps,dir:'above',label:`目標 ${fmt(spd.tps)} 字/秒以上`}} tipFmt=${{x:tipU.x,y:v=>`${fmt(v)} 字/秒`}}/>
+        </div>
+        <div style=${{minWidth:0}}>
+          <${H}>人數 → 首字等待 ${sub(`綠色區＝達標（${fmt(spd.ttft)} 秒內）`)}${nTtft>0&&nTtft>nSpd?hot('ttft'):null}<//>
+          <${MultiChart} series=${sTtft} x0=${1} x1=${uMax} log=${true} hx=${hx} setHx=${setHx}
+            xLabel="同時在線人數（對數刻度）" yLabel="首字等待（秒）" refX=${{x:u,label:`你的 ${fmt(u)} 人`}}
+            band=${{y:spd.ttft,dir:'below',label:`目標 ${fmt(spd.ttft)} 秒內`}} tipFmt=${{x:tipU.x,y:v=>`${fmt(v,1)} 秒`}}/>
+        </div>
+      </div>
+      <div className=${'reveal'+(showHw?' on':'')} inert=${!showHw}><div>
+        <div style=${{marginTop:14}}>
+          <${H}>GPU 張數 → 每人速度 ${sub(`在你的 ${fmt(u)} 人下・圓點＝目前張數・線變平＝再加卡也不會更快`)}<//>
+          ${showHw&&html`<${MultiChart} series=${hwSeries} x0=${1} x1=${cMax} log=${false} hx=${hc} setHx=${setHc}
+            xLabel="GPU 張數（張）" yLabel="每人速度（字/秒）" band=${{y:spd.tps,dir:'above',label:`目標 ${fmt(spd.tps)} 字/秒以上`}}
+            tipFmt=${{x:c=>`${fmt(Math.round(c))} 張`,y:v=>`${fmt(v)} 字/秒`}}/>`}
+          ${machines.length>0&&html`<${Text} type="secondary" style=${{fontSize:12}}>${machines.map(letter).join('、')} 以「台」計，和 GPU 張數單位不同，不放進這張圖。<//>`}
+        </div>
+      </div></div>
+      ${xs.filter(x=>x.st=='nofit').length>0&&html`<${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:8}}>
+        <${CloseCircleOutlined}/> ${xs.filter(x=>x.st=='nofit').map(letter).join('、')} 放不下，圖上沒有線。<//>`}
+      </div>
+    <//>
+  </div></div>`;}
+
+// ================= 主程式 =================
+function Calculator(){
+  const {token}=theme.useToken();const {message:msg}=AntApp.useApp();
+  const [lang,setLang]=useState('zh');
+  const [u,setU]=useState(60);const [uFocus,setUFocus]=useState(false);
+  const [wk,setWk]=useState('chat');const [wo,setWo]=useState(null);
+  const [models,setModels]=useState(BASE_MODELS);const [mid,setMid]=useState('llama70');
+  const [q,setQ]=useState('fp8');const [sp,setSp]=useState('smooth');const [spc,setSpc]=useState({tps:30,ttft:2});
+  const [rows,setRows]=useState({});const [openKey,setOpenKey]=useState(null);
+  const [customHw,setCustomHw]=useState([]);
+  const [drawer,setDrawer]=useState(null); // 'basis' | 'acc' | 'funnel' | 'wl' | 'spd' | 'hf' | 'manual' | 'hw'
+  const [basisFilter,setBasisFilter]=useState('est');const [cite,setCite]=useState(false);
+  // 比較線：只存「換掉了什麼」，其餘跟句子與平台列走；slot 決定顏色與字母，刪掉別條也不會變
+  const [lines,setLines]=useState([{id:1,slot:0,pk:'h200n4'},{id:2,slot:1,pk:'h100n5'},{id:3,slot:2,pk:'h200n4',mid:'muse30'}]);
+  const [verify,setVerify]=useState(null);const [estOpen,setEstOpen]=useState(false);const [hwEdit,setHwEdit]=useState(null);const [search,setSearch]=useState('');
+  const [hwForm]=Form.useForm();const [mForm]=Form.useForm();const [fForm]=Form.useForm();
+  const m=models.find(x=>x.id==mid);const w=wo?Object.assign({},WL[wk],wo):WL[wk];
+  const spd=sp=='custom'?spc:SPEED[sp];
+  const platforms=[...BASE_PL,...customHw];
+  const ctx={m,q,w,spd,u,sp,models};
+  // 任何輸入條件改變，手動調整回到建議值
+  const firstRun=useRef(true);
+  useEffect(()=>{if(firstRun.current){firstRun.current=false;return;}setRows({});},[u,wk,wo,mid,q,sp,spc]);
+  const sugs=useMemo(()=>Object.fromEntries(platforms.map(p=>[p.k,suggest(p,m,q,w,spd,u)])),[u,wk,wo,mid,q,sp,spc,customHw,models]);
+  const best=BASE_PL.filter(p=>p.g=='nchc'&&sugs[p.k].ok).sort((a,b)=>sugs[a.k].c-sugs[b.k].c)[0];
+  const adjusted=Object.keys(rows).find(k=>rows[k]&&!rows[k].auto);
+  const adjP=adjusted&&platforms.find(p=>p.k==adjusted);
+  const hasUser=wo||sp=='custom'||m.custom||customHw.length>0;
+
+  const opt=(o,desc)=>({value:o.value,label:o.label,desc});
+  // 選項說明：選單打開時只對目前（游標所在或已選）選項顯示；觸控裝置直接列在每個選項下方
+  const optRender=o=>html`<div><div>${o.data.label}</div>${o.data.desc&&html`<div className="opt-desc"><${Text} type="secondary" style=${{fontSize:12,whiteSpace:'normal'}}>${o.data.desc}<//></div>`}</div>`;
+  const modelDesc=x=>{if(adjP){const c=rows[adjusted].c;const r=perf(adjP,x,q,w,spd,c,u);return r.s?`在你的 ${fmt(c)} ${unitOf(adjP)} ${adjP.nm} 上：每人 ${fmt(r.tps)} 字/秒${r.ok?'':'（未達標）'}`:`你的 ${fmt(c)} ${unitOf(adjP)} ${adjP.nm} 放不下`;}
+    const ok=platforms.filter(p=>suggest(p,x,q,w,spd,u).ok).length;return ok?`可在 ${ok} / ${platforms.length} 種機台執行`:'目前設定下所有機台都跑不動';};
+  const looksRepo=/^[\w.-]+\/[\w.-]+$/.test(search.trim());
+
+  const sentence=html`<div className="sent">
+    <span className="clause">同時最多有 <${Popover} open=${uFocus} placement="bottomLeft" content=${html`<${Button} size="small" type="link" style=${{padding:0}} onMouseDown=${e=>e.preventDefault()} onClick=${()=>{setUFocus(false);setDrawer('funnel');}}>只知道總人數？換算同時人數<//>`}>
+      <${InputNumber} min=${1} max=${10000000} value=${u} style=${{width:110}} onFocus=${()=>setUFocus(true)} onBlur=${()=>setTimeout(()=>setUFocus(false),150)} onChange=${v=>v&&setU(Math.round(v))}/><//> 人會使用，</span>
+    <span className="clause">做 <${Select} value=${wo?'custom':wk} style=${{width:150}} popupMatchSelectWidth=${280} virtual=${false} optionRender=${optRender}
+      options=${[...Object.entries(WL).map(([k,v])=>opt({value:k,label:v.nm},v.d)),opt({value:'custom',label:'自訂…'},'以上都不符合？自己設定讀入與回覆長度')]}
+      onChange=${v=>{if(v=='custom'){setWo(wo||{inT:w.inT,outT:w.outT,hit:w.hit});setDrawer('wl');}else{setWo(null);setWk(v);}}}/> 任務，</span>
+    <span className="clause">模型用 <${Select} showSearch value=${mid} style=${{width:250}} popupMatchSelectWidth=${340} optionFilterProp="label" virtual=${false} optionRender=${optRender}
+      onSearch=${setSearch} onChange=${v=>{setMid(v);setSearch('');}}
+      options=${models.map(x=>opt({value:x.id,label:x.nm},modelDesc(x)))}
+      dropdownRender=${menu=>html`<div><div style=${{padding:'6px 10px',fontSize:12}}><${Text} type="secondary"><${Tag} color="orange">推估（參考用）<//>這類任務建議：${TIER_NOTE[wk]}<//></div>${menu}</div>`}
+      notFoundContent=${html`<div style=${{padding:8}}><div style=${{marginBottom:6}}>找不到這個模型？</div><${Space} wrap>
+        <${Button} size="small" icon=${html`<${CloudDownloadOutlined}/>`} onClick=${()=>setDrawer('hf')}>${looksRepo?`匯入 ${search.trim()}`:'從 Hugging Face 匯入'}<//>
+        <${Button} size="small" icon=${html`<${FormOutlined}/>`} onClick=${()=>setDrawer('manual')}>手動輸入架構<//><//></div>`}/>，</span>
+    <span className="clause">模型精度用 <${Select} value=${q} style=${{width:100}} popupMatchSelectWidth=${240} virtual=${false} optionRender=${optRender} options=${Object.entries(QUANT).map(([k,v])=>opt({value:k,label:v.nm},v.d))} onChange=${setQ}/>，</span>
+    <span className="clause">希望回應速度 <${Select} value=${sp} style=${{width:110}} popupMatchSelectWidth=${280} virtual=${false} optionRender=${optRender}
+      options=${[...Object.entries(SPEED).map(([k,v])=>opt({value:k,label:v.nm},v.d)),opt({value:'custom',label:'自訂…'},'以上都不符合？自己設定速度與等待時間')]}
+      onChange=${v=>{setSp(v);if(v=='custom')setDrawer('spd');}}/></span>
+  </div>`;
+
+  const bestSug=best&&sugs[best.k];
+  const ansNum=useTween(bestSug?bestSug.c:0);
+  const estItems=BASIS.filter(b=>b.st=='estimate'||b.st=='unverified');
+  const answer=html`<${Flex} align="center" gap=${12} wrap="wrap" style=${{borderTop:'1px solid '+token.colorBorderSecondary,paddingTop:14,marginTop:6}}>
+    <div>
+      <div style=${{fontSize:26,fontWeight:800,lineHeight:1.2}}>${best?html`<span style=${{color:token.colorPrimary}}>${best.nm} × ${fmt(ansNum)} 張</span> <${Text} type="secondary" style=${{fontSize:15,fontWeight:500}}>${best.sub}<//>`:html`<span style=${{color:token.colorError}}>國網機台都不可行</span>`}</div>
+      <${Text} type="secondary">${best?`保守 × ${fmt(Math.ceil(bestSug.c*1.25))} 張`:'可嘗試較小的模型、較低精度或放寬速度'}<//>
+    </div>
+    <${Popover} open=${estOpen} onOpenChange=${setEstOpen} trigger=${['hover','click','focus']} title="這個結果用到的推估（前 3 項）" content=${html`<div style=${{width:300}}>
+        ${estItems.slice(0,3).map(b=>html`<div key=${b.t} style=${{fontSize:12,margin:'4px 0',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}><${StatusTag} st=${b.st}/>${b.t}</div>`)}
+        <a onClick=${()=>{setEstOpen(false);setBasisFilter('est');setDrawer('basis');}}>查看全部 ${estItems.length} 項 →</a></div>`}>
+      <${Tag} color="orange" style=${{borderStyle:'dashed',cursor:'pointer'}}>推估<//><//>
+    ${hasUser&&html`<${Tag} color="geekblue" className="fade-in">自訂<//>`}
+    <div style=${{flex:1}}></div>
+    <${Space} size=${4}>
+      <${Button} type="text" icon=${html`<${InfoCircleOutlined}/>`} onClick=${()=>{setBasisFilter('all');setDrawer('basis');}}>依據<//>
+      <${Button} type="text" icon=${html`<${CopyOutlined}/>`} onClick=${()=>setCite(true)}>引用<//>
+      <${Button} type="text" icon=${html`<${ShareAltOutlined}/>`} onClick=${()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href);msg.success('已複製分享連結');}}>分享<//>
+    <//>
+  <//>`;
+
+  const onApply=(a,p)=>{if(a.q)setQ(a.q);if(a.sp)setSp(a.sp);if(a.mid)setMid(a.mid);if(a.u)setU(a.u);
+    if(a.auto)setRows(Object.assign({},rows,{[p.k]:{auto:true}}));msg.info('已套用，數字隨之更新');};
+  const rowCount=p=>{const st=rows[p.k]||{auto:true};const sg=sugs[p.k]||suggest(p,m,q,w,spd,u);return st.auto?(sg.ok?sg.c:1):st.c;};
+  const env={platforms,models,ctx,rowCount};
+  const plain=L=>!L.mid&&!L.q&&!L.wk&&!L.inT&&!L.c;
+  const inCmp=p=>lines.some(L=>L.pk==p.k&&plain(L));
+  const addLines=news=>{const used=new Set(lines.map(L=>L.slot));const free=[0,1,2,3,4].filter(s=>!used.has(s));
+    if(!free.length){msg.warning(`最多比較 ${LINES_MAX} 個方案`);return;}
+    if(news.length>free.length)msg.warning(`最多 ${LINES_MAX} 條線，只加入前 ${free.length} 條`);
+    let id=lines.reduce((a,L)=>Math.max(a,L.id),0);
+    setLines([...lines,...news.slice(0,free.length).map((n,i)=>Object.assign({},n,{id:++id,slot:free[i]}))]);};
+  const onCmp=p=>{if(inCmp(p))setLines(lines.filter(L=>!(L.pk==p.k&&plain(L))));else addLines([{pk:p.k}]);};
+  const onVariant=(x,key)=>{const [f,v]=key.split(':');const base={pk:x.L.pk,mid:x.L.mid,q:x.L.q,wk:x.L.wk,inT:x.L.inT,c:x.c};const mk=o=>Object.assign({},base,o);
+    if(f=='m')addLines([mk({mid:v})]);
+    if(f=='q')addLines(v=='*'?Object.keys(QUANT).filter(k=>k!=x.q).map(k=>mk({q:k})):[mk({q:v})]);
+    if(f=='w')addLines([mk({wk:v,inT:undefined})]);
+    if(f=='i')addLines([mk({inT:+v})]);
+    if(f=='c')addLines([mk({c:+v})]);
+    if(f=='p')addLines([mk({pk:v,c:undefined})]);};
+  const saveHw=v=>{const p={k:hwEdit?hwEdit.k:'hw'+Date.now(),nm:v.nm,sub:`${v.mem} GB × ${v.gpn}／台・${v.engine}`,g:'self',unit:v.gpn>1?'gpu':'machine',gpn:v.gpn,mem:v.mem,bw:v.bw,tf:v.tf,tdp:v.tdp||null,custom:true};
+    setCustomHw(hwEdit?customHw.map(x=>x.k==p.k?p:x):[...customHw,p]);setDrawer(null);setHwEdit(null);msg.success(hwEdit?'已更新硬體':'已加入你的硬體');};
+  const filtered=basisFilter=='est'?estItems:BASIS;
+  const citeText=best?`依國網推論算力計算機估算：以 ${m.nm}（${QUANT[q].nm}）提供「${w.nm||'自訂工作'}」服務，同時最多 ${fmt(u)} 名使用者，在每人每秒至少 ${spd.tps} 字、首字等待不超過 ${spd.ttft} 秒的條件下，建議申請 ${best.nm}（${best.sub}）${fmt(bestSug.c)} 張 GPU，保守估計 ${fmt(Math.ceil(bestSug.c*1.25))} 張。\n\n主要假設與來源：\n`+BASIS.slice(0,6).map((b,i)=>`[${i+1}] ${b.t}（${ST[b.st][0]}；${b.src}）`).join('\n'):'目前設定下國網機台不可行。';
+  const dw=Math.min(520,window.innerWidth);
+
+  return html`<div style=${{maxWidth:980,margin:'0 auto',padding:16}}>
+    <${Flex} component="header" align="center" justify="space-between" gap=${8} style=${{marginBottom:8}}>
+      <${Flex} align="center" gap=${8} style=${{minWidth:0}}>
+        <img src="../../packages/web/public/favicon.svg" alt="" width=${22} height=${22} style=${{flex:'none'}}/>
+        <${Text} strong style=${{fontSize:16,minWidth:0}}>${lang=='zh'?'國網推論算力計算機':'NCHC Inference Calculator'}<//>
+      <//>
+      <${Flex} align="center" gap=${4} style=${{flex:'none'}}>
+        <${Segmented} size="small" value=${lang} onChange=${setLang} options=${[{label:'中文',value:'zh'},{label:'English',value:'en'}]}/>
+        <${ThemeButton}/>
+        <${Tooltip} title="原始碼與問題回報（GitHub）">
+          <${Button} type="text" size="small" aria-label="GitHub" icon=${html`<${GithubOutlined}/>`} href=${GITHUB} target="_blank" rel="noopener"/>
+        <//>
+      <//>
+    <//>
+    <${Card} style=${{marginBottom:12}}>${sentence}${answer}<//>
+    <${Card} styles=${{body:{padding:12}}}>
+      <${PlatformList} ctx=${ctx} rows=${rows} setRows=${setRows} platforms=${platforms} openKey=${openKey} setOpenKey=${setOpenKey} bestKey=${best&&best.k}
+        inCmp=${inCmp} onCmp=${onCmp} onApply=${onApply} onVerify=${v=>{setVerify(v);setDrawer("verify");}} onAddHw=${()=>{setHwEdit(null);hwForm.resetFields();setDrawer('hw');}}
+        onEditHw=${p=>{setHwEdit(p);hwForm.setFieldsValue({nm:p.nm,mem:p.mem,bw:p.bw,tf:p.tf,gpn:p.gpn,engine:'vLLM',tdp:p.tdp});setDrawer('hw');}}
+        onDeleteHw=${p=>{setCustomHw(customHw.filter(x=>x.k!=p.k));msg.info('已移除');}}/>
+    <//>
+    <${CompareCard} lines=${lines} env=${env} onRemove=${id=>setLines(lines.filter(L=>L.id!=id))} onVariant=${onVariant} onClear=${()=>setLines([])}/>
+    <footer>
+    <${Divider} style=${{margin:'20px 0 12px'}}/>
+    <${Flex} align="center" justify="space-between" gap=${12} wrap="wrap">
+      <a className="nchc" href=${ISERVICE} target="_blank" rel="noopener">
+        <img className="nchc-logo" src="../../packages/web/public/nchc-logo.png" alt="NCHC" height=${30}/>
+        <span style=${{display:'flex',flexDirection:'column',lineHeight:1.35}}>
+          <${Text} style=${{fontSize:13}}>國家高速網路與計算中心<//>
+          <${Text} type="secondary" style=${{fontSize:12}}>使用國網算力：iService 服務入口 <${ExportOutlined}/><//>
+        </span>
+      </a>
+      <${Flex} gap=${16} align="center" style=${{fontSize:13}}>
+        <a href=${GITHUB} target="_blank" rel="noopener"><${GithubOutlined}/> GitHub</a>
+        <a href=${GITHUB+'/issues/new/choose'} target="_blank" rel="noopener"><${BugOutlined}/> 回報問題</a>
+      <//>
+    <//>
+    <${Flex} gap=${16} wrap="wrap" style=${{marginTop:10,fontSize:12}}>
+      <${Text} type="secondary">資料版本 2026-10-19（v10 demo：數字為示意，不是計算結果）<//>
+      <a onClick=${()=>setDrawer('acc')}>準確度<//>
+      <${Tip} content="國網計費費率尚未取得，結果只顯示卡數與功耗"><${Text} type="secondary">費用：尚未包含<//><//>
+      <${Tip} content="目前估算的是平均值；尖峰時的 P95／P99 延遲尚未估算"><${Text} type="secondary">尾端延遲（P95）：尚未估算<//><//>
+    <//>
+    </footer>
+
+    <${Modal} title="計算依據" open=${drawer=='basis'} onCancel=${()=>setDrawer(null)} width=${640}
+      footer=${html`<${Flex} gap=${8} wrap="wrap" align="center" justify="flex-end">
+        <${Text} type="secondary" style=${{fontSize:12}}>這個數字看起來不對？<//>
+        <a style=${{fontSize:12}} target="_blank" rel="noopener" href=${GITHUB+'/issues/new?'+new URLSearchParams({title:`數字疑問：${m.nm}${best?' on '+best.nm:''}`,
+          body:`目前的設定（網址）：\n${location.href}\n\n哪個數字看起來不對？您預期的值與根據（實測、論文或文件連結）：\n`})}><${BugOutlined}/> 回報（附上目前的設定）</a>
+      <//>`} styles=${{body:{maxHeight:"70vh",overflowY:"auto"}}}>
+      <${Segmented} block value=${basisFilter} onChange=${setBasisFilter} options=${[{label:`推估與未查證（${estItems.length}）`,value:'est'},{label:`全部（${BASIS.length}）`,value:'all'}]} style=${{marginBottom:12}}/>
+      ${filtered.map((b,i)=>html`<div key=${b.t} className="fade-in" style=${{padding:'8px 0',borderBottom:'1px solid '+token.colorBorderSecondary}}>
+        <div><${StatusTag} st=${b.st}/>${b.t}</div><${Text} type="secondary" style=${{fontSize:12}}>值：${b.v}・出處：${b.src}<//></div>`)}
+    <//>
+    <${Drawer} title="準確度（以公開實測校正）" open=${drawer=='acc'} onClose=${()=>setDrawer(null)} width=${dw}>
+      <${Table} size="small" pagination=${false} rowKey="p" dataSource=${[{p:'H200',d:'±18%',t:'±41%',n:12},{p:'H100',d:'±22%',t:'±38%',n:9},{p:'GB200',d:'無實測',t:'無實測',n:0},{p:'Mac Studio',d:'±25%',t:'+33%',n:3}]}
+        columns=${[{title:'平台',dataIndex:'p'},{title:'每人速度誤差',dataIndex:'d'},{title:'首字誤差',dataIndex:'t'},{title:'比對點',dataIndex:'n'}]}/>
+      <${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:8}}>全部尚待國網實測校正。<//>
+    <//>
+    <${Drawer} title="從總人數換算同時人數" open=${drawer=='funnel'} onClose=${()=>setDrawer(null)} width=${dw}>
+      <${Form} form=${fForm} layout="vertical" initialValues=${{total:20000,daily:5,peak:15}} onValuesChange=${()=>fForm.validateFields().catch(()=>{})}>
+        <${Form.Item} name="total" label="總人數（註冊或全校）"><${InputNumber} min=${1} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="daily" label=${html`<span>每日活躍比例（%）<${Tag} color="orange" style=${{marginLeft:6}}>推估<//></span>`}><${InputNumber} min=${0} max=${100} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="peak" label=${html`<span>尖峰時同時使用比例（%）<${Tag} color="orange" style=${{marginLeft:6}}>推估<//></span>`}><${InputNumber} min=${0} max=${100} style=${{width:'100%'}}/><//>
+        <${Form.Item} shouldUpdate>${()=>{const v=fForm.getFieldsValue();const n=Math.max(1,Math.round((v.total||0)*(v.daily||0)/100*(v.peak||0)/100));
+          return html`<div><div style=${{fontSize:20,fontWeight:700}}>約同時 ${fmt(n)} 人</div><${Button} type="primary" style=${{marginTop:8}} onClick=${()=>{setU(n);setDrawer(null);}}>套用到句子<//></div>`;}}<//>
+      <//><//>
+    <${Drawer} title="自訂工作" open=${drawer=='wl'} onClose=${()=>setDrawer(null)} width=${dw}>
+      <${Space} direction="vertical" style=${{width:'100%'}}>
+        ${[['inT','每次讀入（token）'],['outT','每次回覆（token）']].map(f=>html`<div key=${f[0]}><${Text}>${f[1]}<//><${InputNumber} min=${1} style=${{width:'100%'}} value=${w[f[0]]} onChange=${v=>v&&setWo(Object.assign({},w,{[f[0]]:v}))}/></div>`)}
+        <div><${Text}>可重複利用的比例（快取命中，%）<//><${InputNumber} min=${0} max=${99} style=${{width:'100%'}} value=${Math.round(w.hit*100)} onChange=${v=>v!=null&&setWo(Object.assign({},w,{hit:v/100}))}/></div>
+        <a onClick=${()=>{setWo(null);setDrawer(null);}}>還原為「${WL[wk].nm}」的預設值</a><//><//>
+    <${Drawer} title="自訂速度" open=${drawer=='spd'} onClose=${()=>setDrawer(null)} width=${dw}>
+      <${Space} direction="vertical" style=${{width:'100%'}}>
+        <div><${Text}>每人每秒至少（字）<//><${InputNumber} min=${1} style=${{width:'100%'}} value=${spc.tps} onChange=${v=>v&&setSpc(Object.assign({},spc,{tps:v}))}/></div>
+        <div><${Text}>送出後最多等幾秒開始回覆<//><${InputNumber} min=${0.5} step=${0.5} style=${{width:'100%'}} value=${spc.ttft} onChange=${v=>v&&setSpc(Object.assign({},spc,{ttft:v}))}/></div><//><//>
+    <${Drawer} title="從 Hugging Face 匯入模型" open=${drawer=='hf'} onClose=${()=>setDrawer(null)} width=${dw}
+      extra=${html`<${Button} type="primary" onClick=${()=>{const nm=search.trim()||'org/my-model';const x={id:'hf'+Date.now(),nm,P:24,kv:0.08,tier:2,custom:true};setModels([...models,x]);setMid(x.id);setDrawer(null);setSearch('');msg.success('已匯入（demo）');}}>匯入<//>`}>
+      <${Input} placeholder="例如 openai/gpt-oss-20b" value=${search} onChange=${e=>setSearch(e.target.value)}/>
+      <${Text} type="secondary" style=${{fontSize:12,display:'block',marginTop:6}}>讀取模型的 config.json 與參數量。需要授權的模型可貼上自己的 token，只留在瀏覽器記憶體。<//><//>
+    <${Drawer} title="手動輸入模型架構" open=${drawer=='manual'} onClose=${()=>setDrawer(null)} width=${dw}
+      extra=${html`<${Button} type="primary" onClick=${()=>mForm.submit()}>加入<//>`}>
+      <${Form} form=${mForm} layout="vertical" initialValues=${{nm:'我的模型'}} onFinish=${v=>{const x={id:'m'+Date.now(),nm:v.nm,P:v.P||10,kv:0.08,tier:2,custom:true};setModels([...models,x]);setMid(x.id);setDrawer(null);msg.success('已加入模型');}}>
+        <${Form.Item} name="nm" label="名稱"><${Input}/><//>
+        ${[['P','總參數（十億）'],['L','層數'],['nh','注意力頭數'],['kvh','KV 頭數'],['hd','head 維度']].map(f=>html`<${Form.Item} key=${f[0]} name=${f[0]} label=${f[1]}><${InputNumber} min=${0} style=${{width:'100%'}}/><//>`)}
+      <//><//>
+    <${Drawer} title=${hwEdit?'編輯你的硬體':'新增你的硬體'} open=${drawer=='hw'} onClose=${()=>{setDrawer(null);setHwEdit(null);}} width=${dw}
+      extra=${html`<${Button} type="primary" onClick=${()=>hwForm.submit()}>${hwEdit?'儲存':'加入'}<//>`}>
+      <${Form} form=${hwForm} layout="vertical" onFinish=${saveHw} initialValues=${{nm:'我的伺服器',gpn:4,mem:96,bw:3.35,tf:700,engine:'vLLM'}}>
+        <${Form.Item} name="nm" label="名稱" rules=${[{required:true}]}><${Input}/><//>
+        <${Form.Item} name="gpn" label="每台幾張卡"><${InputNumber} min=${1} max=${16} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="mem" label="每張卡記憶體（GB）" rules=${[{required:true}]}><${InputNumber} min=${1} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="bw" label="每張卡記憶體頻寬（TB/s）" rules=${[{required:true}]}><${InputNumber} min=${0.01} step=${0.1} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="tf" label="每張卡算力（TFLOPS，dense）" rules=${[{required:true}]}><${InputNumber} min=${1} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="tdp" label="每張卡功耗（W，選填）"><${InputNumber} min=${1} style=${{width:'100%'}}/><//>
+        <${Form.Item} name="engine" label="推論引擎"><${Segmented} options=${['vLLM','MLX']}/><//>
+        <${Text} type="secondary" style=${{fontSize:12}}>效率係數沒有你這台的實測，會借用同引擎的校正值，結果標為「推估」。<//>
+      <//><//>
+    <${Drawer} title="驗證指令" open=${drawer=='verify'} onClose=${()=>setDrawer(null)} width=${dw}>
+      ${verify&&html`<div>
+        <${Text} type="secondary" style=${{fontSize:12}}>在機台上依序執行，比對實際的每人速度與首字時間：<//>
+        <div style=${{marginTop:12}}><${Text} strong>1. 啟動服務<//></div>
+        <${CodeBlock} code=${`vllm serve ${verify.m.nm} \\\n  --tensor-parallel-size ${verify.t} \\\n  --max-num-seqs ${Math.max(16,verify.ur)}`}/>
+        <div style=${{marginTop:12}}><${Text} strong>2. 壓測<//></div>
+        <${CodeBlock} code=${`vllm bench serve --model ${verify.m.nm} \\\n  --max-concurrency ${verify.conc} \\\n  --random-input-len ${verify.w.inT} \\\n  --random-output-len ${verify.w.outT} \\\n  --num-prompts ${verify.conc*10}`}/>
+        <${Text} type="secondary" style=${{fontSize:12}}>結果中的 Mean TPOT 換算為每人速度，Mean TTFT 即首字時間。<//></div>`}
+    <//>
+    <${Modal} title="可貼進申請書／報告的文字" open=${cite} onCancel=${()=>setCite(false)} footer=${null} width=${640}>
+      <${Paragraph} copyable=${{text:citeText,tooltips:['複製','已複製']}} style=${{whiteSpace:'pre-wrap',background:token.colorFillTertiary,padding:12,borderRadius:8}}>${citeText}<//><//>
+  </div>`;
+}
+
+const MOTION={motionDurationFast:'0.2s',motionDurationMid:'0.4s',motionDurationSlow:'0.4s',motionEaseOut:'cubic-bezier(0.215, 0.61, 0.355, 1)',motionEaseInOut:'cubic-bezier(0.215, 0.61, 0.355, 1)'};
+// v10：外觀三選一，存在瀏覽器（不進網址，分享連結不會改掉對方的外觀）
+const readMode=()=>{try{const v=localStorage.getItem('theme-mode');return v=='light'||v=='dark'?v:'system';}catch(e){return 'system';}};
+function Root(){const mq=window.matchMedia('(prefers-color-scheme: dark)');const [sys,setSys]=useState(mq.matches);const [mode,setModeRaw]=useState(readMode);
+  const setMode=v=>{setModeRaw(v);try{v=='system'?localStorage.removeItem('theme-mode'):localStorage.setItem('theme-mode',v);}catch(e){}};
+  const dark=mode=='system'?sys:mode=='dark';
+  useEffect(()=>{const f=e=>setSys(e.matches);mq.addEventListener('change',f);return ()=>mq.removeEventListener('change',f);},[]);
+  useEffect(()=>{document.body.style.background=dark?'#141414':'#f5f5f5';document.body.style.color=dark?'rgba(255,255,255,.85)':'rgba(0,0,0,.88)';document.documentElement.style.colorScheme=dark?'dark':'light';document.documentElement.dataset.theme=dark?'dark':'light';},[dark]);
+  return html`<${ThemeCtx.Provider} value=${{mode,setMode}}><${DarkCtx.Provider} value=${dark}><${ConfigProvider} button=${{autoInsertSpace:false}} theme=${{algorithm:dark?theme.darkAlgorithm:theme.defaultAlgorithm,token:MOTION}}><${AntApp}><${Calculator}/><//><//><//><//>`;}
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${Root}/>`);
+})();
+</script>
+</body>
+</html>

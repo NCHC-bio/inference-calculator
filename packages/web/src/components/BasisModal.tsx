@@ -1,12 +1,14 @@
 import type { BasisItem } from '@nchc/core';
 import type { CoreStatus } from '@nchc/schema';
 import type { Source } from '@nchc/schema';
+import { BugOutlined } from '@ant-design/icons';
 import { Card, Flex, List, Modal, Segmented, Tag, Typography } from 'antd';
 import type { JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useMain } from '../compute/useResults';
 import { useLang, useT, type Lang, type TFn } from '../i18n';
-import { workloadId, type BasisFilter } from '../state/state';
+import { reportNumberUrl } from '../reportModel';
+import { CUSTOM_MODEL_ID, workloadId, type BasisFilter, type CalcState } from '../state/state';
 import { sourcesOf } from './citeText';
 import { isWeak, uniqueByPath } from './weak';
 
@@ -98,11 +100,34 @@ function ConcurrencyReading({ workload, tr }: { workload: string; tr: TFn }) {
 }
 
 
+/** The model as the sentence names it, for the report title. */
+function modelName(s: CalcState, tr: TFn): string {
+  const c = s.customModel;
+  if (s.model === CUSTOM_MODEL_ID && c) return c.kind === 'hf' ? c.repo : (c.value.name ?? tr('opt.custom'));
+  return getBundle().models[s.model]?.name ?? s.model;
+}
+
+/** 「這個數字看起來不對？」 at the moment a number raises doubt (design v10): an issue carrying the page URL. */
+function ReportNumber({ name, tr }: { name: string; tr: TFn }) {
+  const href = reportNumberUrl(tr('basis.report.title', { model: name }), tr('basis.report.body', { url: window.location.href }));
+  return (
+    <Flex gap={8} wrap="wrap" align="center" justify="flex-end">
+      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+        {tr('basis.report.ask')}
+      </Typography.Text>
+      <Typography.Link href={href} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>
+        <BugOutlined /> {tr('basis.report.link')}
+      </Typography.Link>
+    </Flex>
+  );
+}
+
 /** Every basis item of the result (or only the estimated and unverified ones), with values and sources (design §3.3). */
 export function BasisModal(): JSX.Element {
   const tr = useT();
   const lang = useLang();
-  const [{ dialog, basisFilter, workload, customModel }, dispatch] = useCalc();
+  const [state, dispatch] = useCalc();
+  const { dialog, basisFilter, workload, customModel } = state;
   const view = useMain();
   const all = view.kind === 'main' ? uniqueByPath(view.result.basis) : [];
   const weak = all.filter(isWeak);
@@ -113,7 +138,7 @@ export function BasisModal(): JSX.Element {
       title={tr('basis.title')}
       open={dialog === 'basis'}
       onCancel={() => dispatch({ type: 'dialog', id: null })}
-      footer={null}
+      footer={<ReportNumber name={modelName(state, tr)} tr={tr} />}
       width={640}
       styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
     >

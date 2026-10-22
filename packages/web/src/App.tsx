@@ -1,8 +1,9 @@
-import { ReloadOutlined } from '@ant-design/icons';
-import { Alert, App as AntApp, Button, Card, ConfigProvider, Flex, Segmented, theme, Typography } from 'antd';
+import { DesktopOutlined, GithubOutlined, MoonOutlined, ReloadOutlined, SunOutlined } from '@ant-design/icons';
+import { Alert, App as AntApp, Button, Card, ConfigProvider, Dropdown, Flex, Segmented, theme, Tooltip, Typography } from 'antd';
 import enUS from 'antd/locale/en_US';
 import zhTWLocale from 'antd/locale/zh_TW';
-import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from 'react';
+import { GITHUB_REPO } from './reportModel';
 import { useLang, useT, type Lang } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import { AnswerLine } from './components/AnswerLine';
@@ -21,7 +22,7 @@ import { MyModelsDrawer, MyModelsSync } from './components/drawers/MyModelsDrawe
 import { SpeedDrawer } from './components/drawers/SpeedDrawer';
 import { VerifyDrawer } from './components/drawers/VerifyDrawer';
 import { WorkloadDrawer } from './components/drawers/WorkloadDrawer';
-import { antdTheme, useDarkMode, useReducedMotion } from './theme';
+import { antdTheme, THEME_MODES, ThemeModeProvider, useDarkMode, useReducedMotion, useThemeMode, type ThemeMode } from './theme';
 
 /** antd does not paint body: sync page background, text colour and color-scheme from the theme tokens. */
 function PageTheme({ dark }: { dark: boolean }) {
@@ -33,6 +34,8 @@ function PageTheme({ dark }: { dark: boolean }) {
     body.style.background = token.colorBgLayout;
     body.style.color = token.colorText;
     documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    // CSS that cannot read antd tokens (the NCHC logo blend in web.css) keys off this.
+    documentElement.dataset.theme = dark ? 'dark' : 'light';
   }, [token.colorBgLayout, token.colorText, dark]);
   useEffect(() => {
     document.documentElement.lang = lang;
@@ -82,25 +85,75 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { error: u
   }
 }
 
-/** Title and the language switch (demo v8 header). */
+const THEME_ICON: Record<ThemeMode, ReactNode> = { system: <DesktopOutlined />, light: <SunOutlined />, dark: <MoonOutlined /> };
+
+/** Appearance: follow the system, light or dark (design v10). The hover tip hides while the menu is open. */
+function ThemeButton() {
+  const tr = useT();
+  const { mode, setMode } = useThemeMode();
+  const [menu, setMenu] = useState(false);
+  const [tip, setTip] = useState(false);
+  const label = tr('theme.label', { mode: tr(`theme.${mode}`) });
+  return (
+    <Dropdown
+      trigger={['click']}
+      placement="bottomRight"
+      open={menu}
+      onOpenChange={(o) => {
+        setMenu(o);
+        if (o) setTip(false);
+      }}
+      menu={{
+        selectable: true,
+        selectedKeys: [mode],
+        onClick: ({ key }) => setMode(key as ThemeMode),
+        items: THEME_MODES.map((m) => ({ key: m, label: tr(`theme.${m}`), icon: THEME_ICON[m] })),
+      }}
+    >
+      <Tooltip title={label} open={tip && !menu} onOpenChange={setTip}>
+        <Button type="text" size="small" aria-label={label} icon={THEME_ICON[mode]} />
+      </Tooltip>
+    </Dropdown>
+  );
+}
+
+/** Title | language, appearance and the GitHub repo (demo v10 header). */
 function Header() {
   const tr = useT();
   const [{ lang }, dispatch] = useCalc();
   return (
-    <Flex component="header" align="center" justify="space-between" gap={8} wrap="wrap" style={{ marginBottom: 8 }}>
-      <Typography.Title level={1} style={{ fontSize: 16, margin: 0 }}>
-        {tr('app.title')}
-      </Typography.Title>
-      <Segmented<Lang>
-        size="small"
-        aria-label={tr('aria.lang')}
-        value={lang}
-        onChange={(l) => dispatch({ type: 'lang', lang: l })}
-        options={[
-          { value: 'zh-TW', label: tr('lang.zhTW') },
-          { value: 'en', label: tr('lang.en') },
-        ]}
-      />
+    <Flex component="header" align="center" justify="space-between" gap={8} style={{ marginBottom: 8 }}>
+      <Flex align="center" gap={8} style={{ minWidth: 0 }}>
+        {/* The site icon (the favicon: GPU nodes, one partly filled), decorative next to the title. */}
+        <img src={`${import.meta.env.BASE_URL}favicon.svg`} alt="" width={22} height={22} style={{ flex: 'none' }} />
+        <Typography.Title level={1} style={{ fontSize: 16, margin: 0, minWidth: 0 }}>
+          {tr('app.title')}
+        </Typography.Title>
+      </Flex>
+      <Flex align="center" gap={4} style={{ flex: 'none' }}>
+        <Segmented<Lang>
+          size="small"
+          aria-label={tr('aria.lang')}
+          value={lang}
+          onChange={(l) => dispatch({ type: 'lang', lang: l })}
+          options={[
+            { value: 'zh-TW', label: tr('lang.zhTW') },
+            { value: 'en', label: tr('lang.en') },
+          ]}
+        />
+        <ThemeButton />
+        <Tooltip title={tr('header.github')}>
+          <Button
+            type="text"
+            size="small"
+            aria-label={tr('header.github')}
+            icon={<GithubOutlined />}
+            href={GITHUB_REPO}
+            target="_blank"
+            rel="noopener noreferrer"
+          />
+        </Tooltip>
+      </Flex>
     </Flex>
   );
 }
@@ -168,7 +221,9 @@ function ThemedApp() {
 export function App() {
   return (
     <StoreProvider>
-      <ThemedApp />
+      <ThemeModeProvider>
+        <ThemedApp />
+      </ThemeModeProvider>
     </StoreProvider>
   );
 }
