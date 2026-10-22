@@ -113,21 +113,37 @@ describe('comparison card', { timeout: 30000 }, () => {
 
   it('the cards chart shows only with two GPU setups; machines get a note', () => {
     history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }, { row: MAC }]));
-    renderStore(<CompareCard width={900} />);
+    renderStore(<CompareCard width={1000} />);
     expect(screen.getByTestId('compare-cards-chart').closest('.reveal')).toHaveClass('on');
     expect(card().textContent).toContain(zh('compare.machines', { letters: 'C' }));
     cleanup();
     history.replaceState(null, '', '/' + search([{ row: H200 }]));
-    renderStore(<CompareCard width={900} />);
+    renderStore(<CompareCard width={1000} />);
     expect(screen.getByTestId('compare-cards-chart').closest('.reveal')).not.toHaveClass('on');
   });
 
   it('delete and clear', async () => {
     history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }]));
-    renderStore(<CompareCard width={900} />);
+    renderStore(<CompareCard width={1000} />);
     await userEvent.click(within(lines()[0]!).getByRole('button', { name: zh('compare.delete') }));
     await waitFor(() => expect(lines()).toHaveLength(1));
     await userEvent.click(within(card()).getByRole('button', { name: zh('compare.clear') }));
     await waitFor(() => expect(card().closest('.reveal')).not.toHaveClass('on'));
   });
+
+  it('dashes only distinguish: when every line uses estimates all lines are solid and the note says so', () => {
+    history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }]));
+    renderStore(<CompareCard width={1000} />);
+    const s = decodeUrl(b, location.search);
+    const m = computeMain(b, s);
+    if (m.kind !== 'main') throw new Error('no main');
+    const est = [H200, H100].map((row) => {
+      const r = m.rows.find((x) => x.row === row)!;
+      return r.kind === 'ok' && r.perf.hasEstimate;
+    });
+    expect(est.every(Boolean)).toBe(true);
+    for (const p of card().querySelectorAll('path.series')) expect(p.getAttribute('stroke-dasharray')).toBeNull();
+    expect(card().textContent).toContain(zh('compare.note.allEst'));
+  });
 });
+

@@ -120,19 +120,18 @@ function layout(p: CompareChartProps, width: number, fmt: (n: number) => string)
     d: s.points.map((q, i) => `${i ? 'L' : 'M'}${x(q.x).toFixed(1)},${y(q.y).toFixed(1)}`).join(''),
   }));
 
-  let prev = -Infinity;
-  const letters = p.series
-    .filter((s) => s.points.length > 0)
-    .map((s) => {
-      const last = s.points[s.points.length - 1]!;
-      return { key: s.key, slot: s.slot, px: x(last.x) + 5, py: y(last.y) + 4 };
-    })
-    .sort((a, b) => a.py - b.py)
-    .map((l) => {
-      const py = Math.max(Math.round(l.py), prev + LETTER_GAP);
-      prev = py;
-      return { ...l, py };
-    });
+  // Each letter takes the nearest free spot (0, ∓12, ∓24 … px) that no letter within 14 px horizontally holds, inside the plot.
+  const letters: { key: string; slot: number; px: number; py: number }[] = [];
+  for (const s of p.series) {
+    if (s.points.length === 0) continue;
+    const last = s.points[s.points.length - 1]!;
+    const px = x(last.x) + 5;
+    const want = Math.round(y(last.y) + 4);
+    const free = (py: number) => py >= M.T + 8 && py <= H - M.B && letters.every((l) => Math.abs(l.px - px) >= 14 || Math.abs(l.py - py) >= LETTER_GAP);
+    let py = want;
+    for (let k = 1; !free(py) && k < 40; k++) py = want + (k % 2 ? -1 : 1) * LETTER_GAP * Math.ceil(k / 2);
+    letters.push({ key: s.key, slot: s.slot, px, py: Math.min(H - M.B, Math.max(M.T + 8, py)) });
+  }
 
   let lastCap = -Infinity;
   const caps = p.series

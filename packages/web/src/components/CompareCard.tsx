@@ -18,8 +18,8 @@ import { Explain } from './Explain';
 import { subLabelText } from './PlatformRow';
 import { WHY } from './why';
 
-/** Below this card width the summary is one card per line instead of a table (design v9 §4.2). */
-const NARROW = 640;
+/** Below this card width the summary is one card per line instead of a table (design v9 §4.2; the table needs ~880 px). */
+const NARROW = 880;
 const small = { fontSize: 12 } as const;
 const nowrap = { whiteSpace: 'nowrap' } as const;
 
@@ -37,11 +37,11 @@ const sizeText = (tr: TFn, lang: string, totalB: number, activeB: number | null)
   activeB === null ? tr('compare.size', { total: fmtIn(lang, totalB) }) : tr('compare.sizeMoe', { total: fmtIn(lang, totalB), active: fmtIn(lang, activeB, 1) });
 
 /** Line sample (colour, dashed for estimates) and letter. */
-function Swatch({ v, color }: { v: LineView; color: string }): JSX.Element {
+function Swatch({ v, color, dashed }: { v: LineView; color: string; dashed: boolean }): JSX.Element {
   return (
     <span style={{ flex: '0 0 auto', display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
       <svg width="22" height="10" aria-hidden="true">
-        <line x1="1" y1="5" x2="21" y2="5" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray={v.perf?.hasEstimate ? '5 3' : undefined} />
+        <line x1="1" y1="5" x2="21" y2="5" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray={dashed ? '5 3' : undefined} />
       </svg>
       <b>{LETTERS[v.line.slot]}</b>
     </span>
@@ -49,14 +49,14 @@ function Swatch({ v, color }: { v: LineView; color: string }): JSX.Element {
 }
 
 /** First line: platform × count; second: model・precision (・task・read length); overridden fields in bold. */
-function LineName({ v, color }: { v: LineView; color: string }): JSX.Element {
+function LineName({ v, color, dashed }: { v: LineView; color: string; dashed: boolean }): JSX.Element {
   const tr = useT();
   const lang = useLang();
   const B = (on: boolean, text: string) => (on ? <b>{text}</b> : text);
   const count = `${fmtIn(lang, v.count)} ${unitWord(tr, v.info.unit, fmtIn(lang, v.count))}`;
   return (
     <Flex gap={8} align="start" style={{ minWidth: 0 }}>
-      <Swatch v={v} color={color} />
+      <Swatch v={v} color={color} dashed={dashed} />
       <div style={{ minWidth: 0 }}>
         <div style={{ overflowWrap: 'anywhere' }}>
           {v.info.name} {subLabelText(v.info.sub, lang, tr)} × {B(v.changed.gpus, count)}
@@ -105,7 +105,7 @@ function Verdict({ v }: { v: LineView }): JSX.Element {
         {tr('compare.nofit')}
       </Tag>
     ) : (
-      <Tag color="error" icon={<CloseCircleOutlined />} tabIndex={0} style={{ marginInlineEnd: 0, cursor: 'help', whiteSpace: 'normal' }}>
+      <Tag color="error" icon={<CloseCircleOutlined />} tabIndex={0} style={{ marginInlineEnd: 0, cursor: 'help', whiteSpace: 'normal', maxWidth: 140 }}>
         {tr('compare.fail', { why })}
       </Tag>
     );
@@ -143,8 +143,19 @@ const GROUP_KEY: Record<VariantGroup['key'], MsgKey> = {
 type CardCtx = {
   view: CompareView;
   color: (v: LineView) => string;
+  dashed: (v: LineView) => boolean;
   actions: (v: LineView) => ReactNode;
 };
+
+/**
+ * Dashes mark the lines that use estimated inputs only when they tell lines apart: when every line does (most of the
+ * catalog today), all are solid and the note says so; each line still carries its 推估 tag (spec §2.1).
+ */
+export function dashedOf(view: CompareView): { dashed: (v: LineView) => boolean; allEst: boolean } {
+  const withPerf = view.lines.filter((v) => v.perf);
+  const allEst = withPerf.length > 0 && withPerf.every((v) => v.perf!.hasEstimate);
+  return { allEst, dashed: (v) => !allEst && (v.perf?.hasEstimate ?? false) };
+}
 
 const Dash = () => <Typography.Text type="secondary">—</Typography.Text>;
 
@@ -154,7 +165,7 @@ function metric(v: LineView, k: 'tps' | 'ttft' | 'max' | 'kw' | 'size', tr: TFn,
   if (k === 'size') {
     return (
       <Explain content={<div style={{ maxWidth: 280 }}>{tr('compare.sizeTip')}</div>}>
-        <span tabIndex={0} className="help-text" style={nowrap}>
+        <span tabIndex={0} className="help-text cmp-size">
           {sizeText(tr, lang, v.params.totalB, v.params.activeB)}
         </span>
       </Explain>
@@ -198,7 +209,7 @@ const METRICS = [
   { k: 'kw', title: 'compare.col.kw', align: 'right' },
 ] as const;
 
-function Summary({ view, color, actions, narrow }: CardCtx & { narrow: boolean }): JSX.Element {
+function Summary({ view, color, dashed, actions, narrow }: CardCtx & { narrow: boolean }): JSX.Element {
   const tr = useT();
   const lang = useLang();
   if (narrow) {
@@ -211,7 +222,7 @@ function Summary({ view, color, actions, narrow }: CardCtx & { narrow: boolean }
             className="fade-in cmp-line-card"
             style={{ borderInlineStart: `4px solid ${color(v)}` }}
           >
-            <LineName v={v} color={color(v)} />
+            <LineName v={v} color={color(v)} dashed={dashed(v)} />
             <div style={{ margin: '6px 0' }}>
               <Verdict v={v} />
             </div>
@@ -240,7 +251,17 @@ function Summary({ view, color, actions, narrow }: CardCtx & { narrow: boolean }
       dataSource={view.lines}
       onRow={() => ({ 'data-testid': 'compare-line' }) as HTMLAttributes<HTMLElement>}
       columns={[
-        { title: tr('compare.col.plan'), key: 'plan', render: (_, v) => <LineName v={v} color={color(v)} /> },
+        {
+          title: tr('compare.col.plan'),
+          key: 'plan',
+          // Actions sit under the name (as on the narrow cards), so the table fits the card at every width.
+          render: (_, v) => (
+            <div style={{ minWidth: 220, maxWidth: 300 }}>
+              <LineName v={v} color={color(v)} dashed={dashed(v)} />
+              <div style={{ marginTop: 4, paddingInlineStart: 38 }}>{actions(v)}</div>
+            </div>
+          ),
+        },
         { title: <span style={nowrap}>{tr('compare.col.verdict')}</span>, key: 'verdict', render: (_, v) => <Verdict v={v} /> },
         ...METRICS.map((m) => ({
           title: <span style={nowrap}>{tr(m.title)}</span>,
@@ -248,7 +269,6 @@ function Summary({ view, color, actions, narrow }: CardCtx & { narrow: boolean }
           align: m.align,
           render: (_: unknown, v: LineView) => metric(v, m.k, tr, lang),
         })),
-        { title: '', key: 'actions', render: (_, v) => actions(v) },
       ]}
     />
   );
@@ -349,7 +369,8 @@ export function CompareCard({ width }: { width?: number } = {}): JSX.Element {
     );
   };
 
-  const charts = view && <Charts view={view} users={s.users} target={target} hoverUsers={hoverUsers} setHoverUsers={setHoverUsers} hoverCards={hoverCards} setHoverCards={setHoverCards} />;
+  const dash = view ? dashedOf(view) : { allEst: false, dashed: () => false };
+  const charts = view && <Charts view={view} dashed={dash.dashed} users={s.users} target={target} hoverUsers={hoverUsers} setHoverUsers={setHoverUsers} hoverCards={hoverCards} setHoverCards={setHoverCards} />;
 
   return (
     <div className={'reveal' + (open ? ' on' : '')} inert={!open} aria-hidden={!open}>
@@ -374,8 +395,9 @@ export function CompareCard({ width }: { width?: number } = {}): JSX.Element {
               <>
                 <Typography.Text type="secondary" style={{ ...small, display: 'block', marginBottom: 8 }}>
                   {tr('compare.note', { users: fmtIn(lang, s.users), tps: fmtIn(lang, target.min), ttft: fmtIn(lang, target.ttft) })}
+                  {tr(dash.allEst ? 'compare.note.allEst' : 'compare.note.dashed')}
                 </Typography.Text>
-                <Summary view={view} color={color} actions={actions} narrow={narrow} />
+                <Summary view={view} color={color} dashed={dash.dashed} actions={actions} narrow={narrow} />
                 <Typography.Text type="secondary" style={{ ...small, display: 'block', marginTop: 6 }}>
                   {tr('compare.hint')}
                 </Typography.Text>
@@ -394,6 +416,7 @@ export function CompareCard({ width }: { width?: number } = {}): JSX.Element {
 
 type ChartsProps = {
   view: CompareView;
+  dashed: (v: LineView) => boolean;
   users: number;
   target: { min: number; ttft: number };
   hoverUsers: number | null;
@@ -403,7 +426,7 @@ type ChartsProps = {
 };
 
 /** The two users charts (shared crosshair) and the GPUs chart, with the notes for lines that are not drawn. */
-function Charts({ view, users, target, hoverUsers, setHoverUsers, hoverCards, setHoverCards }: ChartsProps): JSX.Element {
+function Charts({ view, dashed, users, target, hoverUsers, setHoverUsers, hoverCards, setHoverCards }: ChartsProps): JSX.Element {
   const tr = useT();
   const lang = useLang();
   const f = (n: number, d = 0) => fmtIn(lang, n, d);
@@ -417,7 +440,7 @@ function Charts({ view, users, target, hoverUsers, setHoverUsers, hoverCards, se
       return {
         key: String(v.line.id),
         slot: v.line.slot,
-        dashed: v.perf?.hasEstimate ?? false,
+        dashed: dashed(v),
         points,
         ...(at ? { dot: { x: users, y: at[key] } } : {}),
         ...(key === 'tps' && capY !== null ? { cap: { x: mc, y: capY, label: tr('compare.cap', { n: f(mc) }) } } : {}),
@@ -428,7 +451,7 @@ function Charts({ view, users, target, hoverUsers, setHoverUsers, hoverCards, se
     .map((v) => {
       const points = v.sweep!.map((p) => ({ x: p.x, y: p.tps }));
       const at = points.find((p) => p.x === v.count);
-      return { key: String(v.line.id), slot: v.line.slot, dashed: v.perf?.hasEstimate ?? false, points, ...(at ? { dot: at } : {}) };
+      return { key: String(v.line.id), slot: v.line.slot, dashed: dashed(v), points, ...(at ? { dot: at } : {}) };
     });
   const letters = (ls: LineView[]) => ls.map((v) => LETTERS[v.line.slot]).join('、');
   const machines = view.lines.filter((v) => v.info.unit === 'machine' && v.status !== 'nofit');

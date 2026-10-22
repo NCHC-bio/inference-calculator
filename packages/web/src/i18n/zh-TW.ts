@@ -209,7 +209,9 @@ const zhTW = {
   // Comparison (design v9).
   'compare.title': '方案比較',
   'compare.clear': '清除',
-  'compare.note': '所有方案回答同一題：同時 {users} 人、每人至少 {tps} 字/秒、首字 {ttft} 秒內。加粗的欄位是這條線換掉的，其餘跟上方句子一致。虛線＝用到推估值。',
+  'compare.note': '所有方案回答同一題：同時 {users} 人、每人至少 {tps} 字/秒、首字 {ttft} 秒內。加粗的欄位是這條線換掉的，其餘跟上方句子一致。',
+  'compare.note.dashed': '虛線＝用到推估值。',
+  'compare.note.allEst': '全部方案都用到推估值（表格標「推估」）。',
   'compare.hint': '想加方案：在平台列勾「比較」，或按「換一項比較」複製一條線、只改一項（數量不變）。',
   'compare.col.plan': '方案',
   'compare.col.verdict': '結論',

@@ -92,4 +92,14 @@ describe('CompareChart', () => {
     expect(container.querySelectorAll('g.x-axis g.tick').length).toBeGreaterThan(0);
     expect(container.querySelector('g.ref text')!.textContent).toBe('你的 60 人');
   });
+
+  it('end letters stay inside the plot when several lines end near zero', () => {
+    const series = [0, 1, 2, 3].map((i) => line(i, [[1, 30], [1000, 0.1 * i]]));
+    const { container } = render(<CompareChart {...props({ series })} />);
+    const ys = [...container.querySelectorAll('text.end-letter')].map((e) => Number(e.getAttribute('y')));
+    expect(Math.max(...ys)).toBeLessThanOrEqual(210 - 40);
+    const sorted = [...ys].sort((a, b) => a - b);
+    sorted.slice(1).forEach((y, i) => expect(y - sorted[i]!).toBeGreaterThanOrEqual(12));
+  });
 });
+

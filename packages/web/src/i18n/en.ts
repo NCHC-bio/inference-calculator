@@ -206,7 +206,9 @@ const en = {
   // Comparison (design v9).
   'compare.title': 'Comparison',
   'compare.clear': 'Clear',
-  'compare.note': 'Every setup answers the same question: {users} users at once, at least {tps} words/s each, first word within {ttft} s. Bold fields are what a line changes; the rest follow the sentence above. Dashed = uses estimates.',
+  'compare.note': 'Every setup answers the same question: {users} users at once, at least {tps} words/s each, first word within {ttft} s. Bold fields are what a line changes; the rest follow the sentence above.',
+  'compare.note.dashed': ' Dashed = uses estimates.',
+  'compare.note.allEst': ' Every setup uses estimates (tagged in the table).',
   'compare.hint': 'To add a setup: tick “Compare” on a platform row, or use “Compare a variant” to copy a line and change one thing (same count).',
   'compare.col.plan': 'Setup',
   'compare.col.verdict': 'Verdict',
