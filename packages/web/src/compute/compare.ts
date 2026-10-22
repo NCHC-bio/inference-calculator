@@ -10,7 +10,7 @@ import {
   type PerformanceResult,
   type ResultWarning,
 } from '@nchc/core';
-import { READ_LENGTHS, quantChoices, quantFor, workloadId, type CalcState, type CompareLine, type CompareSpec, type RowKey } from '../state/state';
+import { COUNT_MAX, READ_LENGTHS, quantChoices, quantFor, workloadId, type CalcState, type CompareLine, type CompareSpec, type RowKey } from '../state/state';
 import type { MainView } from './compute';
 import { performanceQueryOf, queryOf } from './query';
 import { rowInfo, type RowInfo } from './rowInfo';
@@ -103,7 +103,8 @@ function resolveLine(b: Bundle, s: CalcState, main: Extract<MainView, { kind: 'm
       inputTokens: line.inputTokens ?? baseTokens,
       changed: {
         model: line.model !== undefined,
-        quant: line.quant !== undefined,
+        // Bold only when the precision used differs from the sentence's (a fallback is not a change).
+        quant: quant !== s.quant,
         workload: line.workload !== undefined,
         inputTokens: line.inputTokens !== undefined,
         gpus: line.gpus !== undefined,
@@ -123,10 +124,13 @@ function tryPerf(b: Bundle, input: PerformanceInput): { perf: PerformanceResult 
   }
 }
 
-/** Up to CURVE_POINTS log-spaced integers in [1, max], with `users` added; increasing, deduplicated. */
-export function logUsers(max: number, users: number): number[] {
+/**
+ * Up to CURVE_POINTS log-spaced integers in [1, max], plus `users` and each line's capacity (`extra`), so the dot and
+ * the 「最多 N」 mark are core points too; increasing, deduplicated.
+ */
+export function logUsers(max: number, users: number, extra: number[] = []): number[] {
   const set = new Set<number>([1, max]);
-  if (users <= max) set.add(users);
+  for (const u of [users, ...extra]) if (u >= 1 && u <= max) set.add(u);
   for (let i = 1; i < CURVE_POINTS - 1; i++) set.add(Math.round(Math.pow(max, i / (CURVE_POINTS - 1))));
   return [...set].filter((u) => u >= 1 && u <= max).sort((a, c) => a - c);
 }
@@ -142,10 +146,11 @@ export function computeCompare(b: Bundle, s: CalcState, main: MainView): Compare
   const first = resolved.map((r) => tryPerf(b, r.input));
   const caps = first.map((f) => f.perf?.maxConcurrent ?? 0);
   const usersMax = Math.min(USERS_AXIS_MAX, Math.ceil(Math.max(10, s.users * 3, ...caps.map((c) => c * 1.6))));
-  const curveUsers = logUsers(usersMax, s.users);
+  const curveUsers = logUsers(usersMax, s.users, caps);
 
   const gpuCounts = resolved.filter((r) => r.v.info.unit === 'gpu').map((r) => r.v.count);
-  const cardsMax = Math.min(SWEEP_MAX, Math.max(8, ...gpuCounts.map((c) => c * 2)));
+  const cardsMax = Math.min(COUNT_MAX, Math.max(8, ...gpuCounts.map((c) => c * 2)));
+  const cardList = cardCounts(cardsMax, gpuCounts);
 
   const lines = resolved.map((r, i): LineView => {
     const { perf: base, error } = first[i]!;
@@ -158,7 +163,7 @@ export function computeCompare(b: Bundle, s: CalcState, main: MainView): Compare
       users = (end < 0 ? curve : curve.slice(0, end)).map((p) => ({ x: p.users, tps: p.tokPerSecPerUser, ttft: p.ttftSec }));
       if (r.v.info.unit === 'gpu') {
         const { gpus: _g, tp: _t, ...q } = r.input;
-        const pts = estimatePerformanceSweep(b, { ...q, gpusList: Array.from({ length: cardsMax }, (_, k) => k + 1) }).points;
+        const pts = estimatePerformanceSweep(b, { ...q, gpusList: cardList }).points;
         sweep = pts.flatMap((p) => {
           if (p.fastest) return [{ x: p.gpus, tps: p.fastest.tokPerSecPerUser }];
           return p.tokPerSecPerUser !== null && p.why !== 'mem' ? [{ x: p.gpus, tps: p.tokPerSecPerUser }] : [];
@@ -189,11 +194,23 @@ export type VariantLabel =
   | { kind: 'workload'; id: string }
   | { kind: 'read'; tokens: number }
   | { kind: 'gpus'; n: number; half: boolean }
-  | { kind: 'platform'; row: RowKey; count: number };
+  | { kind: 'platform'; row: RowKey; count: number; name: string; sub: RowInfo['sub']; unit: RowInfo['unit'] };
 export type VariantGroup = {
   key: 'model' | 'quant' | 'workload' | 'read' | 'gpus' | 'platform';
   items: { key: string; label: VariantLabel; specs: CompareSpec[] }[];
 };
+
+/**
+ * GPU counts of the GPUs → speed chart: every count up to SWEEP_MAX (core's sweep limit), else SWEEP_MAX counts that
+ * always include 1, `max` and every line's own count, the rest evenly spaced (final review: large setups were cut off).
+ */
+export function cardCounts(max: number, must: number[]): number[] {
+  if (max <= SWEEP_MAX) return Array.from({ length: max }, (_, i) => i + 1);
+  const set = new Set([1, max, ...must.filter((c) => c >= 1 && c <= max)]);
+  const free = SWEEP_MAX - set.size;
+  for (let i = 1; i <= free; i++) set.add(Math.round(1 + (i * (max - 1)) / (free + 1)));
+  return [...set].sort((a, c) => a - c).slice(0, SWEEP_MAX);
+}
 
 /** The line's spec without id / slot and without unset fields. */
 function specOf(l: CompareLine): CompareSpec {
@@ -267,7 +284,11 @@ export function variantGroups(b: Bundle, s: CalcState, main: MainView, v: LineVi
       .map((r) => {
         const { gpus: _g, ...rest } = src;
         const info = rowInfo(b, s, r.row);
-        return { key: `platform:${r.row}`, label: { kind: 'platform', row: r.row, count: rowCount(main, info, r.row) }, specs: [{ ...rest, row: r.row }] };
+        return {
+          key: `platform:${r.row}`,
+          label: { kind: 'platform', row: r.row, count: rowCount(main, info, r.row), name: info.name, sub: info.sub, unit: info.unit },
+          specs: [{ ...rest, row: r.row }],
+        };
       }),
   });
 

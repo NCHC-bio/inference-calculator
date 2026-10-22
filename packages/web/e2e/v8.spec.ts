@@ -72,6 +72,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.getByRole('menuitem', { name: new RegExp(`^${bundle.models['gpt-oss-20b']!.name}`) }).click();
       await expect(compare.getByTestId('compare-line')).toHaveCount(3);
 
+      // 換機台 lists platforms by name and sub-label, with their current count.
+      await compare.getByTestId('compare-line').first().getByRole('button', { name: new RegExp(tZh('compare.variant')) }).click();
+      await page.getByRole('menuitem', { name: tZh('compare.variant.platform') }).click();
+      await expect(page.getByRole('menuitem', { name: new RegExp('^' + bundle.platforms['nano5-h100']!.name + ' ' + bundle.platforms['nano5-h100']!.sub) })).toBeVisible();
+      await shot(page, 'compare-variant-platform');
+      await page.keyboard.press('Escape');
+
       // Five lines: a failing one, a machine one, the GPU chart and the hover tooltip.
       await page.goto(url({ w: 'chat', n: 60, cmp: FIVE_LINES }));
       await expect(compare.getByTestId('compare-line')).toHaveCount(5);
@@ -82,6 +89,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
       const box = (await chart.boundingBox())!;
       await page.mouse.move(box.x + box.width * 0.55, box.y + box.height / 2);
       await expect(compare.locator('.cmp-tip').first()).toHaveCSS('opacity', '1');
+      // The tooltip follows the pointer with no transition (design v9 §4.4, reduced motion).
+      await expect(compare.locator('.cmp-tip').first()).toHaveCSS('transition-duration', '0s');
       await shot(page, 'compare-hover');
       await noHorizontalScroll(page);
 

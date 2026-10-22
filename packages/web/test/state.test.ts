@@ -234,3 +234,14 @@ describe('reduce', () => {
   });
 });
 
+describe('final review fixes: undo keeps comparison lines', () => {
+  it('restorePlatform puts back the lines removed with the platform, in their slots', () => {
+    const run2 = (s: CalcState, ...as: Action[]) => as.reduce((x, a) => reduce(b, x, a), s);
+    const s1 = run2(s0, { type: 'addPlatform', value: gpu('A') }, { type: 'compareAdd', lines: [{ row: 'nano4-h200' }, { row: 'custom:0', gpus: 2 }] });
+    const dropped = s1.compare.filter((l) => l.row === 'custom:0');
+    const s2 = run2(s1, { type: 'removePlatform', index: 0 });
+    expect(s2.compare.map((l) => l.row)).toEqual(['nano4-h200']);
+    const s3 = run2(s2, { type: 'restorePlatform', index: 0, value: gpu('A'), lines: dropped });
+    expect(s3.compare.map((l) => [l.row, l.slot, l.gpus])).toEqual([['nano4-h200', 0, undefined], ['custom:0', 1, 2]]);
+  });
+});

@@ -41,6 +41,8 @@ export type CompareChartProps = {
   band: { y: number; dir: 'above' | 'below' };
   /** 「你的 N 人」 vertical line. */
   refLine?: { x: number; label: string };
+  /** x values core sampled (shared by every line): the crosshair snaps to the nearest, so the tooltip shows core points. */
+  snap?: number[];
   /** Shared crosshair (controlled, so two charts can show the same x). */
   hover: number | null;
   onHover: (x: number | null) => void;
@@ -75,15 +77,9 @@ function xTickValues(min: number, max: number, log: boolean, w: number): number[
   return out;
 }
 
-/** Value of a polyline at x (linear between neighbours); null outside its range. */
+/** The line's own point at x (core's value), never an interpolation; null when it has none there. */
 export function valueAt(points: { x: number; y: number }[], x: number): number | null {
-  if (points.length === 0 || x < points[0]!.x || x > points[points.length - 1]!.x) return null;
-  for (let i = 1; i < points.length; i++) {
-    const a = points[i - 1]!;
-    const b = points[i]!;
-    if (x <= b.x) return b.x === a.x ? b.y : a.y + ((b.y - a.y) * (x - a.x)) / (b.x - a.x);
-  }
-  return points[points.length - 1]!.y;
+  return points.find((p) => p.x === x)?.y ?? null;
 }
 
 type Lay = {
@@ -295,7 +291,11 @@ export function CompareChart(p: CompareChartProps): JSX.Element {
     else line.attr('x1', lay.x(hv)).attr('x2', lay.x(hv)).attr('opacity', 1);
   }, [hv, lay]);
 
-  const at = (e: MouseEvent<SVGSVGElement>) => lay.x.invert(e.clientX - e.currentTarget.getBoundingClientRect().left);
+  const at = (e: MouseEvent<SVGSVGElement>) => {
+    const px = e.clientX - e.currentTarget.getBoundingClientRect().left;
+    if (!p.snap || p.snap.length === 0) return lay.x.invert(px);
+    return p.snap.reduce((best, v) => (Math.abs(lay.x(v) - px) < Math.abs(lay.x(best) - px) ? v : best), p.snap[0]!);
+  };
   const rows = hv === null ? [] : p.series.map((s) => ({ s, v: valueAt(s.points, hv) }));
   const left = hv === null ? 0 : Math.min(Math.max(0, lay.x(hv) + 10), Math.max(0, lay.w - TIP_WIDTH));
   const palette = SERIES[dark ? 'dark' : 'light'];

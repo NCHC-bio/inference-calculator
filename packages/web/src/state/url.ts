@@ -7,12 +7,15 @@ import {
   isRowKey,
   quantChoices,
   reduce,
+  validCompareSpec,
   validCustomModel,
   validOverride,
   validPlatform,
   validSpeed,
   validWorkload,
   type CalcState,
+  type CompareLine,
+  type CompareSpec,
   type Override,
 } from './state';
 
@@ -40,7 +43,9 @@ export function encodeUrl(s: CalcState): string {
   const o = Object.entries(s.overrides).map(([k, v]) => (v.tp === undefined ? `${k}:${v.gpus}` : `${k}:${v.gpus}:${v.tp}`));
   if (o.length > 0) p.set('o', o.join(','));
   if (s.compare.length > 0) {
-    const specs = [...s.compare].sort((x, y) => x.slot - y.slot).map(({ id: _i, slot: _s, ...spec }) => spec);
+    // Index = slot (null in a gap), so a shared link keeps each line's letter and colour.
+    const specs: (CompareSpec | null)[] = Array.from({ length: Math.max(...s.compare.map((l) => l.slot)) + 1 }, () => null);
+    for (const { id: _i, slot, ...spec } of s.compare) specs[slot] = spec;
     p.set('cmp', toBase64Url(JSON.stringify(specs)));
   }
   return p.toString();
@@ -129,9 +134,18 @@ export function decodeUrl(b: Bundle, search: string): CalcState {
     const o = parseOverride(item);
     if (o && isRowKey(b, s, o[0])) s = reduce(b, s, { type: 'override', row: o[0], value: o[1] });
   }
-  // Comparison lines: each spec is validated by the reducer (invalid ones dropped), at most COMPARE_MAX.
+  // Comparison lines: index = slot; each spec validated like compareAdd (invalid ones and gaps dropped), at most COMPARE_MAX.
   const rawCmp = p.get('cmp');
   const cmp = rawCmp !== null ? fromBase64UrlJson(rawCmp) : undefined;
-  if (Array.isArray(cmp)) s = reduce(b, s, { type: 'compareAdd', lines: cmp.slice(0, COMPARE_MAX * 4) });
+  if (Array.isArray(cmp)) {
+    const compare: CompareLine[] = [];
+    cmp.slice(0, COMPARE_MAX * 4).forEach((v, i) => {
+      if (compare.length >= COMPARE_MAX || !validCompareSpec(b, s, v)) return;
+      const used = new Set(compare.map((l) => l.slot));
+      const slot = i < COMPARE_MAX && !used.has(i) ? i : Array.from({ length: COMPARE_MAX }, (_, k) => k).find((k) => !used.has(k))!;
+      compare.push({ ...v, id: compare.length + 1, slot });
+    });
+    s = { ...s, compare };
+  }
   return s;
 }

@@ -76,7 +76,7 @@ export type Action =
   | { type: 'editPlatform'; index: number; value: CustomPlatformInput }
   | { type: 'removePlatform'; index: number }
   /** Undo of removePlatform: back at `index` (clamped to the end), with the row's count and open state when it had them (v8 minor 5). */
-  | { type: 'restorePlatform'; index: number; value: CustomPlatformInput; override?: Override; wasOpen?: boolean }
+  | { type: 'restorePlatform'; index: number; value: CustomPlatformInput; override?: Override; wasOpen?: boolean; lines?: CompareLine[] }
   | { type: 'openRow'; row: RowKey | null }
   /** Add or remove the line that only names `row` (the row's 比較 checkbox). */
   | { type: 'compareToggle'; row: RowKey }
@@ -269,6 +269,25 @@ function shiftLines(lines: CompareLine[], removed: number): CompareLine[] {
   return lines.filter((l) => customIndex(l.row) !== removed).map((l) => ({ ...l, row: shiftRow(l.row, removed)! }));
 }
 
+/**
+ * Lines removed with a custom platform come back on its new row key (final review: 復原 brings the comparison back),
+ * in their old slot when it is still free, else the smallest free one; fresh ids; at most COMPARE_MAX lines.
+ */
+function restoreLines(b: Bundle, customPlatforms: CustomPlatformInput[], lines: CompareLine[], back: CompareLine[] | undefined, row: RowKey): CompareLine[] {
+  if (!Array.isArray(back)) return lines;
+  const out = [...lines];
+  let id = out.reduce((m, l) => Math.max(m, l.id), 0);
+  for (const l of back) {
+    const { id: _i, slot, ...spec } = l;
+    const restored: CompareSpec = { ...spec, row };
+    if (out.length >= COMPARE_MAX || !validCompareSpec(b, { customPlatforms }, restored)) continue;
+    const used = new Set(out.map((x) => x.slot));
+    const free = used.has(slot) ? Array.from({ length: COMPARE_MAX }, (_, i) => i).find((i) => !used.has(i))! : slot;
+    out.push({ ...restored, id: ++id, slot: free });
+  }
+  return out;
+}
+
 /** Lines on custom rows at or after `at` shift up (a platform inserted at `at`). */
 function unshiftLines(lines: CompareLine[], at: number): CompareLine[] {
   return lines.map((l) => {
@@ -365,12 +384,13 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
       const i = s.openRow === null ? null : customIndex(s.openRow);
       const openRow = a.wasOpen ? key : i !== null && i >= at ? `custom:${i + 1}` : s.openRow;
       const ep = s.editingPlatform;
+      const customPlatforms = [...s.customPlatforms.slice(0, at), a.value, ...s.customPlatforms.slice(at)];
       return {
         ...s,
-        customPlatforms: [...s.customPlatforms.slice(0, at), a.value, ...s.customPlatforms.slice(at)],
+        customPlatforms,
         overrides,
         openRow,
-        compare: unshiftLines(s.compare, at),
+        compare: restoreLines(b, customPlatforms, unshiftLines(s.compare, at), a.lines, key),
         editingPlatform: ep !== null && ep >= at ? ep + 1 : ep,
       };
     }

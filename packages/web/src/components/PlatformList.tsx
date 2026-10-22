@@ -46,6 +46,7 @@ export function PlatformList(): JSX.Element | null {
     const key = `custom:${index}`;
     const override = current.overrides[key];
     const wasOpen = current.openRow === key;
+    const lines = current.compare.filter((l) => l.row === key);
     dispatch({ type: 'removePlatform', index });
     const mk = `undo-hardware-${++undoSeq.current}`;
     const undo = () => {
@@ -55,7 +56,7 @@ export function PlatformList(): JSX.Element | null {
         void message.warning(tr('hw.full', { n: CUSTOM_PLATFORMS_MAX }));
         return;
       }
-      dispatch({ type: 'restorePlatform', index, value, ...(override ? { override } : {}), wasOpen });
+      dispatch({ type: 'restorePlatform', index, value, ...(override ? { override } : {}), wasOpen, lines });
     };
     void message.open({
       key: mk,

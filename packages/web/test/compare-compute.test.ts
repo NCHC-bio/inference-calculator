@@ -1,7 +1,7 @@
 import { estimatePerformance, quantOptions } from '@nchc/core';
 import { describe, expect, it } from 'vitest';
 import { getBundle } from '../src/bundle';
-import { computeCompare, variantGroups } from '../src/compute/compare';
+import { cardCounts, computeCompare, variantGroups } from '../src/compute/compare';
 import { computeMain } from '../src/compute/compute';
 import { performanceQueryOf, rowPerf } from '../src/compute/query';
 import { defaultState, reduce, type CalcState, type CompareSpec } from '../src/state/state';
@@ -175,5 +175,44 @@ describe('variantGroups model', () => {
     expect(gemma12.specs[0]!.quant).toBe('int4-awq');
     const llama = items.find((i) => i.specs[0]!.model === 'llama-3.3-70b-instruct-fp8')!;
     expect(llama.specs[0]!.quant).toBeUndefined();
+  });
+});
+
+describe('final review fixes', () => {
+  it('platform variants carry the platform name and sub-label', () => {
+    const s = withLines(base, [{ row: H200 }]);
+    const main = computeMain(b, s);
+    const g = variantGroups(b, s, main, computeCompare(b, s, main)!.lines[0]!).find((x) => x.key === 'platform')!;
+    const h100 = g.items.find((i) => i.specs[0]!.row === H100)!;
+    expect(h100.label).toMatchObject({ kind: 'platform', name: b.platforms[H100]!.name, sub: b.platforms[H100]!.sub, unit: 'gpu' });
+  });
+
+  it("curveUsers holds each line's maxConcurrent, so the cap is a core point", () => {
+    const cv = view(withLines(base, [{ row: H200 }, { row: H100 }]));
+    for (const l of cv.lines) {
+      const mc = l.perf!.maxConcurrent;
+      if (mc > 0 && mc <= cv.usersMax) expect(cv.curveUsers).toContain(mc);
+    }
+    expect(cv.curveUsers.length).toBeLessThanOrEqual(64);
+  });
+
+  it('the GPUs sweep reaches large setups and includes every line count', () => {
+    const cv = view(withLines({ ...base, users: 5000 }, [{ row: H200, gpus: 128 }, { row: H100, gpus: 8 }]));
+    expect(cv.cardsMax).toBe(256);
+    const xs = cv.lines[0]!.sweep!.map((p) => p.x);
+    expect(xs).toContain(128);
+    expect(xs.length).toBeLessThanOrEqual(64);
+    const list = cardCounts(256, [128, 8]);
+    expect(list).toEqual(expect.arrayContaining([1, 8, 128, 256]));
+    expect(list.length).toBe(64);
+    expect(list.every((v, i) => i === 0 || v > list[i - 1]!)).toBe(true);
+  });
+
+  it('changed.quant compares the resolved quant with the sentence', () => {
+    const fallback = view(withLines(base, [{ row: H200, quant: 'int4-awq' }])).lines[0]!;
+    expect(fallback.changed.quant).toBe(false);
+    const other = view(withLines(base, [{ row: H200, model: 'gpt-oss-20b' }])).lines[0]!;
+    expect(other.quant).not.toBe(base.quant);
+    expect(other.changed.quant).toBe(true);
   });
 });

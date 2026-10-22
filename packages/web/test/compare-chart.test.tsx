@@ -1,4 +1,4 @@
-import { fireEvent } from '@testing-library/react';
+import { cleanup, fireEvent } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { renderStore as render } from './helpers';
 import { CompareChart, LETTERS, SERIES, type CompareChartProps, type CompareSeries } from '../src/components/CompareChart';
@@ -77,12 +77,15 @@ describe('CompareChart', () => {
     expect(onHover).toHaveBeenLastCalledWith(null);
   });
 
-  it('the tooltip lists every line at the hovered x, — outside its range', () => {
-    const series = [line(0, [[1, 50], [100, 30]]), line(1, [[1, 40], [5, 35]])];
+  it('the tooltip shows core points only: — where a line has no point at that x', () => {
+    const series = [line(0, [[1, 50], [10, 42], [100, 30]]), line(1, [[1, 40], [5, 35]])];
     const { container } = render(<CompareChart {...props({ series, hover: 10 })} />);
     const tip = container.querySelector('.cmp-tip')!;
     expect(tip.textContent).toContain('x10');
-    expect(tip.textContent).toMatch(/A\s*\d+ t\/s/);
+    expect(tip.textContent).toContain('42 t/s');
+    cleanup();
+    const between = render(<CompareChart {...props({ series, hover: 7 })} />);
+    expect(between.container.querySelector('.cmp-tip')!.textContent).toMatch(/A\s*—/);
     expect(tip.textContent).toMatch(/B\s*—/);
   });
 
@@ -101,5 +104,12 @@ describe('CompareChart', () => {
     const sorted = [...ys].sort((a, b) => a - b);
     sorted.slice(1).forEach((y, i) => expect(y - sorted[i]!).toBeGreaterThanOrEqual(12));
   });
-});
 
+  it('hover snaps to the nearest sampled x', () => {
+    const onHover = vi.fn();
+    const { container } = render(<CompareChart {...props({ onHover, x: { min: 0, max: 100, log: false }, snap: [0, 40, 100] })} />);
+    fireEvent.mouseMove(container.querySelector('svg')!, { clientX: 46 + ((600 - 46 - 24) * 47) / 100 });
+    expect(onHover).toHaveBeenLastCalledWith(40);
+  });
+
+});

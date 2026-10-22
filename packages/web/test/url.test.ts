@@ -108,12 +108,17 @@ describe('url', () => {
     it('encodes in slot order', () => {
       const s: CalcState = { ...s0, compare: [{ id: 5, slot: 2, row: 'nano4-h200' }, { id: 6, slot: 0, row: 'nano5-h100' }] };
       expect(lines(decodeUrl(b, encodeUrl(s)))).toEqual([{ row: 'nano5-h100' }, { row: 'nano4-h200' }]);
+      expect(decodeUrl(b, encodeUrl(s)).compare.map((l) => l.slot)).toEqual([0, 2]);
     });
     it('ignores a malformed cmp', () => {
       expect(decodeUrl(b, 'cmp=%%%').compare).toEqual([]);
       expect(decodeUrl(b, 'cmp=' + b64({ row: 'nano4-h200' })).compare).toEqual([]);
       const many = Array.from({ length: 9 }, () => ({ row: 'nano4-h200', gpus: 2 }));
       expect(decodeUrl(b, 'cmp=' + b64([{ row: 'no-such' }, ...many])).compare).toHaveLength(5);
+    });
+    it('keeps each line in its slot (letters survive a shared link)', () => {
+      const s: CalcState = { ...s0, compare: [{ id: 1, slot: 0, row: 'nano4-h200' }, { id: 3, slot: 2, row: 'nano5-h100' }] };
+      expect(decodeUrl(b, encodeUrl(s)).compare.map((l) => [l.row, l.slot])).toEqual([['nano4-h200', 0], ['nano5-h100', 2]]);
     });
     it('no cmp param without lines', () => {
       expect(new URLSearchParams(encodeUrl(s0)).has('cmp')).toBe(false);

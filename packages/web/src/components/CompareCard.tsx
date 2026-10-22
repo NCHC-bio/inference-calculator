@@ -324,12 +324,7 @@ export function CompareCard({ width }: { width?: number } = {}): JSX.Element {
         if (l.kind === 'gpus') {
           label = `${fmtIn(lang, l.n)} ${unitWord(tr, v.info.unit, fmtIn(lang, l.n))}${l.half ? tr('compare.variant.half') : ''}`;
         }
-        if (l.kind === 'platform') {
-          const line = view?.lines.find((x) => x.line.row === l.row);
-          const info = line?.info;
-          const name = info ? `${info.name} ${subLabelText(info.sub, lang, tr)}` : l.row;
-          label = `${name}（${fmtIn(lang, l.count)}）`;
-        }
+        if (l.kind === 'platform') label = `${l.name} ${subLabelText(l.sub, lang, tr)}（${fmtIn(lang, l.count)} ${unitWord(tr, l.unit, fmtIn(lang, l.count))}）`;
         return { key: it.key, label, ...(l.kind === 'quant' && l.all ? { style: { borderTop: '1px solid rgba(128,128,128,.2)' } } : {}) };
       }),
     }));
@@ -437,6 +432,7 @@ function Charts({ view, dashed, users, target, hoverUsers, setHoverUsers, hoverC
       const points = v.users.map((p) => ({ x: p.x, y: p[key] }));
       const at = v.users.find((p) => p.x === users);
       const mc = v.perf?.maxConcurrent ?? 0;
+      // maxConcurrent is one of curveUsers, so the mark sits on core's own point (none when memory ends the line first).
       const capY = mc > 0 ? valueAt(points, mc) : null;
       return {
         key: String(v.line.id),
@@ -485,6 +481,7 @@ function Charts({ view, dashed, users, target, hoverUsers, setHoverUsers, hoverC
             yTitle={tr('compare.y.tps')}
             band={{ y: target.min, dir: 'above' }}
             refLine={you}
+            snap={view.curveUsers}
             hover={hoverUsers}
             onHover={setHoverUsers}
             tip={{ x: tipUsers, y: (v) => tr('compare.tps', { v: f(v) }) }}
@@ -503,6 +500,7 @@ function Charts({ view, dashed, users, target, hoverUsers, setHoverUsers, hoverC
             yTitle={tr('compare.y.ttft')}
             band={{ y: target.ttft, dir: 'below' }}
             refLine={you}
+            snap={view.curveUsers}
             hover={hoverUsers}
             onHover={setHoverUsers}
             tip={{ x: tipUsers, y: (v) => tr('compare.ttft', { v: f(v, 1) }) }}
@@ -523,6 +521,7 @@ function Charts({ view, dashed, users, target, hoverUsers, setHoverUsers, hoverC
                 xTitle={tr('compare.x.cards')}
                 yTitle={tr('compare.y.tps')}
                 band={{ y: target.min, dir: 'above' }}
+                snap={[...new Set(cards.flatMap((c) => c.points.map((q) => q.x)))].sort((a, c) => a - c)}
                 hover={hoverCards}
                 onHover={setHoverCards}
                 tip={{ x: (v) => tr('compare.tip.cards', { n: f(Math.round(v)) }), y: (v) => tr('compare.tps', { v: f(v) }) }}
