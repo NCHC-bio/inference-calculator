@@ -575,14 +575,19 @@ describe('verifyCommand', () => {
     expect(cmd).not.toContain('暖機');
     expect(cmd).toContain('只執行一次');
     expect(cmd).toContain('Median TTFT');
-    expect(cmd).toContain('Prefix cache hit rate');
+    // vLLM logs the hit rate as a percentage, so the note states the configured one as a percentage too.
+    expect(cmd).toContain('Prefix cache hit rate（最近 1000 個請求');
+    expect(cmd).toContain('應接近快取命中率 95.7%');
     expect(cmd).toContain('未重現');
     // The context includes the prefix: 126180 + 252.
     expect(cmd).toContain('--max-model-len 126432');
     const mac = resolvePlatform(bundle, 'mac-studio-m5u-512', 'fp8').platform;
-    expect(verifyCommand(mac, { tp: 1, replicas: 1 }, long, aw, 100, { ...fp8, kind: 'agent', agentShare: 0.033 })).toContain(
-      '--prefix-repetition-num-prefixes 100',
-    );
+    const macCmd = verifyCommand(mac, { tp: 1, replicas: 1 }, long, aw, 100, { ...fp8, kind: 'agent', agentShare: 0.033 });
+    expect(macCmd).toContain('--prefix-repetition-num-prefixes 100');
+    // mlx_lm.server logs no hit rate; the note points at the per-request cached_tokens instead.
+    expect(macCmd).not.toContain('Prefix cache hit rate');
+    expect(macCmd).toContain('cached_tokens');
+    expect(macCmd).toContain('接近前綴的 120754 token');
   });
   it('several replicas: prefixes and concurrency are the replica share; num-prompts is a multiple of the prefixes (final-review I2)', () => {
     const { platform } = resolvePlatform(bundle, 'nano4-h200', 'fp8');

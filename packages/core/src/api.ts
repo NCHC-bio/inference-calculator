@@ -1383,8 +1383,14 @@ export function verifyCommand(
             'TTFT 只剩排程時間（GitHub issue #19）。同一段前綴的每個請求都接一段新的隨機內容，所以一次執行中，' +
             '每段前綴的第一個請求之後就是估算的情境（前綴命中、新內容要 prefill）',
           '# 比對 TTFT 用 Median TTFT，不要用 Mean：未命中的請求是少數的慢尾巴，會拉高平均' +
-            '（每段前綴的第一個請求；有些模型要第二個請求之後才整段命中，例如 Gemma 4，issue #19 實測；以及前綴還在 prefill 時就送出的同前綴請求）。' +
-            `伺服器日誌的 Prefix cache hit rate 應接近快取命中率 ${hit}（因上述未命中而略低），明顯偏低表示前綴被逐出`,
+            '（每段前綴的第一個請求；有些模型要第二個請求之後才整段命中，例如 Gemma 4，issue #19 實測；以及前綴還在 prefill 時就送出的同前綴請求）；' +
+            '每段前綴至少有 10 個請求，所以未命中不到一半，中位數落在命中的請求。' +
+            // vLLM v0.32.0 logs the hit rate as a percentage over the last 1000 requests (vllm/v1/metrics/loggers.py
+            // L321-L323, stats.py L47 CachingMetrics); mlx-lm v0.32.2 logs none, but returns usage.prompt_tokens_details
+            // .cached_tokens per request (mlx_lm/server.py L1494-L1497, L1740-L1741).
+            (platform.engine === 'mlx'
+              ? `mlx_lm.server 沒有命中率日誌：回應的 usage.prompt_tokens_details.cached_tokens 是該請求命中的 token 數，命中時應接近前綴的 ${prefix} token`
+              : `伺服器日誌的 Prefix cache hit rate（最近 1000 個請求，請看執行快結束時的值）應接近快取命中率 ${+(hit * 100).toFixed(1)}%（因上述未命中而略低），明顯偏低表示前綴被逐出`),
           `# 未重現：估算時每個常駐的上下文佔 輸入 + 輸出 = ${workload.inputTokens + workload.outputTokens} token 的 KV，bench 只留住前綴（${pct}%）；` +
             '記憶體不夠時 vLLM 不會拒絕，而是逐出前綴（命中率下降、TTFT 變長、吞吐下降），記憶體上限要從這些現象判斷；' +
             '工作階段是隨機挑選的，不是各自輪流生成',
