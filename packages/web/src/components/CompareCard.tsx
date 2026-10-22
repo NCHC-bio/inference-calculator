@@ -117,7 +117,7 @@ function variantText(l: VariantLabel, tr: TFn, lang: string): string {
   const b = getBundle();
   switch (l.kind) {
     case 'model':
-      return `${l.name}（${sizeText(tr, lang, l.totalB, l.activeB)}）`;
+      return `${l.name}・${sizeText(tr, lang, l.totalB, l.activeB)}`;
     case 'quant':
       return l.all ? tr('compare.variant.quantAll') : (b.quantization[l.id]?.name ?? l.id);
     case 'workload':
@@ -256,15 +256,16 @@ function Summary({ view, color, dashed, actions, narrow }: CardCtx & { narrow: b
           key: 'plan',
           // Actions sit under the name (as on the narrow cards), so the table fits the card at every width.
           render: (_, v) => (
-            <div style={{ minWidth: 220, maxWidth: 300 }}>
+            <div style={{ minWidth: 200, maxWidth: 280 }}>
               <LineName v={v} color={color(v)} dashed={dashed(v)} />
               <div style={{ marginTop: 4, paddingInlineStart: 38 }}>{actions(v)}</div>
             </div>
           ),
         },
-        { title: <span style={nowrap}>{tr('compare.col.verdict')}</span>, key: 'verdict', render: (_, v) => <Verdict v={v} /> },
+        // Headers may wrap (English ones are long); the values stay on one line.
+        { title: tr('compare.col.verdict'), key: 'verdict', render: (_, v) => <Verdict v={v} /> },
         ...METRICS.map((m) => ({
-          title: <span style={nowrap}>{tr(m.title)}</span>,
+          title: tr(m.title),
           key: m.k,
           align: m.align,
           render: (_: unknown, v: LineView) => metric(v, m.k, tr, lang),
