@@ -1242,9 +1242,13 @@ export function quantFields(model: Model, res: QuantResolution): QuantFields {
  *   --prefix-repetition-output-len out --ignore-eos`, R_r = resident sessions per replica (vLLM v0.32.0
  *   vllm/benchmarks/datasets/datasets.py L1810-L1840, L4181-L4266; ignore_eos is defaulted only for the random datasets,
  *   vllm/benchmarks/serve.py L2133-L2139), so the prefix cache must hold R_r prefixes; `--num-prompts` is a multiple
- *   of R_r (each prefix gets num_prompts // R_r prompts, at least 10). Notes: run twice (the same --seed regenerates the
- *   same prefixes) and compare the second; not reproduced: the outputs of idle sessions (the bench holds P of the
- *   input + output tokens sized), and a memory shortfall shows as prefix evictions, not a refusal.
+ *   of R_r (each prefix gets num_prompts // R_r prompts, at least 10). Notes: run once and compare the median TTFT
+ *   (issue #19; was "run twice, compare the second": the dataset reseeds from --seed (datasets.py L4194-L4195), so a
+ *   second run repeats every prompt whole and hits the cache end to end; within one run each prompt draws a new suffix
+ *   (L4233-L4250), so after a prefix's first request(s) the run is the estimated hit; the misses are a slow tail the
+ *   median, printed by serve.py L1384, leaves out), check the server's "Prefix cache hit rate" (v1/metrics/loggers.py
+ *   L321-L323); not reproduced: the outputs of idle sessions (the bench holds P of the input + output tokens sized),
+ *   and a memory shortfall shows as prefix evictions, not a refusal.
  *   P = 0: `--dataset-name random` (bench defaults ignore_eos), with a note when idle resident sessions exist.
  * - `--num-prompts max(G × 10, 100)` (random dataset).
  * MLX (Mac): the same benchmark parameters against an `mlx_lm.server` endpoint. mlx_lm.server has no
@@ -1375,8 +1379,12 @@ export function verifyCommand(
           `# prefix_repetition：每份模型 ${residentRep} 個常駐${kind === 'agent' ? '工作階段' : '使用者'}各有一段 ${prefix} token 的固定前綴` +
             `（輸入 ${workload.inputTokens} × 快取命中率 ${hit}，四捨五入），每個請求隨機取其中一段，再接 ${suffix} token 的隨機內容；` +
             `--max-concurrency ${gRep} 個同時生成。前綴快取要同時留住 ${residentRep} 段前綴才會命中，所以會用到估算的常駐記憶體`,
-          '# 暖機：同一行 bench 指令先執行一次（相同的 --seed 產生相同的前綴），讓前綴進入快取，再執行第二次，以第二次的結果比對；' +
-            '第一次每段前綴的第一個請求必定未命中',
+          '# 只執行一次，不要以相同的 --seed 重跑：相同的 seed 會產生完全相同的請求（前綴和後面的隨機內容都相同），第二次整段命中快取，' +
+            'TTFT 只剩排程時間（GitHub issue #19）。同一段前綴的每個請求都接一段新的隨機內容，所以一次執行中，' +
+            '每段前綴的第一個請求之後就是估算的情境（前綴命中、新內容要 prefill）',
+          '# 比對 TTFT 用 Median TTFT，不要用 Mean：未命中的請求是少數的慢尾巴，會拉高平均' +
+            '（每段前綴的第一個請求；有些模型要第二個請求之後才整段命中，例如 Gemma 4，issue #19 實測；以及前綴還在 prefill 時就送出的同前綴請求）。' +
+            `伺服器日誌的 Prefix cache hit rate 應接近快取命中率 ${hit}（因上述未命中而略低），明顯偏低表示前綴被逐出`,
           `# 未重現：估算時每個常駐的上下文佔 輸入 + 輸出 = ${workload.inputTokens + workload.outputTokens} token 的 KV，bench 只留住前綴（${pct}%）；` +
             '記憶體不夠時 vLLM 不會拒絕，而是逐出前綴（命中率下降、TTFT 變長、吞吐下降），記憶體上限要從這些現象判斷；' +
             '工作階段是隨機挑選的，不是各自輪流生成',

@@ -570,8 +570,12 @@ describe('verifyCommand', () => {
     );
     expect(cmd).not.toContain('--random-prefix-len');
     expect(cmd).toContain('100 個工作階段 × 同時生成比例 0.033');
-    // The note says what is and is not reproduced, and how to warm the cache.
-    expect(cmd).toContain('暖機');
+    // The note says what is and is not reproduced, and how to read the run (issue #19: a second run with the same
+    // --seed repeats every prompt whole, so it hits the cache end to end and its TTFT says nothing).
+    expect(cmd).not.toContain('暖機');
+    expect(cmd).toContain('只執行一次');
+    expect(cmd).toContain('Median TTFT');
+    expect(cmd).toContain('Prefix cache hit rate');
     expect(cmd).toContain('未重現');
     // The context includes the prefix: 126180 + 252.
     expect(cmd).toContain('--max-model-len 126432');
