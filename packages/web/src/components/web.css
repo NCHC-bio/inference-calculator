@@ -225,3 +225,22 @@ body {
 .compare-card .ant-table td {
   white-space: nowrap;
 }
+
+/* Comparison chart tooltip (design v9 §4.3): follows the crosshair, clamped inside the chart. */
+.cmp-tip {
+  position: absolute;
+  top: 6px;
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 8px;
+  white-space: nowrap;
+  transition: opacity 0.2s;
+}
+.cmp-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-inline-end: 6px;
+}
