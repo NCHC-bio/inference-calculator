@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-NCHC inference deployment calculator: given a model, a user count and a workload type, it answers how many GPUs each platform (H100, H200, GB200, Mac Studio/mini, DGX Spark) needs, with per-user speed, time to first token, a provenance basis for every number, and a verify command to run on the machine. There is no mode switch: the reverse question (how many users my hardware serves, how fast at my user count) is the count control on that platform's row, and an expanded row is a workbench (speed, TTFT, usage bars, split, cards → speed and users → speed charts, suggested actions, verify command). Users can add custom hardware, models (Hugging Face import or manual), workloads and speed targets, and pin up to 3 setups for comparison. The website (v8) is done; the MCP server (`apps/mcp`) has not been started.
+NCHC inference deployment calculator: given a model, a user count and a workload type, it answers how many GPUs each platform (H100, H200, GB200, Mac Studio/mini, DGX Spark) needs, with per-user speed, time to first token, a provenance basis for every number, and a verify command to run on the machine. There is no mode switch: the reverse question (how many users my hardware serves, how fast at my user count) is the count control on that platform's row, and an expanded row is a workbench (speed, TTFT, usage bars, split, cards → speed and users → speed charts, suggested actions, verify command). Users can add custom hardware, models (Hugging Face import or manual), workloads and speed targets, and compare up to 5 setups (a 比較 checkbox on each row, 「換一項比較」 variants that change one thing: model, precision, task, read length, count or platform) as a summary plus overlaid users → speed, users → TTFT and GPUs → speed charts; comparison lines are live (they follow the sentence) and travel in the URL (`cmp=`). The website (v9) is done; the MCP server (`apps/mcp`) has not been started.
 
 Docs, README, spec and config comments are in Traditional Chinese (zh-TW). Commit messages are in English, conventional-commit style (`feat(web):`, `fix:`, `docs:`, `test(web):`).
 
@@ -78,6 +78,7 @@ Hugging Face ──data:import──▶ config/models/*.yaml
 ## Design docs
 
 - `docs/superpowers/specs/2026-10-19-inference-calculator-design.md`: the main spec (computation model §5, config §7, web §8, MCP §9). Numbered "Ruling R##" decisions referenced in code comments are recorded there.
+- `docs/superpowers/specs/2026-10-22-compare-v9-design.md`: the comparison charts of website v9 (implemented; visual spec `docs/prototypes/calculator-demo-v9.html`); replaces the v8 pinned comparison table.
 - `docs/superpowers/specs/2026-10-21-direct-manipulation-design.md`: the binding design of the website v8 (implemented): direct manipulation, workbench, custom inputs, motion; visual spec `docs/prototypes/calculator-demo-v8.html`. §11 lists the rulings taken while implementing v8 (web W1–W11, core R1–R7).
 - `docs/prototypes/calculator-demo-v8-requirements.md` (local file, not committed; may be absent): history — the user feedback after phase 2 that demo v8 answered; the design doc above supersedes it.
 - `docs/superpowers/plans/`: implementation plans per phase.
