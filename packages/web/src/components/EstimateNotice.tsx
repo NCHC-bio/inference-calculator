@@ -1,9 +1,10 @@
 import { GithubOutlined } from '@ant-design/icons';
 import type { ResultWarning } from '@nchc/core';
 import type { EstimatedFeature } from '@nchc/data/hf';
-import { Alert, Button, Collapse, Space, Typography } from 'antd';
-import type { JSX } from 'react';
+import { Alert, Button, Collapse, Space, Tag, Typography } from 'antd';
+import { useState, type JSX } from 'react';
 import { useT, type MsgKey } from '../i18n';
+import { transitionMs } from '../motion';
 import { reportModelUrl } from '../reportModel';
 import { useCalc } from '../state/store';
 
@@ -26,11 +27,15 @@ export const FEATURE: Record<EstimatedFeature, MsgKey> = {
 };
 const featureKey = (f: string): MsgKey | undefined => (Object.hasOwn(FEATURE, f) ? FEATURE[f as EstimatedFeature] : undefined);
 
+/** Models whose notice the user closed, until the page reloads (key: repo@sha, or the catalog id). */
+const dismissed = new Set<string>();
+
 /**
  * The notice of an estimated result (core's nonstandard-config warning): the model's config is not standard, so the
  * listed structures are conservative estimates. One sentence names them in the user's language; what was assumed for
  * each is one step away (Collapse); an imported model offers a pre-filled request to model the architecture
- * precisely, so later imports of that kind get precise numbers.
+ * precisely, so later imports of that kind get precise numbers. Closable: it folds into a small 推估 tag that opens it
+ * again (the close animates with antd's own motion); closed stays closed for that model until the page reloads.
  */
 export function EstimateNotice({ warning }: { warning: ResultWarning }): JSX.Element {
   const tr = useT();
@@ -41,7 +46,37 @@ export function EstimateNotice({ warning }: { warning: ResultWarning }): JSX.Ele
     return k ? tr(k) : f;
   });
   const hf = s.customModel?.kind === 'hf' ? s.customModel : undefined;
+  const key = hf ? `${hf.repo}@${hf.sha}` : s.model;
+  // Read on every render, so switching to another model shows its own state; `rerender` only redraws after a change.
+  const [, rerender] = useState(0);
+  const closed = dismissed.has(key);
   const reason = `estimated: ${items.map((i) => `${i.feature} (${i.detail})`).join('; ')}`;
+  if (closed) {
+    const reopen = () => {
+      dismissed.delete(key);
+      rerender((n) => n + 1);
+    };
+    return (
+      <Tag
+        data-testid="estimate-reopen"
+        color="warning"
+        role="button"
+        tabIndex={0}
+        aria-label={tr('est.reopen')}
+        className="fade-in"
+        style={{ marginTop: 8, cursor: 'pointer' }}
+        onClick={reopen}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            reopen();
+          }
+        }}
+      >
+        {tr('est.tag')}
+      </Tag>
+    );
+  }
   return (
     <Alert
       data-testid="estimate-notice"
@@ -49,6 +84,14 @@ export function EstimateNotice({ warning }: { warning: ResultWarning }): JSX.Ele
       showIcon
       className="fade-in"
       style={{ marginTop: 8 }}
+      closable={{ 'aria-label': tr('est.dismiss') }}
+      onClose={() => {
+        // antd animates the close with the shared motion token; the tag replaces it when that ends (0 ms when reduced).
+        window.setTimeout(() => {
+          dismissed.add(key);
+          rerender((n) => n + 1);
+        }, transitionMs());
+      }}
       title={tr('est.title')}
       description={
         <>

@@ -608,6 +608,29 @@ describe('EstimateNotice (issue #17)', () => {
     expect(screen.getByText(CUSTOM_MODEL_WARNING.text)).toBeInTheDocument();
   });
 
+  it('closing folds the notice into a tag that opens it again; another model keeps its own notice', async () => {
+    const { model, source } = importedFixture();
+    const estimates = [{ feature: 'linear-attention', detail: 'Gated DeltaNet layers' }];
+    const pick = (sha: string) =>
+      act(() => send({ type: 'customModel', value: { kind: 'hf', repo: 'test-org/test-model', sha, imported: { model: { ...model, estimates }, source } } }));
+    renderWith(<AnswerLine />, '?w=chat');
+    pick('abc1234def');
+    const notice = await screen.findByTestId('estimate-notice');
+    await userEvent.click(within(notice).getByRole('button', { name: '關閉推估說明' }));
+    const tag = await screen.findByTestId('estimate-reopen');
+    expect(tag).toHaveTextContent('部分數值為推估');
+    expect(screen.queryByTestId('estimate-notice')).toBeNull();
+    // Another commit of the model is another model: its notice is open.
+    pick('fff1234def');
+    expect(await screen.findByTestId('estimate-notice')).toBeInTheDocument();
+    // Back to the closed one: still closed; the tag (keyboard too) opens it again.
+    pick('abc1234def');
+    const again = await screen.findByTestId('estimate-reopen');
+    again.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(await screen.findByTestId('estimate-notice')).toBeInTheDocument();
+  });
+
   it('a model without estimates shows no notice', async () => {
     const { model, source } = importedFixture();
     renderWith(<AnswerLine />, '?w=chat');
