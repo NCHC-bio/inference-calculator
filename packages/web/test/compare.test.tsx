@@ -1,19 +1,29 @@
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { App } from '../src/App';
-import { t, type MsgKey } from '../src/i18n';
 import { getBundle } from '../src/bundle';
-import { withQuant } from '../src/components/Workbench';
-import { CUSTOM_MODEL_WARNING } from '@nchc/core';
-import { useEffect } from 'react';
-import { CompareTable } from '../src/components/CompareTable';
-import type { Action, Pin } from '../src/state/state';
-import { useCalc } from '../src/state/store';
-import { renderStore, shown } from './helpers';
+import { CompareCard } from '../src/components/CompareCard';
+import { computeMain } from '../src/compute/compute';
+import { rowPerf } from '../src/compute/query';
+import { t, type MsgKey } from '../src/i18n';
+import { decodeUrl, encodeUrl } from '../src/state/url';
+import { defaultState, type CompareSpec } from '../src/state/state';
+import { renderStore } from './helpers';
 
 const zh = (k: MsgKey, v?: Record<string, string | number>) => t('zh-TW', k, v);
+const b = getBundle();
 const H200 = 'nano4-h200';
+const H100 = 'nano5-h100';
+const MAC = 'mac-studio-m5u-512';
+const fmt = (n: number, d = 0) => new Intl.NumberFormat('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }).format(n);
+
+/** Search string with the given comparison lines (and chat, `users`). */
+function search(lines: CompareSpec[], users = 60): string {
+  const s0 = defaultState(b);
+  const s = { ...decodeUrl(b, `w=chat&n=${users}`), compare: lines.map((l, i) => ({ ...l, id: i + 1, slot: i })) };
+  return '?' + encodeUrl({ ...s0, ...s });
+}
 
 beforeEach(() => {
   cleanup();
@@ -21,214 +31,119 @@ beforeEach(() => {
 });
 
 const rowOf = (key: string) => screen.getAllByTestId('platform-row').find((x) => x.dataset.row === key)!;
+const card = () => screen.getByTestId('compare');
+const lines = () => within(card()).queryAllByTestId('compare-line');
+const isOpen = () => card().closest('.reveal')!.classList.contains('on');
 
-/** Open the H200 row's workbench and press 加入比較. */
-async function pin(): Promise<void> {
-  if (!screen.queryByTestId('workbench')) await userEvent.click(within(rowOf(H200)).getByTestId('row-name'));
-  const wb = await within(rowOf(H200)).findByTestId('workbench');
-  await userEvent.click(within(wb).getByRole('button', { name: /加入比較/ }));
-}
-const dataRows = () => document.querySelectorAll('.compare-card tbody tr.ant-table-row');
-
-describe('comparison table', { timeout: 20000 }, () => {
-  it('appears after the first pin, with the eight columns', async () => {
+describe('comparison card', { timeout: 30000 }, () => {
+  it("is closed until a row's 比較 is checked, then shows one line; unchecking closes it", async () => {
     render(<App />);
-    expect(screen.getByTestId('compare').closest('.reveal')).not.toHaveClass('on');
-    await pin();
-    const card = await screen.findByTestId('compare');
-    expect(card.closest('.reveal')).toHaveClass('on');
-    await waitFor(() => expect(dataRows()).toHaveLength(1));
-    for (const k of ['compare.platform', 'compare.count', 'compare.model', 'compare.users', 'compare.tps', 'compare.ttft', 'compare.max', 'compare.kw'] as const) {
-      expect(within(card).getAllByText(zh(k)).length).toBeGreaterThan(0);
-    }
-    const p = getBundle().platforms[H200]!;
-    expect(dataRows()[0]!.textContent).toContain(`${p.name} ${p.sub}`);
-    expect(dataRows()[0]!.textContent).not.toMatch(/FP8（FP8）/);
-    await shown(zh('pin.added'));
+    expect(isOpen()).toBe(false);
+    await userEvent.click(within(rowOf(H200)).getByRole('checkbox', { name: zh('row.compare') }));
+    await waitFor(() => expect(lines()).toHaveLength(1));
+    expect(isOpen()).toBe(true);
+    expect(screen.queryByTestId('workbench')).toBeNull();
+    await userEvent.click(within(rowOf(H200)).getByRole('checkbox', { name: zh('row.compare') }));
+    await waitFor(() => expect(isOpen()).toBe(false));
   });
 
-  it('the 4th pin is rejected with a message', async () => {
+  it('换一項比較 → 換模型 adds a line with the model in bold and the source count', async () => {
+    history.replaceState(null, '', '/' + search([{ row: H200, gpus: 2 }]));
     render(<App />);
-    await pin();
-    await pin();
-    await pin();
-    await waitFor(() => expect(dataRows()).toHaveLength(3));
-    await pin();
-    await shown(zh('pin.max', { n: 3 }));
-    expect(dataRows()).toHaveLength(3);
+    await waitFor(() => expect(lines()).toHaveLength(1));
+    await userEvent.click(within(lines()[0]!).getByRole('button', { name: new RegExp(zh('compare.variant')) }));
+    await userEvent.click(await screen.findByText(zh('compare.variant.model')));
+    await userEvent.click(await screen.findByText(new RegExp(`^${b.models['gpt-oss-20b']!.name}`)));
+    await waitFor(() => expect(lines()).toHaveLength(2));
+    const added = lines()[1]!;
+    expect(within(added).getByText(b.models['gpt-oss-20b']!.name).tagName).toBe('B');
+    expect(added.textContent).toContain('× 2');
   });
 
-  it('delete removes one row; clear removes all and hides the card', async () => {
+  it('其他精度各加一條 at four lines adds one and warns', async () => {
+    history.replaceState(null, '', '/' + search([{ row: H200, model: 'gemma-4-31b-it' }, { row: H100 }, { row: MAC }, { row: H200, gpus: 1 }]));
     render(<App />);
-    await pin();
-    await pin();
-    await waitFor(() => expect(dataRows()).toHaveLength(2));
-    await userEvent.click(within(dataRows()[0] as HTMLElement).getByRole('button', { name: zh('compare.delete') }));
-    await waitFor(() => expect(dataRows()).toHaveLength(1));
-    await userEvent.click(screen.getByText(zh('compare.clear')));
-    await waitFor(() => expect(screen.getByTestId('compare').closest('.reveal')).not.toHaveClass('on'));
+    await waitFor(() => expect(lines()).toHaveLength(4));
+    await userEvent.click(within(lines()[0]!).getByRole('button', { name: new RegExp(zh('compare.variant')) }));
+    await userEvent.click(await screen.findByText(zh('compare.variant.quant')));
+    await userEvent.click(await screen.findByText(zh('compare.variant.quantAll')));
+    await waitFor(() => expect(lines()).toHaveLength(5));
+    expect(await screen.findByText(zh('compare.partial', { n: 5, k: 1 }))).toBeInTheDocument();
+    for (const l of lines()) expect(within(l).getByRole('button', { name: new RegExp(zh('compare.variant')) })).toBeDisabled();
   });
 
-  it('pins are snapshots: changing users later leaves the row unchanged', async () => {
+  it('a failing line shows 不達標 and 達不到 when it serves nobody', async () => {
+    history.replaceState(null, '', '/' + search([{ row: H200, gpus: 1, inputTokens: 128000 }], 5000));
     render(<App />);
-    await pin();
-    await waitFor(() => expect(dataRows()).toHaveLength(1));
-    const before = dataRows()[0]!.textContent;
-    const input = screen.getByRole('spinbutton', { name: zh('aria.users') });
-    await userEvent.clear(input);
-    await userEvent.type(input, '40{Enter}');
-    await waitFor(() => expect(new URLSearchParams(location.search).get('n')).toBe('40'));
-    expect(dataRows()[0]!.textContent).toBe(before);
+    await waitFor(() => expect(lines()).toHaveLength(1));
+    const l = lines()[0]!;
+    expect(l.textContent).toMatch(new RegExp(`${zh('compare.unreachable')}|${zh('compare.nofit')}`));
   });
-});
 
-describe('footer honesty', () => {
-  it('shows data version, accuracy link and the two not-included notes with hover explanations', async () => {
+  it('an infeasible Mac row can be compared and shows its verdict', async () => {
+    history.replaceState(null, '', `/?w=assist&n=5000`);
     render(<App />);
-    const footer = document.querySelector('footer')!;
-    expect(footer.textContent).toContain(getBundle().meta.dataVersion);
-    expect(within(footer).getByText(zh('footer.cost'))).toBeInTheDocument();
-    expect(within(footer).getByText(zh('footer.p95'))).toBeInTheDocument();
-    await userEvent.hover(within(footer).getByText(zh('footer.cost')));
-    await shown(zh('footer.cost.tip'));
-    await userEvent.hover(within(footer).getByText(zh('footer.p95')));
-    await shown(zh('footer.p95.tip'));
+    const m = computeMain(b, decodeUrl(b, 'w=assist&n=5000'));
+    expect(m.kind === 'main' && m.rows.find((r) => r.row === MAC)!.kind).toBe('infeasible');
+    await userEvent.click(within(rowOf(MAC)).getByRole('checkbox', { name: zh('row.compare') }));
+    await waitFor(() => expect(lines()).toHaveLength(1));
+    expect(lines()[0]!.textContent).toMatch(new RegExp(`${zh('compare.nofit')}|不達標`));
   });
 
-  it('準確度 opens the accuracy dialog', async () => {
+  it("values equal core: the H200 line's speed is rowPerf's", async () => {
+    const q = search([{ row: H200 }]);
+    history.replaceState(null, '', '/' + q);
     render(<App />);
-    await userEvent.click(within(document.querySelector('footer')!).getByText(zh('footer.accuracy')));
-    expect(await screen.findByRole('dialog')).toBeInTheDocument();
-  });
-});
-
-describe('model label', () => {
-  it('skips the quant suffix when the name already contains it as a token', () => {
-    expect(withQuant('Llama-3.3-70B-Instruct-FP8', 'FP8')).toBe('Llama-3.3-70B-Instruct-FP8');
-    expect(withQuant('Llama-3.3-70B-Instruct-fp8', 'FP8')).toBe('Llama-3.3-70B-Instruct-fp8');
-    expect(withQuant('gpt-oss-20b', 'MXFP4')).toBe('gpt-oss-20b（MXFP4）');
-    expect(withQuant('Model-FP8', 'FP')).toBe('Model-FP8（FP）');
-  });
-});
-
-describe('closed comparison', () => {
-  it('the container is inert while there are no pins and not after one pin', { timeout: 20000 }, async () => {
-    render(<App />);
-    const reveal = screen.getByTestId('compare').closest('.reveal')!;
-    const clear = () => screen.getByText(zh('compare.clear')).closest('button')!;
-    expect(clear().closest('[inert]')).toBe(reveal);
-    await pin();
-    await waitFor(() => expect(clear().closest('[inert]')).toBeNull());
+    await waitFor(() => expect(lines()).toHaveLength(1));
+    const s = decodeUrl(b, q);
+    const m = computeMain(b, s);
+    const r = m.kind === 'main' ? m.rows.find((x) => x.row === H200) : undefined;
+    if (r?.kind !== 'ok') throw new Error('H200 not ok');
+    const p = rowPerf(b, s, H200, { gpus: r.count });
+    expect(lines()[0]!.textContent).toContain(zh('compare.tps', { v: fmt(p.usage!.tokPerSecPerUser) }));
+    expect(lines()[0]!.textContent).toContain(zh('compare.ok'));
   });
 
-  it('each pin keeps its trust flags: a miss, 推估, 自訂 and the custom-model warning (review I2)', async () => {
-    const base: Omit<Pin, 'id'> = { platform: { row: 'p', name: 'P', sub: '' }, unit: 'gpu', count: 8, model: { name: 'M', quant: null }, users: 15, tps: 30, ttft: 1, max: 40, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] };
-    const pins: Omit<Pin, 'id'>[] = [
-      { ...base, platform: { row: 'p', name: 'Plain', sub: '' } },
-      { ...base, platform: { row: 'p', name: 'Missed', sub: '' }, ok: false, hasEstimate: true, hasUser: true, warnings: [CUSTOM_MODEL_WARNING] },
-    ];
-    function Seed() {
-      const [, dispatch] = useCalc();
-      useEffect(() => {
-        for (const pin of pins) dispatch({ type: 'pin', pin });
-      }, [dispatch]);
-      return null;
-    }
-    await act(async () => {
-      renderStore(
-        <>
-          <CompareTable />
-          <Seed />
-        </>,
-      );
+  it('a narrow container renders line cards instead of a table', () => {
+    history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }]));
+    renderStore(<CompareCard width={390} />);
+    expect(card().querySelector('table')).toBeNull();
+    expect(lines()).toHaveLength(2);
+  });
+
+  it('the cards chart shows only with two GPU setups; machines get a note', () => {
+    history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }, { row: MAC }]));
+    renderStore(<CompareCard width={1000} />);
+    expect(screen.getByTestId('compare-cards-chart').closest('.reveal')).toHaveClass('on');
+    expect(card().textContent).toContain(zh('compare.machines', { letters: 'C' }));
+    cleanup();
+    history.replaceState(null, '', '/' + search([{ row: H200 }]));
+    renderStore(<CompareCard width={1000} />);
+    expect(screen.getByTestId('compare-cards-chart').closest('.reveal')).not.toHaveClass('on');
+  });
+
+  it('delete and clear', async () => {
+    history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }]));
+    renderStore(<CompareCard width={1000} />);
+    await userEvent.click(within(lines()[0]!).getByRole('button', { name: zh('compare.delete') }));
+    await waitFor(() => expect(lines()).toHaveLength(1));
+    await userEvent.click(within(card()).getByRole('button', { name: zh('compare.clear') }));
+    await waitFor(() => expect(card().closest('.reveal')).not.toHaveClass('on'));
+  });
+
+  it('dashes only distinguish: when every line uses estimates all lines are solid and the note says so', () => {
+    history.replaceState(null, '', '/' + search([{ row: H200 }, { row: H100 }]));
+    renderStore(<CompareCard width={1000} />);
+    const s = decodeUrl(b, location.search);
+    const m = computeMain(b, s);
+    if (m.kind !== 'main') throw new Error('no main');
+    const est = [H200, H100].map((row) => {
+      const r = m.rows.find((x) => x.row === row)!;
+      return r.kind === 'ok' && r.perf.hasEstimate;
     });
-    await waitFor(() => expect(dataRows()).toHaveLength(2));
-    const [plain, missed] = [...dataRows()] as HTMLElement[];
-    expect(within(plain!).getByLabelText(zh('compare.ok'))).toBeInTheDocument();
-    expect(within(plain!).queryByText(zh('tag.estimate'))).toBeNull();
-    expect(within(plain!).queryByText(zh('tag.user'))).toBeNull();
-    expect(within(missed!).getByLabelText(zh('compare.miss'))).toBeInTheDocument();
-    expect(within(missed!).getByText(zh('tag.estimate'))).toBeInTheDocument();
-    expect(within(missed!).getByText(zh('tag.user'))).toBeInTheDocument();
-    expect(within(screen.getByTestId('compare')).getAllByText(CUSTOM_MODEL_WARNING.text)).toHaveLength(1);
+    expect(est.every(Boolean)).toBe(true);
+    for (const p of card().querySelectorAll('path.series')) expect(p.getAttribute('stroke-dasharray')).toBeNull();
+    expect(card().textContent).toContain(zh('compare.note.allEst'));
   });
 });
 
-describe('pins follow the current language (v8 minor 6)', () => {
-  it('a pin made in zh-TW is formatted in en after the switch; its values stay frozen', async () => {
-    const pins: Omit<Pin, 'id'>[] = [
-      {
-        platform: { row: 'custom:0', name: 'Lab GPU', sub: { key: 'platforms.customSub', vars: { mem: 80, gpn: 8, engine: 'vLLM' } } },
-        unit: 'gpu',
-        count: 1200,
-        model: { name: 'gpt-oss-20b', quant: 'MXFP4' },
-        users: 1500,
-        tps: 31.4,
-        ttft: null,
-        max: 2400,
-        kw: 1.25,
-        ok: true,
-        hasEstimate: false,
-        hasUser: false,
-        warnings: [],
-      },
-    ];
-    let send: (a: Action) => void = () => {};
-    function Seed() {
-      const [, dispatch] = useCalc();
-      send = dispatch;
-      useEffect(() => {
-        for (const pin of pins) dispatch({ type: 'pin', pin });
-      }, [dispatch]);
-      return null;
-    }
-    await act(async () => {
-      renderStore(
-        <>
-          <CompareTable />
-          <Seed />
-        </>,
-      );
-    });
-    await waitFor(() => expect(dataRows()).toHaveLength(1));
-    const cells = () => [...(dataRows()[0] as HTMLElement).querySelectorAll('td')].map((td) => td.textContent);
-    expect(cells().slice(0, 8)).toEqual([
-      'Lab GPU 80 GB × 8／台・vLLM',
-      '1,200 張',
-      'gpt-oss-20b（MXFP4）',
-      '1,500',
-      '31',
-      zh('status.unverified'),
-      '2,400',
-      '1.3',
-    ]);
-    act(() => send({ type: 'lang', lang: 'en' }));
-    const en = (k: MsgKey) => t('en', k);
-    await waitFor(() => expect(cells()[1]).toBe('1,200 GPUs'));
-    expect(cells().slice(0, 8)).toEqual([
-      'Lab GPU 80 GB × 8 per machine · vLLM',
-      '1,200 GPUs',
-      'gpt-oss-20b (MXFP4)',
-      '1,500',
-      '31',
-      en('status.unverified'),
-      '2,400',
-      '1.3',
-    ]);
-    expect(screen.getByTestId('compare').querySelector('thead')!.textContent).toContain(en('compare.platform'));
-  });
-
-  it('a real pin, then the language switch: the count unit turns English, the numbers stay', async () => {
-    render(<App />);
-    await pin();
-    await waitFor(() => expect(dataRows()).toHaveLength(1));
-    const cells = () => [...(dataRows()[0] as HTMLElement).querySelectorAll('td')].map((td) => td.textContent ?? '');
-    const before = cells();
-    expect(before[1]).toMatch(/ 張$/);
-    await userEvent.click(screen.getByText(zh('lang.en')));
-    await waitFor(() => expect(cells()[1]).toMatch(/ GPUs$/));
-    const after = cells();
-    expect(after[1]!.replace(' GPUs', '')).toBe(before[1]!.replace(' 張', ''));
-    expect(after.slice(3, 8)).toEqual(before.slice(3, 8));
-  });
-});

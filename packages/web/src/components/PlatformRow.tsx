@@ -1,12 +1,12 @@
 import { CheckCircleOutlined, CloseCircleOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
-import type { Bundle } from '@nchc/schema';
-import { Button, Space, Tag, theme, Typography } from 'antd';
+import { Button, Checkbox, Space, Tag, theme, Tooltip, Typography } from 'antd';
 import type { JSX } from 'react';
 import type { OkRow } from '../compute/compute';
 import { unitWord, useLang, useT } from '../i18n';
 import type { TFn } from '../i18n/t';
 import { useTween } from '../motion/useTween';
-import { customIndex, type CalcState, type RowKey, type SubLabel } from '../state/state';
+import type { SubLabel } from '../state/state';
+import type { RowInfo } from '../compute/rowInfo';
 import { CapacityBar } from './CapacityBar';
 import { CountControl } from './CountControl';
 import { Explain } from './Explain';
@@ -16,38 +16,7 @@ import { WHY } from './why';
 const fmt = (lang: string, n: number, digits = 0) =>
   new Intl.NumberFormat(lang, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(n);
 
-/** What a row shows about its platform: catalog entry or the user's custom one. */
-export type RowInfo = {
-  name: string;
-  /** Catalog sub-label, or the custom platform's memory × count and engine. */
-  sub: SubLabel;
-  unit: 'gpu' | 'machine';
-  gpusPerNode: number;
-  /** Index into customPlatforms for a custom row. */
-  custom: number | null;
-  /** Bundle group ('nchc' | 'self'); custom rows count as self-hosted. */
-  self: boolean;
-  /** Catalog hardware id (for its TDP record). */
-  hardware: string | null;
-};
-
-export function rowInfo(b: Bundle, s: CalcState, row: RowKey): RowInfo {
-  const i = customIndex(row);
-  if (i !== null) {
-    const p = s.customPlatforms[i]!;
-    return {
-      name: p.name,
-      sub: { key: 'platforms.customSub', vars: { mem: p.memGB, gpn: p.gpusPerNode, engine: p.engine === 'mlx' ? 'MLX' : 'vLLM' } },
-      unit: p.unit,
-      gpusPerNode: p.gpusPerNode,
-      custom: i,
-      self: true,
-      hardware: null,
-    };
-  }
-  const p = b.platforms[row]!;
-  return { name: p.name, sub: p.sub, unit: p.unit, gpusPerNode: p.gpusPerNode.value, custom: null, self: p.group === 'self', hardware: p.hardware };
-}
+export { rowInfo, type RowInfo } from '../compute/rowInfo';
 
 /** A sub-label as text in `lang` (catalog sub as is; a message with its numbers formatted). */
 export function subLabelText(sub: SubLabel, lang: string, tr: TFn): string {
@@ -98,6 +67,18 @@ export function WhyTag({ why, detail }: { why: keyof typeof WHY; detail: string 
   );
 }
 
+/** The row's 比較 checkbox (design v9 §3.1): adds / removes the line that follows this row, without expanding it. */
+export function CompareCheck({ checked, onChange, infeasible = false }: { checked: boolean; onChange: () => void; infeasible?: boolean }): JSX.Element {
+  const tr = useT();
+  return (
+    <Tooltip title={tr(infeasible ? 'row.compareTipMiss' : 'row.compareTip')}>
+      <Checkbox className="row-compare" checked={checked} onChange={onChange}>
+        {tr('row.compare')}
+      </Checkbox>
+    </Tooltip>
+  );
+}
+
 /** Edit / delete buttons of a custom hardware row. */
 export function CustomActions({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }): JSX.Element {
   const tr = useT();
@@ -139,13 +120,15 @@ type ExtraProps = {
   onSet: (n: number) => void;
   onEdit: () => void;
   onDelete: () => void;
+  compared: boolean;
+  onCompare: () => void;
 };
 
 /**
- * Feasible row header `extra` (outside the toggle): machine icons, count control, capacity bar, custom edit / delete,
+ * Feasible row header `extra` (outside the toggle): machine icons, count control, capacity bar, 比較, custom edit / delete,
  * and — for an adjusted row — the speed line, which opens with a `grid-template-rows` 0fr → 1fr transition.
  */
-export function RowExtra({ r, info, users, onSuggest, onSet, onEdit, onDelete }: ExtraProps): JSX.Element {
+export function RowExtra({ r, info, users, onSuggest, onSet, onEdit, onDelete, compared, onCompare }: ExtraProps): JSX.Element {
   const tr = useT();
   return (
     <div className="row-extra fade-in">
@@ -165,6 +148,7 @@ export function RowExtra({ r, info, users, onSuggest, onSet, onEdit, onDelete }:
       <div className="row-capacity">
         <CapacityBar users={users} max={r.perf.maxConcurrent} />
       </div>
+      <CompareCheck checked={compared} onChange={onCompare} />
       {info.custom !== null && <CustomActions onEdit={onEdit} onDelete={onDelete} />}
       <div className={'reveal row-speed' + (r.adjusted ? ' on' : '')} aria-hidden={!r.adjusted}>
         <div>{r.adjusted && <SpeedLine r={r} unit={info.unit} />}</div>

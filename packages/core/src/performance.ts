@@ -28,6 +28,7 @@ import { BasisCollector, trustFlags, type BasisItem } from './basis';
 import { CoreInputError, parseInput } from './errors';
 import {
   MAX_GPUS,
+  MAX_N,
   capacityWhy,
   contextDetail,
   singleUserWhy,
@@ -69,6 +70,16 @@ export const PerformanceInputSchema = UsersQueryInputSchema.extend({
   gpus: int(MAX_GPUS),
   /** Force this tensor-parallel size (must be legal and fit in `gpus`); omitted → the best split. */
   tp: TpOptionSchema.optional(),
+  /**
+   * Users to sample the speed curve at (1–64, strictly increasing), instead of evenly spaced ones up to
+   * max(maxConcurrent, users); points past the capacity carry their `why`. Lets several deployments share one axis.
+   */
+  curveUsers: z
+    .array(int(MAX_N))
+    .min(1)
+    .max(64)
+    .refine((l) => l.every((u, i) => i === 0 || u > l[i - 1]!), { message: 'curveUsers must be strictly increasing' })
+    .optional(),
 });
 export type PerformanceInput = z.input<typeof PerformanceInputSchema>;
 
@@ -196,7 +207,7 @@ export function estimatePerformance(bundle: Bundle, raw: PerformanceInput): Perf
   const { check, why, usage, hasUsage } = judgeShape(ctx, platform, shape, gpus, users, unit);
   const mc = chosen?.maxConcurrent ?? 0;
   const speedCurve = hasUsage && shape
-    ? shapeProfile(ctx, platform, shape, Math.max(mc, users), 'expected', PERFORMANCE_CURVE_POINTS).speedCurve
+    ? shapeProfile(ctx, platform, shape, Math.max(mc, users), 'expected', PERFORMANCE_CURVE_POINTS, input.curveUsers).speedCurve
     : null;
   const queueing = check?.queueing ?? null;
 

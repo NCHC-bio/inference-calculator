@@ -65,7 +65,19 @@ export async function openRow(page: Page, key: string): Promise<Locator> {
 }
 
 /** Query string for a state (the app's own URL format, design §7). */
-export function url(q: { n?: number; w?: string; m?: string; q?: string; s?: string; o?: string; lang?: string }): string {
+/** `cmp=` value for comparison lines (design v9 §3.3). */
+export const cmpParam = (specs: Record<string, unknown>[]): string => Buffer.from(JSON.stringify(specs)).toString('base64url');
+
+/** Five comparison lines: two platforms, a model variant, a Mac and one that misses (1 H200, 128k reads). */
+export const FIVE_LINES = cmpParam([
+  { row: 'nano4-h200' },
+  { row: 'nano5-h100' },
+  { row: 'nano4-h200', model: 'gpt-oss-20b', gpus: 2 },
+  { row: 'mac-studio-m5u-512' },
+  { row: 'nano4-h200', gpus: 1, inputTokens: 128000 },
+]);
+
+export function url(q: { n?: number; w?: string; m?: string; q?: string; s?: string; o?: string; lang?: string; cmp?: string }): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) if (v !== undefined) p.set(k, String(v));
   return `/?${p.toString()}`;

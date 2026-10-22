@@ -8,7 +8,6 @@ import {
   resolveModel,
   type CustomPlatformInput,
   type ModelOverride,
-  type ResultWarning,
 } from '@nchc/core';
 import type { Lang, MsgKey } from '../i18n/t';
 
@@ -26,28 +25,12 @@ export type CustomModel =
 /** A platform sub-label as data: catalog text, or a message key with its values (formatted in the current language). */
 export type SubLabel = string | { key: MsgKey; vars: Record<string, string | number> };
 /**
- * A comparison snapshot (values frozen when 加入比較 was pressed), stored as raw values and formatted at render in the
- * current language (v8 minor 6).
+ * A comparison line (design v9 §3.3): only what it overrides; every field left out follows the sentence, and `gpus`
+ * left out follows the row's current count. `id` is stable; `slot` (0–4) picks the line's colour and letter A–E and is
+ * kept when other lines are removed.
  */
-export type Pin = {
-  id: number;
-  /** Row key at pin time (bundle id or `custom:i`), with the name and sub-label so later edits or deletes do not change it. */
-  platform: { row: RowKey; name: string; sub: SubLabel };
-  unit: 'gpu' | 'machine';
-  count: number;
-  /** Model name and the quantization's display name (null when the bundle has none). */
-  model: { name: string; quant: string | null };
-  users: number;
-  tps: number | null;
-  ttft: number | null;
-  max: number;
-  kw: number | null;
-  /** Trust flags of the pinned result (spec §2.1): the comparison marks a miss, estimates, custom values and warnings. */
-  ok: boolean;
-  hasEstimate: boolean;
-  hasUser: boolean;
-  warnings: ResultWarning[];
-};
+export type CompareSpec = { row: RowKey; model?: string; quant?: string; workload?: string; inputTokens?: number; gpus?: number };
+export type CompareLine = CompareSpec & { id: number; slot: number };
 /** Every dialog the store can open; the reducer ignores any other id, so the type is derived from this one list. */
 export const DIALOGS = ['basis', 'cite', 'verify', 'accuracy', 'funnel', 'workload', 'speed', 'hf', 'manualModel', 'hardware', 'myModels'] as const;
 export type DialogId = (typeof DIALOGS)[number];
@@ -66,7 +49,7 @@ export type CalcState = {
   overrides: Record<RowKey, Override>;
   /** Row key of the expanded row. */
   openRow: RowKey | null;
-  pins: Pin[];
+  compare: CompareLine[];
   dialog: DialogId | null;
   basisFilter: BasisFilter;
   /** customPlatforms index the hardware dialog edits (null: adding a new one). */
@@ -92,17 +75,24 @@ export type Action =
   | { type: 'editPlatform'; index: number; value: CustomPlatformInput }
   | { type: 'removePlatform'; index: number }
   /** Undo of removePlatform: back at `index` (clamped to the end), with the row's count and open state when it had them (v8 minor 5). */
-  | { type: 'restorePlatform'; index: number; value: CustomPlatformInput; override?: Override; wasOpen?: boolean }
+  | { type: 'restorePlatform'; index: number; value: CustomPlatformInput; override?: Override; wasOpen?: boolean; lines?: CompareLine[] }
   | { type: 'openRow'; row: RowKey | null }
-  | { type: 'pin'; pin: Omit<Pin, 'id'> }
-  | { type: 'unpin'; id: number }
-  | { type: 'clearPins' }
+  /** Add or remove the line that only names `row` (the row's 比較 checkbox). */
+  | { type: 'compareToggle'; row: RowKey }
+  /** Valid specs, in order, up to the free slots. */
+  | { type: 'compareAdd'; lines: CompareSpec[] }
+  | { type: 'compareRemove'; id: number }
+  | { type: 'compareClear' }
   | { type: 'dialog'; id: DialogId | null; basisFilter?: BasisFilter; editingPlatform?: number | null; hfQuery?: string };
 
 export const USERS_MAX = 1e7;
 /** Upper bound of a row's card / machine count. */
 export const COUNT_MAX = 1e5;
-export const PINS_MAX = 3;
+/** Most comparison lines (the validated categorical palette has five colours). */
+export const COMPARE_MAX = 5;
+/** Read lengths 「換每次讀入長度」 offers (tokens). */
+export const READ_LENGTHS = [8000, 32000, 128000] as const;
+const INPUT_TOKENS_MAX = 1e6;
 export const CUSTOM_PLATFORMS_MAX = 8;
 export const CUSTOM_MODEL_ID = 'custom';
 /** Tensor-parallel sizes a replica may use within one node (spec: TP ∈ {1,2,4,8}). */
@@ -145,7 +135,7 @@ export function defaultState(b: Bundle): CalcState {
     customPlatforms: [],
     overrides: {},
     openRow: null,
-    pins: [],
+    compare: [],
     dialog: null,
     basisFilter: 'est',
     editingPlatform: null,
@@ -218,6 +208,35 @@ export function validOverride(v: unknown): v is Override {
   return isIntIn(o.gpus as number, COUNT_MAX) && (o.tp === undefined || TP_SIZES.includes(o.tp as number));
 }
 
+const SPEC_KEYS = new Set(['row', 'model', 'quant', 'workload', 'inputTokens', 'gpus']);
+
+/** A comparison spec whose row exists and whose overrides are catalog ids / integers in range, with no other keys. */
+export function validCompareSpec(b: Bundle, s: Pick<CalcState, 'customPlatforms'>, v: unknown): v is CompareSpec {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const c = v as Record<string, unknown>;
+  if (!Object.keys(c).every((k) => SPEC_KEYS.has(k))) return false;
+  if (typeof c.row !== 'string' || !isRowKey(b, s, c.row)) return false;
+  const id = (x: unknown, ids: Record<string, unknown>) => x === undefined || (typeof x === 'string' && Object.hasOwn(ids, x));
+  if (!id(c.model, b.models) || !id(c.quant, b.quantization) || !id(c.workload, b.workloads)) return false;
+  const int = (x: unknown, max: number) => x === undefined || isIntIn(x as number, max);
+  return int(c.inputTokens, INPUT_TOKENS_MAX) && int(c.gpus, COUNT_MAX);
+}
+
+/** A line that only names its row (what the row's 比較 checkbox adds). */
+export const isPlainLine = (l: CompareSpec): boolean => Object.keys(l).every((k) => k === 'row' || k === 'id' || k === 'slot');
+
+/** Append valid specs with fresh ids in the smallest free slots; unchanged when nothing is added. */
+function addLines(b: Bundle, s: CalcState, specs: CompareSpec[]): CalcState {
+  const used = new Set(s.compare.map((l) => l.slot));
+  const free = Array.from({ length: COMPARE_MAX }, (_, i) => i).filter((i) => !used.has(i));
+  let id = s.compare.reduce((m, l) => Math.max(m, l.id), 0);
+  const added = specs
+    .filter((v) => validCompareSpec(b, s, v))
+    .slice(0, free.length)
+    .map((v, i): CompareLine => ({ ...v, id: ++id, slot: free[i]! }));
+  return added.length === 0 ? s : { ...s, compare: [...s.compare, ...added] };
+}
+
 /** Any input change makes the per-row card counts stale: they are cleared. */
 const input = (s: CalcState, patch: Partial<CalcState>): CalcState => ({ ...s, ...patch, overrides: {} });
 
@@ -240,6 +259,38 @@ function unshiftCustom<T>(rec: Record<RowKey, T>, at: number): Record<RowKey, T>
     out[i !== null && i >= at ? `custom:${i + 1}` : k] = v;
   }
   return out;
+}
+
+/** Lines on removed custom platform `removed` are dropped; later custom rows shift down. */
+function shiftLines(lines: CompareLine[], removed: number): CompareLine[] {
+  return lines.filter((l) => customIndex(l.row) !== removed).map((l) => ({ ...l, row: shiftRow(l.row, removed)! }));
+}
+
+/**
+ * Lines removed with a custom platform come back on its new row key (final review: 復原 brings the comparison back),
+ * in their old slot when it is still free, else the smallest free one; fresh ids; at most COMPARE_MAX lines.
+ */
+function restoreLines(b: Bundle, customPlatforms: CustomPlatformInput[], lines: CompareLine[], back: CompareLine[] | undefined, row: RowKey): CompareLine[] {
+  if (!Array.isArray(back)) return lines;
+  const out = [...lines];
+  let id = out.reduce((m, l) => Math.max(m, l.id), 0);
+  for (const l of back) {
+    const { id: _i, slot, ...spec } = l;
+    const restored: CompareSpec = { ...spec, row };
+    if (out.length >= COMPARE_MAX || !validCompareSpec(b, { customPlatforms }, restored)) continue;
+    const used = new Set(out.map((x) => x.slot));
+    const free = used.has(slot) ? Array.from({ length: COMPARE_MAX }, (_, i) => i).find((i) => !used.has(i))! : slot;
+    out.push({ ...restored, id: ++id, slot: free });
+  }
+  return out;
+}
+
+/** Lines on custom rows at or after `at` shift up (a platform inserted at `at`). */
+function unshiftLines(lines: CompareLine[], at: number): CompareLine[] {
+  return lines.map((l) => {
+    const i = customIndex(l.row);
+    return i !== null && i >= at ? { ...l, row: `custom:${i + 1}` } : l;
+  });
 }
 
 function shiftRow(row: RowKey | null, removed: number): RowKey | null {
@@ -315,6 +366,7 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
         customPlatforms: s.customPlatforms.filter((_, i) => i !== a.index),
         overrides: shiftCustom(s.overrides, a.index),
         openRow: shiftRow(s.openRow, a.index),
+        compare: shiftLines(s.compare, a.index),
         editingPlatform: ep === null || ep === a.index ? null : ep > a.index ? ep - 1 : ep,
       };
     }
@@ -329,25 +381,28 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
       const i = s.openRow === null ? null : customIndex(s.openRow);
       const openRow = a.wasOpen ? key : i !== null && i >= at ? `custom:${i + 1}` : s.openRow;
       const ep = s.editingPlatform;
+      const customPlatforms = [...s.customPlatforms.slice(0, at), a.value, ...s.customPlatforms.slice(at)];
       return {
         ...s,
-        customPlatforms: [...s.customPlatforms.slice(0, at), a.value, ...s.customPlatforms.slice(at)],
+        customPlatforms,
         overrides,
         openRow,
+        compare: restoreLines(b, customPlatforms, unshiftLines(s.compare, at), a.lines, key),
         editingPlatform: ep !== null && ep >= at ? ep + 1 : ep,
       };
     }
     case 'openRow':
       return { ...s, openRow: a.row };
-    case 'pin': {
-      if (s.pins.length >= PINS_MAX) return s;
-      const id = s.pins.reduce((m, p) => Math.max(m, p.id), 0) + 1;
-      return { ...s, pins: [...s.pins, { ...a.pin, id }] };
+    case 'compareToggle': {
+      const plain = s.compare.find((l) => l.row === a.row && isPlainLine(l));
+      return plain ? { ...s, compare: s.compare.filter((l) => l !== plain) } : addLines(b, s, [{ row: a.row }]);
     }
-    case 'unpin':
-      return { ...s, pins: s.pins.filter((p) => p.id !== a.id) };
-    case 'clearPins':
-      return { ...s, pins: [] };
+    case 'compareAdd':
+      return Array.isArray(a.lines) ? addLines(b, s, a.lines) : s;
+    case 'compareRemove':
+      return { ...s, compare: s.compare.filter((l) => l.id !== a.id) };
+    case 'compareClear':
+      return { ...s, compare: [] };
     case 'dialog': {
       if (a.id !== null && !(DIALOGS as readonly string[]).includes(a.id)) return s;
       const basisFilter = a.basisFilter === 'est' || a.basisFilter === 'all' ? a.basisFilter : s.basisFilter;

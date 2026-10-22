@@ -6,6 +6,7 @@ import { CONFIG_DIR, loadConfig, validateConfig } from '../../data/src/index';
 import { needAnswerText } from '../src/components/answerText';
 import { tZh } from '../src/i18n/t';
 import { defaultState, quantFor, type CalcState } from '../src/state/state';
+import { row as rowOf } from './helpers';
 
 function realBundle(): Bundle {
   const { bundle, issues } = validateConfig(loadConfig(CONFIG_DIR));
@@ -109,6 +110,20 @@ test('workload, speed and model each change the answer and leave the other selec
     expect(expectedMain(s)).not.toBe(before);
     for (const [i, k] of others.entries()) await expect(shownValue(page, k)).toHaveAttribute('title', othersBefore[i]!);
   }
+});
+
+test('comparison lines are in the URL and a reload restores them', async ({ page }) => {
+  await page.goto('/');
+  await rowOf(page, 'nano4-h200').getByRole('checkbox', { name: tZh('row.compare') }).check();
+  await rowOf(page, 'nano5-h100').getByRole('checkbox', { name: tZh('row.compare') }).check();
+  await expect(page).toHaveURL(/[?&]cmp=/);
+  const lines = page.getByTestId('compare').getByTestId('compare-line');
+  await expect(lines).toHaveCount(2);
+  const before = await lines.allInnerTexts();
+  await page.goto(page.url());
+  await expect(lines).toHaveCount(2);
+  expect(await lines.allInnerTexts()).toEqual(before);
+  await expect(rowOf(page, 'nano4-h200').getByRole('checkbox', { name: tZh('row.compare') })).toBeChecked();
 });
 
 test('the user count is in the URL and a reload restores the same screen', async ({ page }) => {

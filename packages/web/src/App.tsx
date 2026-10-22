@@ -6,7 +6,7 @@ import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { useLang, useT, type Lang } from './i18n';
 import { StoreProvider, useCalc } from './state/store';
 import { AnswerLine } from './components/AnswerLine';
-import { CompareTable } from './components/CompareTable';
+import { CompareCard } from './components/CompareCard';
 import { Footer } from './components/Footer';
 import { PlatformList } from './components/PlatformList';
 import { BasisModal } from './components/BasisModal';
@@ -138,7 +138,7 @@ function Shell() {
       <Card styles={{ body: { padding: 12 } }}>
         <PlatformList />
       </Card>
-      <CompareTable />
+      <CompareCard />
       <Dialogs />
       <Footer />
     </main>

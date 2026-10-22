@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { tZh } from '../src/i18n/t';
-import { answer, attachJson, bestRow, bundle, DEFAULT, expectedMain, need, openRow, row, settle, suggestedOf, url, watchConsole } from './helpers';
+import { answer, attachJson, bestRow, bundle, cmpParam, DEFAULT, expectedMain, need, openRow, row, settle, suggestedOf, url, watchConsole } from './helpers';
 
 watchConsole();
 test.skip(({ isMobile }) => isMobile, 'motion frames are taken on desktop only');
@@ -20,7 +20,7 @@ async function hideTyping(page: Page): Promise<void> {
 }
 
 /** What to read from the region that must transition: the answer's count, a box's width / height / top, an svg width. */
-type Probe = { sel: string; read: 'count' | 'width' | 'height' | 'top' | 'attrWidth' };
+type Probe = { sel: string; read: 'count' | 'width' | 'height' | 'top' | 'attrWidth' | 'translateX' };
 /** One rAF sample: page time, wall clock (to line up with the screencast) and the region's value (null: not there). */
 type Sample = { t: number; wall: number; v: number | null };
 
@@ -41,6 +41,10 @@ async function startSampling(page: Page, probe: Probe, ms = 2000): Promise<void>
         if (p.read === 'width') return el.getBoundingClientRect().width;
         if (p.read === 'height') return el.getBoundingClientRect().height;
         if (p.read === 'top') return parseFloat(getComputedStyle(el).top);
+        if (p.read === 'translateX') {
+          const m = /translate\(([-\d.e]+)/.exec(el.getAttribute('transform') ?? '');
+          return m ? Number(m[1]) : null;
+        }
         return Number(el.getAttribute('width'));
       };
       const t0 = performance.now();
@@ -198,6 +202,26 @@ const CASES: { name: string; probe: Probe; setup: (page: Page) => Promise<void>;
     },
     done: async (page) => {
       await expect(row(page, 'nano4-h200').locator('text.brace-label')).toHaveText(/× 60 node/);
+    },
+  },
+  {
+    // Design v9 §4.4: with comparison lines, a new user count moves 「你的 N 人」 and the dots together.
+    name: 'compare-users',
+    probe: { sel: '[data-testid="compare-chart-tps"] g.ref', read: 'translateX' },
+    setup: async (page) => {
+      // Tall enough that the sentence and the comparison charts are both on screen for the frames.
+      await page.setViewportSize({ width: 1280, height: 2400 });
+      await page.goto(url({ w: 'chat', n: 60, cmp: cmpParam([{ row: 'nano4-h200' }, { row: 'nano5-h100' }]) }));
+      await expect(page.getByTestId('compare').getByTestId('compare-line')).toHaveCount(2);
+      await page.getByTestId('compare').scrollIntoViewIfNeeded();
+      await page.getByLabel(tZh('aria.users'), { exact: true }).focus();
+      await settle(page);
+    },
+    act: async (page) => {
+      await page.getByLabel(tZh('aria.users'), { exact: true }).fill('400');
+    },
+    done: async (page) => {
+      await expect(page.getByTestId('compare-chart-tps').locator('g.ref text')).toHaveText(tZh('compare.you', { n: '400' }));
     },
   },
 ];

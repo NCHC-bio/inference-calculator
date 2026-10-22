@@ -1,7 +1,7 @@
 import { quantOptions, type CustomPlatformInput } from '@nchc/core';
 import { describe, expect, it } from 'vitest';
 import { getBundle } from '../src/bundle';
-import { CUSTOM_PLATFORMS_MAX, defaultState, reduce, type Action, type CalcState, type Pin } from '../src/state/state';
+import { COMPARE_MAX, CUSTOM_PLATFORMS_MAX, defaultState, reduce, type Action, type CalcState, type CompareSpec } from '../src/state/state';
 
 const b = getBundle();
 const s0 = defaultState(b);
@@ -9,7 +9,6 @@ const s0 = defaultState(b);
 // Test fixtures (not catalog values).
 const gpu = (name: string): CustomPlatformInput => ({ name, unit: 'gpu', gpusPerNode: 8, memGB: 80, memBwTBs: 3, tflops: 900, engine: 'vllm' });
 const manual = { name: 'My 8B', totalParamsB: 8, layers: 32, heads: 32, kvHeads: 8, headDim: 128, hidden: 4096 };
-const pin: Omit<Pin, 'id'> = { platform: { row: 'nano4-h200', name: 'H200', sub: 'x' }, unit: 'gpu', count: 8, model: { name: 'M', quant: null }, users: 15, tps: 30, ttft: 1, max: 40, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] };
 
 const run = (s: CalcState, ...as: Action[]) => as.reduce((x, a) => reduce(b, x, a), s);
 
@@ -158,12 +157,75 @@ describe('reduce', () => {
     expect(s.customPlatforms.map((p) => p.name)).toEqual(['Z']);
     expect(reduce(b, s, { type: 'editPlatform', index: 3, value: gpu('Q') })).toEqual(s);
   });
-  it('pins cap at three', () => {
-    const s = run(s0, ...Array.from({ length: 4 }, (): Action => ({ type: 'pin', pin })));
-    expect(s.pins).toHaveLength(3);
-    expect(new Set(s.pins.map((p) => p.id)).size).toBe(3);
-    expect(reduce(b, s, { type: 'unpin', id: s.pins[0]!.id }).pins).toHaveLength(2);
-    expect(reduce(b, s, { type: 'clearPins' }).pins).toEqual([]);
+  describe('compare lines', () => {
+    const H200 = 'nano4-h200';
+    const rows = Object.keys(b.platforms);
+    const specs = (s: CalcState) => s.compare.map(({ id: _i, slot: _s, ...rest }) => rest);
+    it('compareToggle adds a plain line in slot 0 and removes it on the second toggle', () => {
+      const s = reduce(b, s0, { type: 'compareToggle', row: H200 });
+      expect(s.compare).toEqual([{ id: 1, slot: 0, row: H200 }]);
+      expect(reduce(b, s, { type: 'compareToggle', row: H200 }).compare).toEqual([]);
+    });
+    it('compareToggle leaves variant lines of the row alone', () => {
+      const s = run(s0, { type: 'compareAdd', lines: [{ row: H200, gpus: 4 }] }, { type: 'compareToggle', row: H200 });
+      expect(specs(s)).toEqual([{ row: H200, gpus: 4 }, { row: H200 }]);
+      expect(specs(reduce(b, s, { type: 'compareToggle', row: H200 }))).toEqual([{ row: H200, gpus: 4 }]);
+    });
+    it('compareAdd fills free slots and stops at five', () => {
+      const four = run(s0, { type: 'compareAdd', lines: rows.slice(0, 4).map((row) => ({ row })) });
+      const s = reduce(b, four, { type: 'compareAdd', lines: rows.slice(4, 7).map((row) => ({ row })) });
+      expect(COMPARE_MAX).toBe(5);
+      expect(s.compare).toHaveLength(5);
+      expect(s.compare.map((l) => l.slot)).toEqual([0, 1, 2, 3, 4]);
+      expect(reduce(b, s, { type: 'compareAdd', lines: [{ row: H200 }] })).toBe(s);
+    });
+    it('slots are reused: removing B then adding gives the new line slot 1, A and C keep theirs', () => {
+      const s = run(s0, { type: 'compareAdd', lines: rows.slice(0, 3).map((row) => ({ row })) });
+      const b1 = s.compare[1]!;
+      const t = run(s, { type: 'compareRemove', id: b1.id }, { type: 'compareAdd', lines: [{ row: rows[5]! }] });
+      expect(t.compare.map((l) => [l.row, l.slot])).toEqual([[rows[0], 0], [rows[2], 2], [rows[5], 1]]);
+      expect(new Set(t.compare.map((l) => l.id)).size).toBe(3);
+    });
+    it('compareAdd drops invalid specs', () => {
+      const bad = [
+        { row: 'no-such' },
+        { row: H200, model: 'no-such' },
+        { row: H200, quant: 'no-such' },
+        { row: H200, workload: 'no-such' },
+        { row: H200, gpus: 0 },
+        { row: H200, gpus: 2.5 },
+        { row: H200, inputTokens: 2.5 },
+        { row: 'custom:0' },
+        { row: H200, extra: 1 },
+      ] as unknown as CompareSpec[];
+      expect(reduce(b, s0, { type: 'compareAdd', lines: bad }).compare).toEqual([]);
+      const ok: CompareSpec = { row: H200, model: 'gpt-oss-20b', quant: s0.quant, workload: 'chat', inputTokens: 32000, gpus: 4 };
+      expect(specs(reduce(b, s0, { type: 'compareAdd', lines: [ok] }))).toEqual([ok]);
+    });
+    it('input changes keep lines and their gpus', () => {
+      const s = run(s0, { type: 'compareAdd', lines: [{ row: H200 }, { row: H200, gpus: 4 }] });
+      const t = run(s, { type: 'users', value: 400 }, { type: 'workload', id: 'chat' }, { type: 'speed', id: 'ok' });
+      expect(t.compare).toEqual(s.compare);
+    });
+    it('removePlatform drops lines on that custom row and re-keys later custom rows', () => {
+      const s = run(
+        s0,
+        { type: 'addPlatform', value: gpu('A') },
+        { type: 'addPlatform', value: gpu('B') },
+        { type: 'compareAdd', lines: [{ row: 'custom:0' }, { row: 'custom:1', gpus: 2 }, { row: H200 }] },
+        { type: 'removePlatform', index: 0 },
+      );
+      expect(specs(s)).toEqual([{ row: 'custom:0', gpus: 2 }, { row: H200 }]);
+      expect(s.compare.map((l) => l.slot)).toEqual([1, 2]);
+    });
+    it('restorePlatform re-keys lines on custom rows at or after the index', () => {
+      const s = run(s0, { type: 'addPlatform', value: gpu('B') }, { type: 'compareAdd', lines: [{ row: 'custom:0' }] }, { type: 'restorePlatform', index: 0, value: gpu('A') });
+      expect(specs(s)).toEqual([{ row: 'custom:1' }]);
+    });
+    it('compareClear empties the list', () => {
+      const s = run(s0, { type: 'compareAdd', lines: [{ row: H200 }] }, { type: 'compareClear' });
+      expect(s.compare).toEqual([]);
+    });
   });
   it('addPlatform caps at eight', () => {
     const s = run(s0, ...Array.from({ length: 9 }, (_, i): Action => ({ type: 'addPlatform', value: gpu(`P${i}`) })));
@@ -172,3 +234,14 @@ describe('reduce', () => {
   });
 });
 
+describe('final review fixes: undo keeps comparison lines', () => {
+  it('restorePlatform puts back the lines removed with the platform, in their slots', () => {
+    const run2 = (s: CalcState, ...as: Action[]) => as.reduce((x, a) => reduce(b, x, a), s);
+    const s1 = run2(s0, { type: 'addPlatform', value: gpu('A') }, { type: 'compareAdd', lines: [{ row: 'nano4-h200' }, { row: 'custom:0', gpus: 2 }] });
+    const dropped = s1.compare.filter((l) => l.row === 'custom:0');
+    const s2 = run2(s1, { type: 'removePlatform', index: 0 });
+    expect(s2.compare.map((l) => l.row)).toEqual(['nano4-h200']);
+    const s3 = run2(s2, { type: 'restorePlatform', index: 0, value: gpu('A'), lines: dropped });
+    expect(s3.compare.map((l) => [l.row, l.slot, l.gpus])).toEqual([['nano4-h200', 0, undefined], ['custom:0', 1, 2]]);
+  });
+});

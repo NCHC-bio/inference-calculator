@@ -3,7 +3,7 @@ import { estimatePerformance, estimatePerformanceSweep } from '@nchc/core';
 import { fmt } from '../src/components/answerText';
 import { tZh } from '../src/i18n/t';
 import { quantFor, type CalcState } from '../src/state/state';
-import { answer, bundle, DEFAULT, expectedMain, need, noHorizontalScroll, openRow, row, settle, suggestedOf, url, watchConsole, widths } from './helpers';
+import { answer, bundle, DEFAULT, expectedMain, FIVE_LINES, need, noHorizontalScroll, openRow, row, settle, suggestedOf, url, watchConsole, widths } from './helpers';
 
 watchConsole();
 
@@ -56,14 +56,47 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, 'workbench', true);
       await noHorizontalScroll(page);
 
-      // Comparison: pin the best row, then a second one.
-      await row(page, best).getByRole('button', { name: tZh('wb.pin') }).click();
+      // Comparison (design v9): tick 比較 on the best row and a second one, without expanding them.
+      await row(page, best).getByRole('checkbox', { name: tZh('row.compare') }).check();
       const second = need(DEFAULT).perPlatform.find((p) => p.expected.ok && p.platform !== best)!.platform;
-      await openRow(page, second);
-      await row(page, second).getByRole('button', { name: tZh('wb.pin') }).click();
-      await expect(page.getByTestId('compare').locator('tbody tr.ant-table-row')).toHaveCount(2);
+      await row(page, second).getByRole('checkbox', { name: tZh('row.compare') }).check();
+      await expect(page.getByTestId('compare').getByTestId('compare-line')).toHaveCount(2);
       await page.getByTestId('compare').scrollIntoViewIfNeeded();
       await shot(page, 'compare');
+
+      // 換一項比較 → 換模型 on the first line adds a third line at the same count.
+      const compare = page.getByTestId('compare');
+      await compare.getByTestId('compare-line').first().getByRole('button', { name: new RegExp(tZh('compare.variant')) }).click();
+      await page.getByRole('menuitem', { name: tZh('compare.variant.model') }).click();
+      await shot(page, 'compare-variant-menu');
+      await page.getByRole('menuitem', { name: new RegExp(`^${bundle.models['gpt-oss-20b']!.name}`) }).click();
+      await expect(compare.getByTestId('compare-line')).toHaveCount(3);
+
+      // 換機台 lists platforms by name and sub-label, with their current count.
+      await compare.getByTestId('compare-line').first().getByRole('button', { name: new RegExp(tZh('compare.variant')) }).click();
+      await page.getByRole('menuitem', { name: tZh('compare.variant.platform') }).click();
+      await expect(page.getByRole('menuitem', { name: new RegExp('^' + bundle.platforms['nano5-h100']!.name + ' ' + bundle.platforms['nano5-h100']!.sub) })).toBeVisible();
+      await shot(page, 'compare-variant-platform');
+      await page.keyboard.press('Escape');
+
+      // Five lines: a failing one, a machine one, the GPU chart and the hover tooltip.
+      await page.goto(url({ w: 'chat', n: 60, cmp: FIVE_LINES }));
+      await expect(compare.getByTestId('compare-line')).toHaveCount(5);
+      await expect(compare.getByTestId('compare-cards-chart').locator('xpath=..')).toHaveClass(/\bon\b/);
+      await compare.scrollIntoViewIfNeeded();
+      await shot(page, 'compare-five', true);
+      const chart = compare.getByTestId('compare-chart-tps').locator('svg');
+      const box = (await chart.boundingBox())!;
+      await page.mouse.move(box.x + box.width * 0.55, box.y + box.height / 2);
+      await expect(compare.locator('.cmp-tip').first()).toHaveCSS('opacity', '1');
+      // The tooltip follows the pointer with no transition (design v9 §4.4, reduced motion).
+      await expect(compare.locator('.cmp-tip').first()).toHaveCSS('transition-duration', '0s');
+      await shot(page, 'compare-hover');
+      await noHorizontalScroll(page);
+
+      // Back to the default inputs with the second row open for the Drawer / Modal shots.
+      await page.goto('/');
+      await openRow(page, second);
 
       // Every Drawer / Modal reachable from the open workbench and the answer line.
       await dialogShot(page, 'drawer-verify', () => row(page, second).getByRole('button', { name: tZh('wb.verify') }).click());
@@ -154,6 +187,37 @@ test.describe('no horizontal scroll', () => {
   }
 });
 
+test.describe('comparison at every width', () => {
+  for (const lang of ['zh-TW', 'en'] as const) {
+    for (const width of [390, 768, 1024, 1440]) {
+      test(`${lang} ${width} px: five lines fit, nothing scrolls sideways`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await page.goto(url({ w: 'chat', n: 60, cmp: FIVE_LINES, lang }));
+        const compare = page.getByTestId('compare');
+        await expect(compare.getByTestId('compare-line')).toHaveCount(5);
+        await settle(page);
+        const w = await widths(page);
+        // A table, when shown, fits its card (no scrolling inside it either).
+        const table = await compare.locator('.ant-table-content, .ant-table-body').evaluateAll((els) => els.map((e) => [e.scrollWidth, e.clientWidth]));
+        await page.screenshot({ path: test.info().outputPath(`compare-${lang}-${width}.png`), fullPage: true });
+        expect(w.scrollWidth).toBeLessThanOrEqual(w.innerWidth);
+        for (const [sw, cw] of table) expect(sw).toBeLessThanOrEqual(cw! + 1);
+        // Chart labels stay inside their svg.
+        const out = await compare.locator('svg.chart').evaluateAll((svgs) =>
+          svgs.flatMap((svg) => {
+            const r = svg.getBoundingClientRect();
+            return [...svg.querySelectorAll('text')]
+              .map((t) => t.getBoundingClientRect())
+              .filter((b) => b.width > 0 && (b.left < r.left - 1 || b.right > r.right + 1))
+              .map((b) => [b.left - r.left, b.right - r.right]);
+          }),
+        );
+        expect(out).toEqual([]);
+      });
+    }
+  }
+});
+
 test.describe('values match core', () => {
   test('the answer is needAnswerText of estimateRequirements', async ({ page }) => {
     await page.goto('/');
@@ -205,7 +269,7 @@ test.describe('values match core', () => {
 });
 
 test.describe('carried checks', () => {
-  test('without pins the comparison takes no height and Tab never reaches 清除', async ({ page, isMobile }) => {
+  test('without lines the comparison takes no height and Tab never reaches 清除', async ({ page, isMobile }) => {
     test.skip(isMobile, 'keyboard');
     await page.goto('/');
     const box = await page.getByTestId('compare').locator('xpath=../..').boundingBox();

@@ -1,17 +1,15 @@
-import { CodeOutlined, PushpinOutlined, ThunderboltOutlined } from '@ant-design/icons';
-import { resolveModel, type PerformanceResult, type Queueing } from '@nchc/core';
-import type { Bundle } from '@nchc/schema';
-import { App as AntApp, Button, Collapse, Flex, Typography } from 'antd';
+import { CodeOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import type { PerformanceResult, Queueing } from '@nchc/core';
+import { Button, Collapse, Flex, Typography } from 'antd';
 import { useRef, useState, type JSX, type ReactNode } from 'react';
 import { getBundle } from '../bundle';
 import { speedTarget } from '../compute/actions';
 import type { BenchView, OkRow } from '../compute/compute';
-import { queryOf } from '../compute/query';
 import { useBench, useDeferredState } from '../compute/useResults';
 import { unitWord, useLang, useT } from '../i18n';
 import type { Lang } from '../i18n/t';
 import { useTween } from '../motion/useTween';
-import { PINS_MAX, workloadId, type Action, type CalcState } from '../state/state';
+import { workloadId, type Action, type CalcState } from '../state/state';
 import { useCalc } from '../state/store';
 import { ActionChips } from './ActionChips';
 import { Explain } from './Explain';
@@ -48,12 +46,6 @@ function Slot({ text, children }: { text: string; children: ReactNode }): JSX.El
 
 function Heading({ children }: { children: ReactNode }): JSX.Element {
   return <div className="wb-h">{children}</div>;
-}
-
-/** The current model's name and the quant's display name (for a comparison pin; joined at render by withQuant). */
-function modelOf(b: Bundle, s: CalcState, perf: PerformanceResult): { name: string; quant: string | null } {
-  const name = s.customModel === null ? b.models[s.model]!.name : resolveModel(b, queryOf(b, s).model).model.name;
-  return { name, quant: b.quantization[perf.quant]?.name ?? null };
 }
 
 /**
@@ -266,7 +258,6 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const usage = perf.usage!;
   const shape = perf.shape ?? usage.shape;
   const info = rowInfo(b, s, row.row);
-  const { message } = AntApp.useApp();
   const unitOf = (n: number) => unitWord(tr, info.unit, fmtIn(lang, n));
   const target = speedTarget(b, s);
   const demoText = b.workloads[workloadId(s.workload)]!.demoText;
@@ -277,31 +268,6 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
   const chartTarget = typeof s.speed !== 'string' && !zones.some((z) => z.lo === target.min) ? { y: target.min, label: `${tr('chart.mark.target')} ${fmtIn(lang, target.min)}` } : null;
   const chart: ChartCtx = { row, bench, s, unit: info.unit, unitOf, zones, target: chartTarget };
 
-  const pin = () => {
-    if (s.pins.length >= PINS_MAX) {
-      void message.warning(tr('pin.max', { n: PINS_MAX }));
-      return;
-    }
-    void message.success(tr('pin.added'));
-    dispatch({
-      type: 'pin',
-      pin: {
-        platform: { row: row.row, name: info.name, sub: info.sub },
-        unit: info.unit,
-        count: row.count,
-        model: modelOf(b, s, perf),
-        users: s.users,
-        tps: usage.tokPerSecPerUser,
-        ttft: usage.ttftSec,
-        max: perf.maxConcurrent,
-        kw: perf.powerKw,
-        ok: perf.ok,
-        hasEstimate: perf.hasEstimate,
-        hasUser: perf.hasUser,
-        warnings: perf.warnings,
-      },
-    });
-  };
   const pickSplit = (tp: number) => {
     if (tp === perf.recommendedTp) {
       dispatch({ type: 'override', row: row.row, value: row.count === row.suggested ? null : { gpus: row.count } });
@@ -315,9 +281,6 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
           {tr('wb.summary', { n: fmtIn(lang, row.count), unit: unitOf(row.count), name: info.name, users: fmtIn(lang, s.users) })}
           <SplitText tp={shape.tp} replicas={shape.replicas} unit={info.unit} />
         </Typography.Text>
-        <Button size="small" icon={<PushpinOutlined />} onClick={pin}>
-          {tr('wb.pin')}
-        </Button>
       </div>
 
       <div className="wb-row-1">
@@ -391,8 +354,7 @@ function Body({ row, bench, s, dispatch }: Props): JSX.Element {
 }
 
 /**
- * 試算區（design §4 item 5, demo v8 `Workbench`）: one view, no tabs. Top line (count, users, split in plain words) and
- * 加入比較; row 1 體驗 | 原因; row 2 the two charts; footer 更多圖表 + 驗證指令. When the split does not fit or serves
+ * 試算區（design §4 item 5, demo v8 `Workbench`）: one view, no tabs. Top line (count, users, split in plain words); row 1 體驗 | 原因; row 2 the two charts; footer 更多圖表 + 驗證指令. When the split does not fit or serves
  * nobody (no usage): only the reason and the suggested actions.
  *
  * Bench data is computed only while this row is open; a closed row keeps its last bench so the close animation still

@@ -2,6 +2,7 @@ import { useDeferredValue } from 'react';
 import { getBundle } from '../bundle';
 import type { CalcState, RowKey } from '../state/state';
 import { useCalc } from '../state/store';
+import { computeCompare, type CompareView } from './compare';
 import { computeBench, computeMain, modelNoteRow, modelOptionNotes, type BenchView, type MainView, type ModelNote } from './compute';
 
 /**
@@ -65,4 +66,13 @@ export function useModelNotes(enabled: boolean): ModelNotesView | null {
   const notes = notesOf([main, s.openRow], s, main);
   const target = modelNoteRow(s, main.rows);
   return notes && { notes, row: target ? { row: target.row, count: target.count } : null };
+}
+
+const compareOf = lastBy((s: CalcState, main: MainView): CompareView | null => computeCompare(getBundle(), s, main));
+
+/** The comparison lines for the (deferred) inputs; null without lines. */
+export function useCompare(): CompareView | null {
+  const s = useDeferredState();
+  const main = mainOf(mainKey(s), s);
+  return compareOf([main, s.compare], s, main);
 }

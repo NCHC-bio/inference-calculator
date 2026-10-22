@@ -225,8 +225,51 @@ body {
   min-height: 0;
 }
 
-/* Comparison table: cells stay on one line; the table scrolls inside its card on narrow screens. */
-.compare-card .ant-table th,
-.compare-card .ant-table td {
+/* Comparison (design v9 §4): two charts side by side, stacked below 760 px; one card per line on narrow cards. */
+.cmp-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px 28px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  .cmp-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.cmp-line-card {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--ant-color-fill-quaternary);
+}
+/* Model size wraps in the table (keeps it inside the card) and stays on one line in the narrow cards. */
+.ant-table .cmp-size {
+  display: inline-block;
+  max-width: 110px;
+}
+.cmp-line-card .cmp-size {
   white-space: nowrap;
+}
+.row-compare {
+  white-space: nowrap;
+}
+
+/* Comparison chart tooltip (design v9 §4.3): follows the crosshair, clamped inside the chart. */
+.cmp-tip {
+  position: absolute;
+  /* Below the 「你的 N 人」 label at the top of the plot. */
+  top: 30px;
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+.cmp-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-inline-end: 6px;
 }

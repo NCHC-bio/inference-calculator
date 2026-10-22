@@ -32,11 +32,11 @@ describe('url', () => {
       customPlatforms: [gpu, mac],
       overrides: { 'nano4-h200': { gpus: 8, tp: 2 }, 'custom:0': { gpus: 4 }, 'custom:1': { gpus: 3 } },
       openRow: 'custom:0',
-      pins: [{ id: 1, platform: { row: 'nano4-h200', name: 'H200', sub: 'x' }, unit: 'gpu', count: 8, model: { name: 'M', quant: null }, users: 1, tps: 1, ttft: 1, max: 1, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] }],
+      compare: [],
       dialog: 'hardware',
       editingPlatform: 1,
     };
-    const { openRow: _o, pins: _p, dialog: _d, editingPlatform: _e, ...kept } = s;
+    const { openRow: _o, dialog: _d, editingPlatform: _e, ...kept } = s;
     expect(decodeUrl(b, encodeUrl(s))).toEqual({ ...s0, ...kept });
   });
   it('hf model encodes as repo@sha', () => {
@@ -90,5 +90,37 @@ describe('url', () => {
   });
   it('garbage search strings fall back to defaults', () => {
     expect(decodeUrl(b, '%%%&&==')).toEqual(s0);
+  });
+  describe('cmp (design v9 §3.3)', () => {
+    const lines = (s: CalcState) => s.compare.map(({ id: _i, slot: _s, ...rest }) => rest);
+    it('round-trips compare lines', () => {
+      const specs = [
+        { row: 'custom:0' },
+        { row: 'nano4-h200', model: 'gpt-oss-20b' },
+        { row: 'nano4-h200', inputTokens: 32000, gpus: 4 },
+      ];
+      const s: CalcState = { ...s0, customPlatforms: [gpu], compare: specs.map((v, i) => ({ ...v, id: i + 1, slot: i })) };
+      const d = decodeUrl(b, encodeUrl(s));
+      expect(lines(d)).toEqual(specs);
+      expect(d.compare.map((l) => l.slot)).toEqual([0, 1, 2]);
+    });
+    it('encodes in slot order', () => {
+      const s: CalcState = { ...s0, compare: [{ id: 5, slot: 2, row: 'nano4-h200' }, { id: 6, slot: 0, row: 'nano5-h100' }] };
+      expect(lines(decodeUrl(b, encodeUrl(s)))).toEqual([{ row: 'nano5-h100' }, { row: 'nano4-h200' }]);
+      expect(decodeUrl(b, encodeUrl(s)).compare.map((l) => l.slot)).toEqual([0, 2]);
+    });
+    it('ignores a malformed cmp', () => {
+      expect(decodeUrl(b, 'cmp=%%%').compare).toEqual([]);
+      expect(decodeUrl(b, 'cmp=' + b64({ row: 'nano4-h200' })).compare).toEqual([]);
+      const many = Array.from({ length: 9 }, () => ({ row: 'nano4-h200', gpus: 2 }));
+      expect(decodeUrl(b, 'cmp=' + b64([{ row: 'no-such' }, ...many])).compare).toHaveLength(5);
+    });
+    it('keeps each line in its slot (letters survive a shared link)', () => {
+      const s: CalcState = { ...s0, compare: [{ id: 1, slot: 0, row: 'nano4-h200' }, { id: 3, slot: 2, row: 'nano5-h100' }] };
+      expect(decodeUrl(b, encodeUrl(s)).compare.map((l) => [l.row, l.slot])).toEqual([['nano4-h200', 0], ['nano5-h100', 2]]);
+    });
+    it('no cmp param without lines', () => {
+      expect(new URLSearchParams(encodeUrl(s0)).has('cmp')).toBe(false);
+    });
   });
 });
