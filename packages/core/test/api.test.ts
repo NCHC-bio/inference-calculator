@@ -570,15 +570,24 @@ describe('verifyCommand', () => {
     );
     expect(cmd).not.toContain('--random-prefix-len');
     expect(cmd).toContain('100 個工作階段 × 同時生成比例 0.033');
-    // The note says what is and is not reproduced, and how to warm the cache.
-    expect(cmd).toContain('暖機');
+    // The note says what is and is not reproduced, and how to read the run (issue #19: a second run with the same
+    // --seed repeats every prompt whole, so it hits the cache end to end and its TTFT says nothing).
+    expect(cmd).not.toContain('暖機');
+    expect(cmd).toContain('只執行一次');
+    expect(cmd).toContain('Median TTFT');
+    // vLLM logs the hit rate as a percentage, so the note states the configured one as a percentage too.
+    expect(cmd).toContain('Prefix cache hit rate（最近 1000 個請求');
+    expect(cmd).toContain('應接近快取命中率 95.7%');
     expect(cmd).toContain('未重現');
     // The context includes the prefix: 126180 + 252.
     expect(cmd).toContain('--max-model-len 126432');
     const mac = resolvePlatform(bundle, 'mac-studio-m5u-512', 'fp8').platform;
-    expect(verifyCommand(mac, { tp: 1, replicas: 1 }, long, aw, 100, { ...fp8, kind: 'agent', agentShare: 0.033 })).toContain(
-      '--prefix-repetition-num-prefixes 100',
-    );
+    const macCmd = verifyCommand(mac, { tp: 1, replicas: 1 }, long, aw, 100, { ...fp8, kind: 'agent', agentShare: 0.033 });
+    expect(macCmd).toContain('--prefix-repetition-num-prefixes 100');
+    // mlx_lm.server logs no hit rate; the note points at the per-request cached_tokens instead.
+    expect(macCmd).not.toContain('Prefix cache hit rate');
+    expect(macCmd).toContain('cached_tokens');
+    expect(macCmd).toContain('接近前綴的 120754 token');
   });
   it('several replicas: prefixes and concurrency are the replica share; num-prompts is a multiple of the prefixes (final-review I2)', () => {
     const { platform } = resolvePlatform(bundle, 'nano4-h200', 'fp8');
