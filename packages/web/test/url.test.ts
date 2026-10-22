@@ -92,4 +92,31 @@ describe('url', () => {
   it('garbage search strings fall back to defaults', () => {
     expect(decodeUrl(b, '%%%&&==')).toEqual(s0);
   });
+  describe('cmp (design v9 §3.3)', () => {
+    const lines = (s: CalcState) => s.compare.map(({ id: _i, slot: _s, ...rest }) => rest);
+    it('round-trips compare lines', () => {
+      const specs = [
+        { row: 'custom:0' },
+        { row: 'nano4-h200', model: 'gpt-oss-20b' },
+        { row: 'nano4-h200', inputTokens: 32000, gpus: 4 },
+      ];
+      const s: CalcState = { ...s0, customPlatforms: [gpu], compare: specs.map((v, i) => ({ ...v, id: i + 1, slot: i })) };
+      const d = decodeUrl(b, encodeUrl(s));
+      expect(lines(d)).toEqual(specs);
+      expect(d.compare.map((l) => l.slot)).toEqual([0, 1, 2]);
+    });
+    it('encodes in slot order', () => {
+      const s: CalcState = { ...s0, compare: [{ id: 5, slot: 2, row: 'nano4-h200' }, { id: 6, slot: 0, row: 'nano5-h100' }] };
+      expect(lines(decodeUrl(b, encodeUrl(s)))).toEqual([{ row: 'nano5-h100' }, { row: 'nano4-h200' }]);
+    });
+    it('ignores a malformed cmp', () => {
+      expect(decodeUrl(b, 'cmp=%%%').compare).toEqual([]);
+      expect(decodeUrl(b, 'cmp=' + b64({ row: 'nano4-h200' })).compare).toEqual([]);
+      const many = Array.from({ length: 9 }, () => ({ row: 'nano4-h200', gpus: 2 }));
+      expect(decodeUrl(b, 'cmp=' + b64([{ row: 'no-such' }, ...many])).compare).toHaveLength(5);
+    });
+    it('no cmp param without lines', () => {
+      expect(new URLSearchParams(encodeUrl(s0)).has('cmp')).toBe(false);
+    });
+  });
 });

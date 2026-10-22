@@ -1,5 +1,6 @@
 import { OriginSchema, type Bundle } from '@nchc/schema';
 import {
+  COMPARE_MAX,
   CUSTOM_PLATFORMS_MAX,
   USERS_MAX,
   defaultState,
@@ -18,8 +19,9 @@ import {
 /**
  * Query string of the shareable inputs (design §7): `n w m q s lang` as before, `o=rowKey:gpus[:tp],…`,
  * `x=` base64url JSON `{ hw?, wl?, sp?, mm?, hfo? }` (custom hardware, workload, speed, manual model, HF publisher origin)
- * and `hf=owner/name@sha`.
- * The expanded row, pins and dialogs are one visit's working state and stay out.
+ * `hf=owner/name@sha` and `cmp=` base64url JSON of the comparison lines' specs in slot order (design v9 §3.3: a line is
+ * a setting, so a shared link carries the comparison). The expanded row and dialogs are one visit's working state and
+ * stay out.
  */
 export function encodeUrl(s: CalcState): string {
   const p = new URLSearchParams({ lang: s.lang, n: String(s.users) });
@@ -37,6 +39,10 @@ export function encodeUrl(s: CalcState): string {
   if (Object.keys(x).length > 0) p.set('x', toBase64Url(JSON.stringify(x)));
   const o = Object.entries(s.overrides).map(([k, v]) => (v.tp === undefined ? `${k}:${v.gpus}` : `${k}:${v.gpus}:${v.tp}`));
   if (o.length > 0) p.set('o', o.join(','));
+  if (s.compare.length > 0) {
+    const specs = [...s.compare].sort((x, y) => x.slot - y.slot).map(({ id: _i, slot: _s, ...spec }) => spec);
+    p.set('cmp', toBase64Url(JSON.stringify(specs)));
+  }
   return p.toString();
 }
 
@@ -46,15 +52,20 @@ function toBase64Url(text: string): string {
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/** Parsed `x=` object, or null when it is not base64url JSON of an object. */
-function fromBase64Url(raw: string): Record<string, unknown> | null {
+/** Parsed base64url JSON, or undefined when it is not. */
+function fromBase64UrlJson(raw: string): unknown {
   try {
     const bin = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
-    const v: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
-    return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+/** Parsed `x=` object, or null when it is not base64url JSON of an object. */
+function fromBase64Url(raw: string): Record<string, unknown> | null {
+  const v = fromBase64UrlJson(raw);
+  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
 }
 
 const parseInt10 = (raw: string | null): number | null =>
@@ -118,5 +129,9 @@ export function decodeUrl(b: Bundle, search: string): CalcState {
     const o = parseOverride(item);
     if (o && isRowKey(b, s, o[0])) s = reduce(b, s, { type: 'override', row: o[0], value: o[1] });
   }
+  // Comparison lines: each spec is validated by the reducer (invalid ones dropped), at most COMPARE_MAX.
+  const rawCmp = p.get('cmp');
+  const cmp = rawCmp !== null ? fromBase64UrlJson(rawCmp) : undefined;
+  if (Array.isArray(cmp)) s = reduce(b, s, { type: 'compareAdd', lines: cmp.slice(0, COMPARE_MAX * 4) });
   return s;
 }
