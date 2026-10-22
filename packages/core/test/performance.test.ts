@@ -345,3 +345,36 @@ describe('final-review fixes', () => {
     }
   });
 });
+
+describe('estimatePerformance curveUsers', () => {
+  const q = { ...defaults, workload: 'chat', users: 60, platform: 'nano4-h200', gpus: 2 } as const;
+
+  it('curveUsers samples exactly the given users', () => {
+    const r = estimatePerformance(bundle, { ...q, curveUsers: [1, 10, 100, 1000] });
+    expect(r.speedCurve!.points.map((p) => p.users)).toEqual([1, 10, 100, 1000]);
+    expect(r.maxConcurrent).toBeLessThan(1000);
+    expect(r.speedCurve!.points[3]!.why).not.toBeNull();
+  });
+
+  it('curveUsers points equal a direct estimate', () => {
+    const users = [1, 7, 40, 200];
+    const r = estimatePerformance(bundle, { ...q, curveUsers: users });
+    users.forEach((u, i) => {
+      const d = estimatePerformance(bundle, { ...q, users: u, tp: r.shape!.tp });
+      if (!d.usage) return;
+      expect(r.speedCurve!.points[i]!.tokPerSecPerUser).toBeCloseTo(d.usage.tokPerSecPerUser, 9);
+      expect(r.speedCurve!.points[i]!.ttftSec).toBeCloseTo(d.usage.ttftSec, 9);
+    });
+  });
+
+  it('without curveUsers the curve is unchanged', () => {
+    const r = estimatePerformance(bundle, q);
+    const us = r.speedCurve!.points.map((p) => p.users);
+    expect(us.length).toBeLessThanOrEqual(PERFORMANCE_CURVE_POINTS);
+    expect(us[us.length - 1]).toBe(Math.max(r.maxConcurrent, q.users));
+  });
+
+  it('rejects a non-increasing curveUsers', () => {
+    expect(() => estimatePerformance(bundle, { ...q, curveUsers: [5, 5] })).toThrow(CoreInputError);
+  });
+});

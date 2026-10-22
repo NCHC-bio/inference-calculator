@@ -695,12 +695,14 @@ export function shapeProfile(
   n: number,
   eta: EtaMode,
   pointCount = SPEED_CURVE_POINTS,
+  /** Sample exactly these users instead of `pointCount` evenly spaced ones up to `n` (the comparison's shared axis). */
+  usersList?: number[],
 ): { memoryOnlyMax: number; bottleneck: Why | null; speedCurve: { shape: Shape; points: SpeedPoint[] } | null } {
   const one = checkShape(ctx, platform, shape, 1, eta);
   const memoryOnlyMax = one.why === 'context' || one.why === 'weights' ? 0 : Math.min(MAX_N, one.capacityPerReplica * shape.replicas);
   const bottleneck = n >= MAX_N ? null : checkShape(ctx, platform, shape, n + 1, eta).why;
   if (n < 1) return { memoryOnlyMax, bottleneck, speedCurve: null };
-  const ns = [...new Set(Array.from({ length: pointCount }, (_, i) => Math.max(1, Math.round(((i + 1) * n) / pointCount))))];
+  const ns = usersList ?? [...new Set(Array.from({ length: pointCount }, (_, i) => Math.max(1, Math.round(((i + 1) * n) / pointCount))))];
   const points = ns.map((users) => {
     const c = checkShape(ctx, platform, shape, users, eta);
     const gen = concurrencyFor(users, ctx.kind, ctx.agentShare).generating;
