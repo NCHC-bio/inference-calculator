@@ -220,9 +220,25 @@ body {
   min-height: 0;
 }
 
-/* Comparison table: cells stay on one line; the table scrolls inside its card on narrow screens. */
-.compare-card .ant-table th,
-.compare-card .ant-table td {
+/* Comparison (design v9 §4): two charts side by side, stacked below 760 px; one card per line on narrow cards. */
+.cmp-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px 28px;
+  margin-top: 14px;
+}
+@media (max-width: 760px) {
+  .cmp-charts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.cmp-line-card {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border-radius: 6px;
+  background: var(--ant-color-fill-quaternary);
+}
+.row-compare {
   white-space: nowrap;
 }
 

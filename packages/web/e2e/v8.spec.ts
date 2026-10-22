@@ -56,12 +56,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, 'workbench', true);
       await noHorizontalScroll(page);
 
-      // Comparison: pin the best row, then a second one.
-      await row(page, best).getByRole('button', { name: tZh('wb.pin') }).click();
+      // Comparison (design v9): tick 比較 on the best row and a second one, without expanding them.
+      await row(page, best).getByRole('checkbox', { name: tZh('row.compare') }).check();
       const second = need(DEFAULT).perPlatform.find((p) => p.expected.ok && p.platform !== best)!.platform;
-      await openRow(page, second);
-      await row(page, second).getByRole('button', { name: tZh('wb.pin') }).click();
-      await expect(page.getByTestId('compare').locator('tbody tr.ant-table-row')).toHaveCount(2);
+      await row(page, second).getByRole('checkbox', { name: tZh('row.compare') }).check();
+      await expect(page.getByTestId('compare').getByTestId('compare-line')).toHaveCount(2);
       await page.getByTestId('compare').scrollIntoViewIfNeeded();
       await shot(page, 'compare');
 

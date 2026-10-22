@@ -4,11 +4,11 @@ import { useRef, type JSX } from 'react';
 import { getBundle } from '../bundle';
 import { useDeferredState, useMain } from '../compute/useResults';
 import { useT } from '../i18n';
-import { CUSTOM_PLATFORMS_MAX } from '../state/state';
+import { CUSTOM_PLATFORMS_MAX, isPlainLine } from '../state/state';
 import { useCalc } from '../state/store';
 import { BestMarker } from './BestMarker';
 import { Explain } from './Explain';
-import { CustomActions, RowExtra, RowName, rowInfo, WhyTag } from './PlatformRow';
+import { CompareCheck, CustomActions, RowExtra, RowName, rowInfo, WhyTag } from './PlatformRow';
 import { Workbench } from './Workbench';
 
 type Item = NonNullable<CollapseProps['items']>[number];
@@ -93,10 +93,13 @@ export function PlatformList(): JSX.Element | null {
     const attrs = { 'data-testid': 'platform-row', 'data-row': r.row, 'data-best': String(best === r.row) };
     const onEdit = () => dispatch({ type: 'dialog', id: 'hardware', editingPlatform: info.custom });
     const onDelete = () => info.custom !== null && remove(info.custom);
+    const compared = current.compare.some((l) => l.row === r.row && isPlainLine(l));
+    const onCompare = () => dispatch({ type: 'compareToggle', row: r.row });
     if (r.kind === 'infeasible') {
       const extra = (
         <div className="row-extra">
           <WhyTag why={r.why} detail={r.detail} />
+          <CompareCheck checked={compared} onChange={onCompare} infeasible />
           {info.custom !== null && <CustomActions onEdit={onEdit} onDelete={onDelete} />}
         </div>
       );
@@ -120,6 +123,8 @@ export function PlatformList(): JSX.Element | null {
           onSet={(gpus) => dispatch({ type: 'override', row: r.row, value: { gpus } })}
           onEdit={onEdit}
           onDelete={onDelete}
+          compared={compared}
+          onCompare={onCompare}
         />
       ),
       children: <Workbench row={r} />,
