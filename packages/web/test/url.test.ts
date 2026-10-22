@@ -32,11 +32,11 @@ describe('url', () => {
       customPlatforms: [gpu, mac],
       overrides: { 'nano4-h200': { gpus: 8, tp: 2 }, 'custom:0': { gpus: 4 }, 'custom:1': { gpus: 3 } },
       openRow: 'custom:0',
-      pins: [{ id: 1, platform: { row: 'nano4-h200', name: 'H200', sub: 'x' }, unit: 'gpu', count: 8, model: { name: 'M', quant: null }, users: 1, tps: 1, ttft: 1, max: 1, kw: null, ok: true, hasEstimate: false, hasUser: false, warnings: [] }],
+      compare: [],
       dialog: 'hardware',
       editingPlatform: 1,
     };
-    const { openRow: _o, pins: _p, dialog: _d, editingPlatform: _e, ...kept } = s;
+    const { openRow: _o, dialog: _d, editingPlatform: _e, ...kept } = s;
     expect(decodeUrl(b, encodeUrl(s))).toEqual({ ...s0, ...kept });
   });
   it('hf model encodes as repo@sha', () => {

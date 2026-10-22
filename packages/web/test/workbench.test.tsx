@@ -66,7 +66,7 @@ describe('Workbench', () => {
     expect(within(foot).getByText('更多圖表（Roofline，專家用）')).toBeInTheDocument();
     expect(within(foot).getByRole('button', { name: /驗證指令/ })).toBeInTheDocument();
     const top = wb.querySelector<HTMLElement>('.wb-top')!;
-    expect(within(top).getByRole('button', { name: /加入比較/ })).toBeInTheDocument();
+    expect(within(top).queryByRole('button', { name: /加入比較/ })).toBeNull();
     expect(wb.textContent).not.toMatch(/副本/);
     expect(wb.textContent).not.toMatch(/NaN/);
   });
@@ -244,26 +244,10 @@ describe('Workbench', () => {
     expect(wb.textContent).toContain(`峰值功耗約 ${fmt(r.perf.powerKw!, 1)} kW`);
   });
 
-  it('pin snapshots the shown numbers', async () => {
-    const r = okRow('', H200);
+  it('has no 加入比較: rows are compared from their header checkbox (design v9 §3.1)', async () => {
     const wb = await openBench('');
-    await userEvent.click(within(wb).getByRole('button', { name: /加入比較/ }));
-    expect(latest!.pins).toHaveLength(1);
-    expect(latest!.pins[0]).toMatchObject({
-      platform: { row: H200, name: getBundle().platforms[H200]!.name, sub: getBundle().platforms[H200]!.sub },
-      unit: 'gpu',
-      count: r.count,
-      model: { name: getBundle().models[decodeUrl(getBundle(), '').model]!.name, quant: getBundle().quantization[r.perf.quant]!.name },
-      users: 15,
-      tps: r.perf.usage!.tokPerSecPerUser,
-      ttft: r.perf.usage!.ttftSec,
-      max: r.perf.maxConcurrent,
-      kw: r.perf.powerKw,
-      ok: r.perf.ok,
-      hasEstimate: r.perf.hasEstimate,
-      hasUser: r.perf.hasUser,
-      warnings: r.perf.warnings,
-    });
+    expect(within(wb).queryByRole('button', { name: /加入比較/ })).toBeNull();
+    expect(within(wb).queryByRole('checkbox')).toBeNull();
   });
 
   it('verify button opens the verify dialog without toggling the chart Collapse', async () => {
