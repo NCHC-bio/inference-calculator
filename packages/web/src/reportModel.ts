@@ -23,3 +23,14 @@ export function reportModelUrl(repo: string, sha: string | undefined, reason: st
   });
   return `${GITHUB_REPO}/issues/new?${q.toString()}`;
 }
+
+/** NCHC service portal: where a user goes to use NCHC computing after the calculator (design v10). */
+export const NCHC_ISERVICE = 'https://iservice.nchc.org.tw/nchc_service/index.php';
+
+/**
+ * A new issue about a number that looks wrong (design v10): the title names the model, the body carries the page URL,
+ * which holds the whole setting, and asks for the expected value and its evidence.
+ */
+export function reportNumberUrl(title: string, body: string): string {
+  return `${GITHUB_REPO}/issues/new?${new URLSearchParams({ title, body }).toString()}`;
+}

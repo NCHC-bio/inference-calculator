@@ -273,3 +273,20 @@ body {
   border-radius: 2px;
   margin-inline-end: 6px;
 }
+
+/* Design v10: NCHC logo in the footer. The PNG is black on white: multiply drops the white in light mode; in dark mode
+   invert + hue-rotate turns it white (the red dot stays red) and screen drops the now-black background. */
+.nchc {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+}
+.nchc-logo {
+  mix-blend-mode: multiply;
+  transition: filter var(--motion-dur) var(--motion-ease);
+}
+[data-theme='dark'] .nchc-logo {
+  filter: invert(1) hue-rotate(180deg);
+  mix-blend-mode: screen;
+}
