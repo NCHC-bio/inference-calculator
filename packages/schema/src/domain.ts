@@ -160,8 +160,20 @@ export const OriginSchema = z.strictObject({
 });
 export type Origin = z.infer<typeof OriginSchema>;
 
+/**
+ * The origin recorded on a user-entered model (manual override or website import): the user is not asked for the
+ * publisher and the model is not origin-checked; every result carries CUSTOM_MODEL_WARNING instead (spec §2.2, Ruling
+ * W12). 'ZZ' is the ISO 3166 user-assigned code: origin not given.
+ */
+export const UNCHECKED_ORIGIN: Origin = Object.freeze({ developer: '使用者自訂', country: 'ZZ' });
+
 export const LayerGroupSchema = z.strictObject({
-  kind: z.enum(['full', 'sliding', 'mamba']),
+  /**
+   * `state`: a layer whose per-sequence cache is a fixed-size state (linear attention, short convolution), sized by
+   * `stateBytes` per layer per sequence over the whole replica, independent of context length.
+   * `none`: a layer (block) with no per-sequence cache at all (an MLP / MoE block of a hybrid block list).
+   */
+  kind: z.enum(['full', 'sliding', 'mamba', 'state', 'none']),
   count: posInt,
   kvHeads: posInt.optional(),
   headDim: posInt.optional(),
@@ -174,6 +186,8 @@ export const LayerGroupSchema = z.strictObject({
     /** Bytes per SSM-state element (HF `mamba_ssm_cache_dtype`: float32 → 4, bf16/fp16 → 2). */
     stateBytesPerElem: z.number().positive().optional(),
   }).optional(),
+  /** kind 'state': bytes of one layer's per-sequence state, summed over the replica's GPUs. */
+  stateBytes: z.number().positive().optional(),
 }).superRefine((g, ctx) => {
   if (g.kind === 'sliding' && g.window === undefined) {
     ctx.addIssue({ code: 'custom', path: ['window'], message: "kind 'sliding' requires window" });
@@ -181,8 +195,13 @@ export const LayerGroupSchema = z.strictObject({
   if (g.kind === 'mamba' && g.ssm === undefined) {
     ctx.addIssue({ code: 'custom', path: ['ssm'], message: "kind 'mamba' requires ssm" });
   }
+  if (g.kind === 'state' && g.stateBytes === undefined) {
+    ctx.addIssue({ code: 'custom', path: ['stateBytes'], message: "kind 'state' requires stateBytes" });
+  }
 });
 export type LayerGroup = z.infer<typeof LayerGroupSchema>;
+
+const nonNeg = z.number().nonnegative();
 
 export const ModelSchema = z
   .strictObject({
@@ -209,9 +228,33 @@ export const ModelSchema = z
      * qkNopeHeadDim + qkRopeHeadDim and V head dim vHeadDim, the decode (absorbed MQA) path with kvLoraRank +
      * qkRopeHeadDim and kvLoraRank (spec §5.2, Ruling R40).
      */
-    mla: z.strictObject({ kvLoraRank: posInt, qkRopeHeadDim: posInt, qkNopeHeadDim: posInt, vHeadDim: posInt }).optional(),
+    mla: z.strictObject({ kvLoraRank: posInt, qkRopeHeadDim: z.number().int().nonnegative(), qkNopeHeadDim: posInt, vHeadDim: posInt }).optional(),
     layerGroups: z.array(LayerGroupSchema).min(1).optional(),
-    moe: z.strictObject({ experts: posInt, topK: posInt, expertFfnDim: posInt }).optional(),
+    /**
+     * Routed experts. Expert parameters = experts × matrices × width × expertFfnDim × layers (spec §5.1):
+     * `layers` = MoE layers (absent → every layer; dense MLP layers before or between them are not MoE),
+     * `matrices` = 3 for a gated MLP (gate / up / down, the default), 2 for a non-gated one (e.g. relu2),
+     * `width` = the dimension experts work in (absent → hidden; a latent MoE projects to a smaller one).
+     */
+    moe: z.strictObject({
+      experts: posInt, topK: posInt, expertFfnDim: posInt,
+      layers: posInt.optional(),
+      matrices: z.union([z.literal(2), z.literal(3)]).optional(),
+      width: posInt.optional(),
+    }).optional(),
+    /**
+     * Per-sequence cache beyond the attention / state layers: a sparse-attention indexer's key cache, memory layers,
+     * repeated passes. `bytesPerToken`: bytes per context token over all layers, kept by every TP rank (like the MLA
+     * latent cache); `stateBytes`: a fixed per-sequence state over the replica. Used by estimates (CLAUDE.md "Goal
+     * for imported models"), each part named in `estimates`.
+     */
+    extraCache: z.strictObject({ bytesPerToken: nonNeg, stateBytes: nonNeg }).optional(),
+    /**
+     * Parts of this model the calculator has not modelled precisely and estimated conservatively (more memory, slower)
+     * from the standard config fields (CLAUDE.md "Goal for imported models"). Results carry the nonstandard-config
+     * warning and an `estimate` basis item. `feature` names the structure, `detail` what was found and assumed.
+     */
+    estimates: z.array(z.strictObject({ feature: z.string().min(1), detail: z.string().min(1) })).min(1).optional(),
     slidingWindow: posInt.nullable().optional(),
     /**
      * The checkpoint at `hfRepo` is already quantized (config.json `quantization_config`). Weight memory is

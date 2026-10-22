@@ -201,7 +201,13 @@ describe('config values (Task 3 table)', () => {
   });
 
   it('quantization', () => {
-    expect(Object.keys(b.quantization)).toEqual(['bf16', 'fp8', 'int4-awq', 'mxfp4']);
+    expect(Object.keys(b.quantization)).toEqual(['bf16', 'fp8', 'int4-awq', 'mxfp4', 'native-other']);
+    // The stand-in for unmodelled native formats (issue #17): every value an estimate, each on the conservative side.
+    const other = b.quantization['native-other']!;
+    expect(other.bytesPerParam).toMatchObject({ value: 0.5, status: 'estimate' });
+    expect(other.computeDtype).toBe('bf16');
+    expect(other.kvBytesPerElem).toMatchObject({ value: 2, status: 'estimate' });
+    expect(other.vllmServe.nativeOnly).toMatchObject({ value: true });
     const bf16 = b.quantization['bf16']!;
     expectSV(bf16.bytesPerParam, 2, 'official', 'google-bfloat16');
     expect(bf16.computeDtype).toBe('bf16');

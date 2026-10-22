@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import {
-  HfRepoSchema, LayerGroupSchema, ModelSchema, SourceSchema, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
+  HfRepoSchema, LayerGroupSchema, ModelSchema, SourceSchema, UNCHECKED_ORIGIN, type Bundle, type CalibrationProfile, type Hardware, type Model, type Platform, type Quantization,
 } from '@nchc/schema';
 import { BasisCollector, fromSourced, fromUser, trustFlags, type BasisItem } from './basis';
 import {
@@ -668,8 +668,15 @@ const OVERRIDE_LABELS: Record<string, string> = {
 };
 const OVERRIDE_LEC: Record<string, string> = { totalParamsB: 'B3, B8', moe: 'B3' };
 
-/** A non-blocking warning on a result (it never stops the computation). */
-export type ResultWarning = { code: 'custom-model-supply-chain'; text: string };
+/**
+ * A non-blocking warning on a result (it never stops the computation). `items`: what it is about, when it lists
+ * something (nonstandard-config: the estimated parts, as Model.estimates).
+ */
+export type ResultWarning = {
+  code: 'custom-model-supply-chain' | 'nonstandard-config';
+  text: string;
+  items?: Array<{ feature: string; detail: string }>;
+};
 
 /**
  * Attached to every result that uses a user-entered (custom) model, whatever its origin or hfRepo (spec §2.2).
@@ -677,8 +684,35 @@ export type ResultWarning = { code: 'custom-model-supply-chain'; text: string };
  */
 export const CUSTOM_MODEL_WARNING: ResultWarning = Object.freeze({
   code: 'custom-model-supply-chain',
-  text: '國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。使用後果請用戶自行承擔。',
+  text: '國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。違反規定可能影響您的 iService 帳號，使用後果請用戶自行承擔。',
 });
+
+/**
+ * Attached to every result whose model has `estimates` (CLAUDE.md "Goal for imported models"): its config is not
+ * standard, so the listed parts are conservative estimates (more memory, slower) until the architecture is modelled.
+ */
+export function nonstandardConfigWarning(m: Pick<Model, 'estimates'>): ResultWarning | null {
+  if (!m.estimates?.length) return null;
+  return {
+    code: 'nonstandard-config',
+    text: '這個模型的 config 不是標準格式，計算機還沒精確建模其中的部分結構，相關數值為推估（保守：記憶體偏多、速度偏慢）。',
+    items: m.estimates.map((e) => ({ ...e })),
+  };
+}
+
+/** The basis item of a model's estimated parts (status estimate; evidence: the model's own source). */
+function estimatesBasis(m: Model, prefix: ResolvedModel['pathPrefix']): BasisItem[] {
+  if (!m.estimates?.length) return [];
+  return [{
+    path: `${prefix}.${m.id}.estimates`,
+    status: 'estimate',
+    value: m.estimates,
+    sourceIds: [m.source],
+    text:
+      `${m.name} 未精確建模的結構，以標準 config 欄位保守推估；推估依據：` +
+      m.estimates.map((e) => `${e.feature}（${e.detail}）`).join('；'),
+  }];
+}
 
 /**
  * A resolved model. `pathPrefix` is the basis path root of its values: `models` for the catalog and overrides, `imported` for a
@@ -708,6 +742,7 @@ export function resolveModel(
       ...(m.moe ? { moe: m.moe } : {}),
       ...(m.layerGroups ? { layerGroups: m.layerGroups } : {}),
       ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
+      ...(m.extraCache ? { extraCache: m.extraCache } : {}),
     };
     const basis: BasisItem[] = [
       fromSourced(`models.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
@@ -719,7 +754,9 @@ export function resolveModel(
         text: `${m.name} 架構（層數、注意力頭、MoE 等，取自模型 config.json）`,
       },
     ];
-    return { model: m, basis, warnings: [], pathPrefix: 'models' };
+    basis.push(...estimatesBasis(m, 'models'));
+    const nonstandard = nonstandardConfigWarning(m);
+    return { model: m, basis, warnings: nonstandard ? [nonstandard] : [], pathPrefix: 'models' };
   }
 
   if ('imported' in idOrOverride) return resolveImported(bundle, idOrOverride);
@@ -733,8 +770,7 @@ export function resolveModel(
     name: o.name ?? '自訂模型',
     ...(o.hfRepo ? { hfRepo: o.hfRepo } : {}),
     ...(o.baseModel ? { baseModel: o.baseModel } : {}),
-    // 'ZZ' = ISO user-assigned code: origin not given by the user.
-    origin: o.origin ?? { developer: '使用者自訂', country: 'ZZ' },
+    origin: o.origin ?? UNCHECKED_ORIGIN,
     ...(o.baseOrigin ? { baseOrigin: o.baseOrigin } : {}),
     // Core math reads only `.value`; provenance for overrides lives in the basis ('user').
     totalParamsB: { value: o.totalParamsB, status: 'user', verified: bundle.meta.dataVersion },
@@ -801,6 +837,7 @@ function resolveImported(
     ...(m.moe ? { moe: m.moe } : {}),
     ...(m.layerGroups ? { layerGroups: m.layerGroups } : {}),
     ...(m.slidingWindow != null ? { slidingWindow: m.slidingWindow } : {}),
+    ...(m.extraCache ? { extraCache: m.extraCache } : {}),
   };
   const basis: BasisItem[] = [
     fromSourced(`imported.${m.id}.totalParamsB`, `${m.name} 總參數量`, m.totalParamsB, 'B3, B8'),
@@ -812,7 +849,9 @@ function resolveImported(
       text: `${m.name} 架構（層數、注意力頭、MoE 等，取自匯入的 config.json；${source.title}）`,
     },
   ];
-  return { model: m as Model, basis, warnings: [CUSTOM_MODEL_WARNING], pathPrefix: 'imported' };
+  basis.push(...estimatesBasis(m as Model, 'imported'));
+  const nonstandard = nonstandardConfigWarning(m);
+  return { model: m as Model, basis, warnings: [CUSTOM_MODEL_WARNING, ...(nonstandard ? [nonstandard] : [])], pathPrefix: 'imported' };
 }
 
 /**
@@ -927,7 +966,22 @@ function weightSizing(
   const emb = inputEmbedding > 0 ? { inputEmbedding } : {};
   if (res.native && nq) {
     const resident = nq.checkpointWeightBytes.value;
-    const expert = expertParams * bpp;
+    let expert = expertParams * bpp;
+    // native-other (an unmodelled format) has only a stand-in bytes per parameter: when it would put the experts at or
+    // above the checkpoint, its own bytes are split in proportion to the parameters instead (an estimate, listed).
+    if (q.id === 'native-other' && !(expert + inputEmbedding < resident)) {
+      const total = model.totalParamsB.value * 1e9;
+      expert = ((resident - inputEmbedding) * expertParams) / total;
+      basis.add({
+        path: `${mp}.nativeQuant.expertBytesProportional`,
+        status: 'estimate',
+        value: expert,
+        sourceIds: [nq.checkpointWeightBytes.source ?? model.source],
+        text:
+          `${model.name} 專家權重位元組：未建模格式的每參數位元組會超過 checkpoint 大小，改依參數比例拆分 checkpoint；` +
+          `推估依據：(checkpoint − 輸入 embedding) × 專家參數 ÷ 總參數 = (${resident} − ${inputEmbedding}) × ${expertParams} ÷ ${total} = ${expert.toFixed(0)}`,
+      });
+    }
     basis.add(
       fromSourced(
         `${mp}.nativeQuant.checkpointWeightBytes`,

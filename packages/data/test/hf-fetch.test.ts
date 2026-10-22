@@ -101,3 +101,50 @@ describe('fetchHfModel', () => {
     expect(seen.has('hf-parse')).toBe(true);
   });
 });
+
+describe('fetchHfModel failures (issue #17)', () => {
+  const api = (body: object) => JSON.stringify({ sha: SHA, safetensors: { total: 1 }, ...body });
+
+  it('a GGUF-only repo is read through its card base_model, an estimate (issue #17)', async () => {
+    const urls: string[] = [];
+    const base = fake().fn;
+    const fn: HfFetchDeps['fetch'] = async (url, init) => {
+      urls.push(url);
+      if (url.includes('/api/models/someone/model-GGUF')) {
+        return res(200, api({ cardData: { base_model: ['openai/gpt-oss-120b'] }, siblings: [{ rfilename: 'README.md' }, { rfilename: 'm-Q4_K_M.gguf' }] }));
+      }
+      return base(url, init);
+    };
+    const r = await fetchHfModel('someone/model-GGUF', { fetch: fn, origin: ORIGIN });
+    if (!r.ok) throw new Error(r.message);
+    expect(r.repo).toBe('openai/gpt-oss-120b');
+    expect(r.model.estimates).toContainEqual({ feature: 'gguf', detail: expect.stringContaining('someone/model-GGUF is a GGUF conversion') });
+    expect(urls.some((u) => u.includes('someone/model-GGUF') && u.endsWith('/config.json'))).toBe(false);
+  });
+
+  it('a repo that is not a language model (its task says so) is reported as such, not as missing fields', async () => {
+    const fn: HfFetchDeps['fetch'] = async (url) => {
+      if (url.includes('expand[]=pipeline_tag')) return res(200, JSON.stringify({ pipeline_tag: 'image-feature-extraction' }));
+      if (url.includes('/api/models/')) return res(200, api({ siblings: [{ rfilename: 'config.json' }, { rfilename: 'weights.pth' }] }));
+      return res(200, JSON.stringify({ model: { decoder_config: { depth: 4 } } }));
+    };
+    const r = await fetchHfModel('someone/earth-encoder', { fetch: fn, origin: ORIGIN });
+    expect(r).toMatchObject({ ok: false, status: 'not-language-model', task: 'image-feature-extraction' });
+  });
+
+  it('a GGUF-only repo whose card names no base model fails (nothing to read the architecture from)', async () => {
+    const fn: HfFetchDeps['fetch'] = async () => res(200, api({ siblings: [{ rfilename: 'm-Q4_K_M.gguf' }] }));
+    expect(await fetchHfModel('someone/model-GGUF', { fetch: fn, origin: ORIGIN })).toMatchObject({ ok: false, status: 'gguf', baseModels: [] });
+  });
+
+  it('a repo with both config.json and .gguf files is read normally', async () => {
+    const fn = fake().fn;
+    const r = await fetchHfModel('openai/gpt-oss-120b', {
+      fetch: async (url, init) => (url.includes('/api/models/') && !url.includes('blobs=true')
+        ? res(200, api({ siblings: [{ rfilename: 'config.json' }, { rfilename: 'x.gguf' }] }))
+        : fn(url, init)),
+      origin: ORIGIN,
+    });
+    expect(r.ok).toBe(true);
+  });
+});

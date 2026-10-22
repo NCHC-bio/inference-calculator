@@ -1,4 +1,4 @@
-import { OriginSchema, type Bundle, type Model, type Origin, type Source } from '@nchc/schema';
+import { type Bundle, type Model, type Source } from '@nchc/schema';
 import {
   CustomPlatformInputSchema,
   ModelOverrideSchema,
@@ -21,11 +21,8 @@ export type SpeedSel = string | { minTokPerSec: number; maxTtftSec: number };
 export type CustomModel =
   | null
   | { kind: 'manual'; value: ModelOverride }
-  /**
-   * `origin`: the publisher the user confirmed on import (spec §8.3.2), kept so a URL reload can refetch (Ruling W1).
-   * `imported` is absent after a URL reload until the refetch answers.
-   */
-  | { kind: 'hf'; repo: string; sha: string; origin?: Origin; imported?: { model: Model; source: Source } };
+  /** `imported` is absent after a URL reload until the refetch answers (Ruling W1). */
+  | { kind: 'hf'; repo: string; sha: string; imported?: { model: Model; source: Source } };
 /** A platform sub-label as data: catalog text, or a message key with its values (formatted in the current language). */
 export type SubLabel = string | { key: MsgKey; vars: Record<string, string | number> };
 /**
@@ -51,7 +48,9 @@ export type Pin = {
   hasUser: boolean;
   warnings: ResultWarning[];
 };
-export type DialogId = 'basis' | 'cite' | 'verify' | 'accuracy' | 'funnel' | 'workload' | 'speed' | 'hf' | 'manualModel' | 'hardware';
+/** Every dialog the store can open; the reducer ignores any other id, so the type is derived from this one list. */
+export const DIALOGS = ['basis', 'cite', 'verify', 'accuracy', 'funnel', 'workload', 'speed', 'hf', 'manualModel', 'hardware', 'myModels'] as const;
+export type DialogId = (typeof DIALOGS)[number];
 export type BasisFilter = 'est' | 'all';
 export type CalcState = {
   lang: Lang;
@@ -108,7 +107,6 @@ export const CUSTOM_PLATFORMS_MAX = 8;
 export const CUSTOM_MODEL_ID = 'custom';
 /** Tensor-parallel sizes a replica may use within one node (spec: TP ∈ {1,2,4,8}). */
 const TP_SIZES = [1, 2, 4, 8];
-const DIALOGS: readonly DialogId[] = ['basis', 'cite', 'verify', 'accuracy', 'funnel', 'workload', 'speed', 'hf', 'manualModel', 'hardware'];
 const HF_REPO = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/;
 const HF_REVISION = /^[\w.-]{1,100}$/;
 
@@ -197,8 +195,7 @@ export function validCustomModel(v: unknown): v is Exclude<CustomModel, null> {
       typeof c.repo === 'string' &&
       HF_REPO.test(c.repo) &&
       typeof c.sha === 'string' &&
-      HF_REVISION.test(c.sha) &&
-      (c.origin === undefined || OriginSchema.safeParse(c.origin).success)
+      HF_REVISION.test(c.sha)
     );
   }
   return false;
@@ -352,7 +349,7 @@ export function reduce(b: Bundle, s: CalcState, a: Action): CalcState {
     case 'clearPins':
       return { ...s, pins: [] };
     case 'dialog': {
-      if (a.id !== null && !DIALOGS.includes(a.id)) return s;
+      if (a.id !== null && !(DIALOGS as readonly string[]).includes(a.id)) return s;
       const basisFilter = a.basisFilter === 'est' || a.basisFilter === 'all' ? a.basisFilter : s.basisFilter;
       const editingPlatform = a.editingPlatform !== undefined ? a.editingPlatform : a.id === null ? null : s.editingPlatform;
       const hfQuery = a.id === 'hf' ? (typeof a.hfQuery === 'string' ? a.hfQuery.trim() : s.hfQuery) : '';

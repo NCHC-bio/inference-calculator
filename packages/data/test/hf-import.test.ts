@@ -149,15 +149,15 @@ describe('runImport', () => {
     expect(m.baseOrigin).toEqual({ developer: 'OpenAI', country: 'US' });
   });
 
-  it('unsupported MoE layout (Nemotron 3.5 latent MoE): exit 2, missing listed, nothing written (Ruling R31)', async () => {
+  it('a layout not modelled precisely (Nemotron 3.5 latent MoE) imports with its estimates printed and recorded (issue #17)', async () => {
     const f = fakeFetch(fixtureText('nemotron-3.5-super'), 200, 124453395976);
     const code = await runImport(
       ['nvidia/NVIDIA-Nemotron-3.5-Super-VL-120B-A12B-BF16', '--developer', 'NVIDIA', '--country', 'US'], deps(f.fn),
     );
-    expect(code).toBe(2);
-    expect(out.join('\n')).toContain('moe_latent_size 1024');
-    expect(existsSync(join(dir, 'models/nvidia-nemotron-3.5-super-vl-120b-a12b-bf16.yaml'))).toBe(false);
-    expect(readFileSync(join(dir, 'sources.yaml'), 'utf8')).toBe(SOURCES_HEAD);
+    expect(code).toBe(0);
+    expect(out.join('\n')).toContain('estimate: moe-layout: latent MoE: experts work in moe_latent_size 1024');
+    const m = parse(readFileSync(join(dir, 'models/nvidia-nemotron-3.5-super-vl-120b-a12b-bf16.yaml'), 'utf8')) as { estimates?: unknown[] };
+    expect(m.estimates).toContainEqual({ feature: 'moe-layout', detail: expect.stringContaining('moe_latent_size 1024') });
   });
 
   it('model card base_model is recorded as baseModel and printed; it does not block the import', async () => {

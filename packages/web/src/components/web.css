@@ -199,6 +199,11 @@ body {
   .sent:lang(en) .clause {
     white-space: normal;
   }
+  /* An imported model's name (owner/name, up to ~96 characters) is longer than a phone line: the model clause may wrap
+     before its select, and the select is capped at the sentence width (its value is then ellipsized). */
+  .sent .clause-model {
+    white-space: normal;
+  }
 }
 
 /* Option descriptions (design §3.2): open for the active / selected option (OptionSelect adds .on; every option

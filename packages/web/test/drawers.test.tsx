@@ -29,6 +29,7 @@ import { computeMain } from '../src/compute/compute';
 import { defaultState, type Action, type CalcState } from '../src/state/state';
 import { StoreProvider, useCalc } from '../src/state/store';
 import { encodeUrl } from '../src/state/url';
+import { reportModelUrl, REPORT_REASON_MAX } from '../src/reportModel';
 
 vi.mock('@nchc/data/hf', () => ({ fetchHfModel: vi.fn() }));
 const fetchMock = vi.mocked(fetchHfModel);
@@ -332,6 +333,8 @@ describe('ManualModelDrawer', () => {
     openDialog({ type: 'dialog', id: 'manualModel' });
     const d = await drawer();
     for (const l of [/總參數/, /層數/, /注意力頭數/, /KV 頭數/, /head 維度/, /hidden 維度/]) expect(within(d).getByLabelText(l)).toBeInTheDocument();
+    // The NCHC rule is stated before anything is entered (Ruling W12).
+    expect(within(d).getByTestId('custom-model-warning')).toHaveTextContent(CUSTOM_MODEL_WARNING.text);
     await userEvent.click(within(d).getByRole('button', { name: '加入' }));
     await waitFor(() => expect(d.querySelectorAll('.ant-form-item-explain-error').length).toBeGreaterThan(0));
     expect(state().customModel).toBeNull();
@@ -423,27 +426,22 @@ describe('ManualModelDrawer re-save (v8 minor 7)', () => {
 });
 
 describe('HfImportDrawer', () => {
-  const origin = async (d: HTMLElement) => {
-    await fill(d, /發表者（/, 'Test Org');
-    await fill(d, /所在國家/, 'US');
-  };
-
-  it('success → customModel hf with imported, origin and sha', async () => {
+  it('success → customModel hf with imported and sha; no publisher fields, the NCHC rule shown first (Ruling W12)', async () => {
     const { model, source } = importedFixture();
     fetchMock.mockResolvedValue({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] });
     renderWith(<HfImportDrawer />);
     openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
     const d = await drawer();
     expect(within(d).getByLabelText(/Hugging Face 模型/)).toHaveValue('test-org/test-model');
-    // Developer and country are required before anything is fetched.
-    await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
-    await waitFor(() => expect(d.querySelectorAll('.ant-form-item-explain-error').length).toBeGreaterThan(0));
-    expect(fetchMock).not.toHaveBeenCalled();
-    await origin(d);
+    const warning = within(d).getByTestId('custom-model-warning');
+    expect(warning).toHaveTextContent('國網中心模型使用規定');
+    expect(warning).toHaveTextContent(CUSTOM_MODEL_WARNING.text);
+    expect(within(d).queryByLabelText(/發表者/)).toBeNull();
+    expect(within(d).queryByLabelText(/國家/)).toBeNull();
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
     await waitFor(() => expect(state().customModel?.kind).toBe('hf'));
-    expect(fetchMock).toHaveBeenCalledWith('test-org/test-model', expect.objectContaining({ origin: { developer: 'Test Org', country: 'US' } }));
-    expect(state().customModel).toEqual({ kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', imported: { model, source }, origin: { developer: 'Test Org', country: 'US' } });
+    expect(fetchMock.mock.calls[0]![1]).not.toHaveProperty('origin');
+    expect(state().customModel).toEqual({ kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', imported: { model, source } });
     expect(state().dialog).toBeNull();
   });
 
@@ -454,7 +452,6 @@ describe('HfImportDrawer', () => {
     openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/gated' });
     const d = await drawer();
     expect(within(d).queryByLabelText(/token/i)).toBeNull();
-    await origin(d);
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
     const token = await within(d).findByLabelText(/Hugging Face token/);
     // Its own localized title plus the CLI-neutral detail (no command-line flag reaches the browser).
@@ -478,7 +475,6 @@ describe('HfImportDrawer', () => {
     renderWith(<HfImportDrawer />);
     openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
     const d = await drawer();
-    await origin(d);
     const button = within(d.closest('.ant-drawer')!).getByRole('button', { name: '匯入' });
     await userEvent.click(button);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
@@ -495,7 +491,6 @@ describe('HfImportDrawer', () => {
     const before = state().model;
     openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
     const d = await drawer();
-    await origin(d);
     await userEvent.click(within(d.closest('.ant-drawer')!).getByRole('button', { name: '匯入' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     fireEvent.click(d.closest('.ant-drawer')!.querySelector('.ant-drawer-close')!);
@@ -511,7 +506,7 @@ describe('HfImportDrawer', () => {
   it.each([
     ['not-found', /找不到這個模型/],
     ['network', /無法連線到 Hugging Face/],
-    ['unparsable', /無法解析這個模型的架構/],
+    ['unparsable', /計算機讀取這個模型時出錯了/],
     ['invalid', /owner\/name/],
   ] as const)('%s → its own message and the missing list', async (status, re) => {
     fetchMock.mockResolvedValue({ ok: false, status, message: 'detail text', missing: ['num_hidden_layers', 'head_dim'] });
@@ -519,7 +514,6 @@ describe('HfImportDrawer', () => {
     const before = state().model;
     openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/x' });
     const d = await drawer();
-    await origin(d);
     await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
     const alert = await within(d).findByTestId('hf-error');
     expect(alert).toHaveTextContent(re);
@@ -527,6 +521,133 @@ describe('HfImportDrawer', () => {
     expect(alert).toHaveTextContent('head_dim');
     expect(state().model).toBe(before);
     expect(state().customModel).toBeNull();
+  });
+
+  const submitFailure = async (failure: Awaited<ReturnType<typeof fetchHfModel>>, query = 'test-org/x') => {
+    fetchMock.mockResolvedValue(failure);
+    renderWith(<HfImportDrawer />);
+    openDialog({ type: 'dialog', id: 'hf', hfQuery: query });
+    const d = await drawer();
+    await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
+    return { d, alert: await within(d).findByTestId('hf-error') };
+  };
+
+  it('an import that fails is a bug: the missing fields once and a pre-filled bug report (issue #17)', async () => {
+    const { alert } = await submitFailure({
+      ok: false, status: 'unparsable', message: 'missing: hidden_size', missing: ['hidden_size'], repo: 'test-org/x', sha: 'abc1234def',
+    });
+    expect(alert).toHaveTextContent('計算機讀取這個模型時出錯了，這是計算機的問題，請回報');
+    expect(alert.textContent?.match(/hidden_size/g)).toHaveLength(1);
+    const link = within(alert).getByTestId('hf-report');
+    expect(link).toHaveTextContent('回報這個錯誤');
+    const url = new URL(link.getAttribute('href')!);
+    expect(url.origin + url.pathname).toBe('https://github.com/NCHC-bio/inference-calculator/issues/new');
+    expect(url.searchParams.get('template')).toBe('unsupported-model.yml');
+    expect(url.searchParams.get('title')).toBe('Import error: test-org/x');
+    expect(url.searchParams.get('repo')).toBe('test-org/x');
+    expect(url.searchParams.get('sha')).toBe('abc1234def');
+    expect(url.searchParams.get('reason')).toBe('missing: hidden_size');
+    expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  it('the report link never carries the token, even after a gated retry (issue #17)', async () => {
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 'denied', message: 'gated or private repo: an access token is required (HTTP 401 on config.json)' });
+    renderWith(<HfImportDrawer />);
+    openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/gated' });
+    const d = await drawer();
+    await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
+    await userEvent.type(await within(d).findByLabelText(/Hugging Face token/), 'hf_secret123');
+    fetchMock.mockResolvedValueOnce({ ok: false, status: 'unparsable', message: 'missing: hidden_size', missing: ['hidden_size'], repo: 'test-org/gated', sha: 'abc1234def' });
+    await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
+    const link = await within(d).findByTestId('hf-report');
+    expect(link.getAttribute('href')).not.toContain('hf_secret123');
+    expect(within(d).getByTestId('hf-error')).toHaveTextContent('缺少：hidden_size');
+  });
+
+  it('a GGUF repo with no base model to read from is a bug report too (issue #17)', async () => {
+    const { alert } = await submitFailure({
+      ok: false, status: 'gguf', message: 'GGUF repo without config.json, and its model card names no base model', repo: 'quant-org/m-GGUF', sha: 'abc1234def', baseModels: [],
+    }, 'quant-org/m-GGUF');
+    expect(alert).toHaveTextContent('這個 repo 只有 GGUF 檔');
+    expect(within(alert).getByTestId('hf-report')).toBeInTheDocument();
+  });
+
+  it('a model with estimated parts imports with a warning toast (issue #17)', async () => {
+    const { model, source } = importedFixture();
+    const estimated = { ...model, estimates: [{ feature: 'linear-attention', detail: 'Gated DeltaNet layers: state 48 × 128 × 128' }] };
+    fetchMock.mockResolvedValue({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model: estimated, source, notes: [], cardBases: [] });
+    renderWith(<HfImportDrawer />);
+    openDialog({ type: 'dialog', id: 'hf', hfQuery: 'test-org/test-model' });
+    const d = await drawer();
+    await userEvent.click(within(d).getByRole('button', { name: '匯入' }));
+    await waitFor(() => expect(document.querySelector('.ant-message-warning')).not.toBeNull());
+    expect(document.querySelector('.ant-message-warning')).toHaveTextContent('已匯入 test-org/test-model，部分數值為推估');
+  });
+});
+
+describe('EstimateNotice (issue #17)', () => {
+  it('an estimated result: one sentence of localized names, details one step away, a support request without the token', async () => {
+    const { model, source } = importedFixture();
+    const estimates = [
+      { feature: 'linear-attention', detail: 'Gated DeltaNet layers: state 48 × 128 × 128 at 4 bytes' },
+      { feature: 'sparse-indexer', detail: 'index_n_heads: an indexer key cache' },
+    ];
+    renderWith(<AnswerLine />, '?w=chat');
+    act(() => send({ type: 'customModel', value: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', imported: { model: { ...model, estimates }, source } } }));
+    const notice = await screen.findByTestId('estimate-notice');
+    expect(notice).toHaveTextContent('這個模型的 config 不是標準格式，部分數值為推估');
+    expect(notice).toHaveTextContent('：混合線性注意力（Gated DeltaNet、KDA）、稀疏注意力索引器（DSA 式）。');
+    expect(within(notice).queryByTestId('estimate-details')).toBeNull();
+    await userEvent.click(within(notice).getByText('推估了哪些部分'));
+    expect(await within(notice).findByTestId('estimate-details')).toHaveTextContent('state 48 × 128 × 128 at 4 bytes');
+    const url = new URL(within(notice).getByTestId('estimate-request').getAttribute('href')!);
+    expect(url.searchParams.get('title')).toBe('Support model: test-org/test-model');
+    expect(url.searchParams.get('sha')).toBe('abc1234def');
+    expect(url.searchParams.get('reason')).toContain('linear-attention (Gated DeltaNet layers');
+    // The NCHC rule keeps its own warning beside it.
+    expect(screen.getByText(CUSTOM_MODEL_WARNING.text)).toBeInTheDocument();
+  });
+
+  it('closing folds the notice into a tag that opens it again; another model keeps its own notice', async () => {
+    const { model, source } = importedFixture();
+    const estimates = [{ feature: 'linear-attention', detail: 'Gated DeltaNet layers' }];
+    const pick = (sha: string) =>
+      act(() => send({ type: 'customModel', value: { kind: 'hf', repo: 'test-org/test-model', sha, imported: { model: { ...model, estimates }, source } } }));
+    renderWith(<AnswerLine />, '?w=chat');
+    pick('abc1234def');
+    const notice = await screen.findByTestId('estimate-notice');
+    await userEvent.click(within(notice).getByRole('button', { name: '關閉推估說明' }));
+    const tag = await screen.findByTestId('estimate-reopen');
+    expect(tag).toHaveTextContent('部分數值為推估');
+    expect(screen.queryByTestId('estimate-notice')).toBeNull();
+    // Another commit of the model is another model: its notice is open.
+    pick('fff1234def');
+    expect(await screen.findByTestId('estimate-notice')).toBeInTheDocument();
+    // Back to the closed one: still closed; the tag (keyboard too) opens it again.
+    pick('abc1234def');
+    const again = await screen.findByTestId('estimate-reopen');
+    again.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(await screen.findByTestId('estimate-notice')).toBeInTheDocument();
+  });
+
+  it('a model without estimates shows no notice', async () => {
+    const { model, source } = importedFixture();
+    renderWith(<AnswerLine />, '?w=chat');
+    act(() => send({ type: 'customModel', value: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', imported: { model, source } } }));
+    await waitFor(() => expect(screen.getByText(CUSTOM_MODEL_WARNING.text)).toBeInTheDocument());
+    expect(screen.queryByTestId('estimate-notice')).toBeNull();
+  });
+});
+
+describe('reportModelUrl', () => {
+  it('caps the reason so the link stays short; no sha → main', () => {
+    const url = new URL(reportModelUrl('a/b', undefined, 'x'.repeat(5000), 'support'));
+    expect(url.searchParams.get('title')).toBe('Support model: a/b');
+    expect(url.searchParams.get('reason')).toHaveLength(REPORT_REASON_MAX);
+    expect(url.searchParams.get('config')).toBe('https://huggingface.co/a/b/blob/main/config.json');
+    expect(url.searchParams.has('sha')).toBe(false);
+    expect(url.href.length).toBeLessThan(8000);
   });
 });
 
@@ -562,21 +683,17 @@ describe('AccuracyDrawer', () => {
 });
 
 describe('HF refetch on load (Ruling W1)', () => {
-  const hfUrl = (origin: boolean) => {
-    const s: CalcState = {
-      ...defaultState(b),
-      model: 'custom',
-      customModel: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', ...(origin ? { origin: { developer: 'Test Org', country: 'US' } } : {}) },
-    };
+  const hfUrl = () => {
+    const s: CalcState = { ...defaultState(b), model: 'custom', customModel: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def' } };
     return '?' + encodeUrl(s);
   };
 
-  it('refetches at the stored sha with the stored origin', async () => {
+  it('refetches at the stored sha', async () => {
     const { model, source } = importedFixture();
     fetchMock.mockResolvedValue({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] });
-    history.replaceState(null, '', '/' + hfUrl(true));
+    history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('test-org/test-model', expect.objectContaining({ revision: 'abc1234def', origin: { developer: 'Test Org', country: 'US' } })));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('test-org/test-model', expect.objectContaining({ revision: 'abc1234def' })));
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
     expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent('test-org/test-model');
   });
@@ -589,7 +706,7 @@ describe('HF refetch on load (Ruling W1)', () => {
       ...defaultState(b),
       model: 'custom',
       quant: quantOptions(b, 'gpt-oss-20b')[0]!,
-      customModel: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def', origin: { developer: 'Test Org', country: 'US' } },
+      customModel: { kind: 'hf', repo: 'test-org/test-model', sha: 'abc1234def' },
       overrides: { 'nano4-h200': { gpus: 8 } },
     };
     history.replaceState(null, '', '/?' + encodeUrl(shared));
@@ -610,22 +727,29 @@ describe('HF refetch on load (Ruling W1)', () => {
     expect(state().overrides).toEqual({});
   });
 
-  it('a failed refetch shows an error and falls back to the default model', async () => {
+  it('a failed import falls back to the default model and its reason stays until the user closes it', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 'not-found', message: 'model API HTTP 404' });
-    history.replaceState(null, '', '/' + hfUrl(true));
+    history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
-    await waitFor(() => expect(document.querySelector('.ant-message-error')).not.toBeNull());
+    await waitFor(() => expect(document.querySelector('.ant-notification-notice')).not.toBeNull());
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
     expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent(b.models[defaultState(b).model]!.name);
+    // The fallback re-runs the import effect: the reason must survive it (it used to vanish at once).
+    await new Promise((r) => setTimeout(r, 1500));
+    const notice = document.querySelector('.ant-notification-notice')!;
+    expect(notice).toHaveTextContent('無法匯入 test-org/test-model：找不到這個模型');
+    expect(notice).toHaveTextContent('model API HTTP 404');
+    fireEvent.click(notice.querySelector('.ant-notification-notice-close')!);
+    await waitFor(() => expect(document.querySelector('.ant-notification-notice')).toBeNull());
   });
 
   it('a network failure keeps the link and offers Retry or the default model (review I3)', async () => {
     const { model, source } = importedFixture();
     fetchMock.mockResolvedValueOnce({ ok: false, status: 'network', message: 'Failed to fetch' });
-    history.replaceState(null, '', '/' + hfUrl(true));
+    history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
     const retry = await screen.findByRole('button', { name: '重試' });
-    expect(screen.getByText('無法連線到 Hugging Face，暫時無法重新匯入 test-org/test-model；連結已保留')).toBeInTheDocument();
+    expect(screen.getByText('無法連線到 Hugging Face，暫時無法匯入 test-org/test-model；連結已保留')).toBeInTheDocument();
     expect(new URLSearchParams(location.search).get('hf')).not.toBeNull();
     expect(screen.getByTestId('answer-loading')).toBeInTheDocument();
     fetchMock.mockResolvedValueOnce({ ok: true, repo: 'test-org/test-model', sha: 'abc1234def', model, source, notes: [], cardBases: [] });
@@ -637,19 +761,21 @@ describe('HF refetch on load (Ruling W1)', () => {
 
   it('after a network failure, 改用預設模型 falls back', async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 'network', message: 'Failed to fetch' });
-    history.replaceState(null, '', '/' + hfUrl(true));
+    history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
     await userEvent.click(await screen.findByRole('button', { name: '改用預設模型' }));
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());
     expect(screen.getByLabelText('模型').closest('.ant-select-content')).toHaveTextContent(b.models[defaultState(b).model]!.name);
   });
 
-  it('without a stored origin the HF drawer asks for it', async () => {
-    history.replaceState(null, '', '/' + hfUrl(false));
+  it('a gated link opens the HF drawer with the token field (Ruling W12)', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 'denied', message: 'gated or private repo: an access token is required (HTTP 401 on config.json)' });
+    history.replaceState(null, '', '/' + hfUrl());
     render(<App />);
     const d = await drawer();
     expect(within(d).getByLabelText(/Hugging Face 模型/)).toHaveValue('test-org/test-model');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(within(d).getByText('test-org/test-model 需要授權才能匯入，請貼上你的 Hugging Face token。')).toBeInTheDocument();
+    expect(within(d).getByLabelText(/Hugging Face token/)).toBeInTheDocument();
     // Closing without importing drops the model.
     fireEvent.click(d.closest('.ant-drawer')!.querySelector('.ant-drawer-close')!);
     await waitFor(() => expect(screen.queryByTestId('answer-loading')).toBeNull());

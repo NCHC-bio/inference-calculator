@@ -102,3 +102,20 @@
     # (--moe-backend auto; on Hopper the OAI Triton kernel) because the fitted t_fixed is format-independent; the note says
     # the NVIDIA calibration points ran Marlin and how to reproduce that.
     nativeNote: { value: 'checkpoint 本身已是 MXFP4（config.json 有 quantization_config），vLLM 會自動偵測量化方式，所以不加 --quantization／--dtype；需要 vLLM v0.10.1 以上（v0.10.0 沒有 mxfp4）。MoE kernel 用 vLLM 預設（--moe-backend auto，Hopper 上是 OAI Triton）；計算機的 NVIDIA 校正點是以 Marlin kernel 量測的（InferenceX 設 VLLM_MXFP4_USE_MARLIN=1，v0.32.0 已移除這個環境變數），要和校正點比對時加 --moe-backend marlin', status: derived, formula: '由各項出處組成的說明（final-review M27）：自動偵測 quantization_config（vllm-config-quant-detect）、v0.10.1 起支援 mxfp4（vllm-mxfp4-v0101、vllm-gpt-oss-recipe）、v0.32.0 預設 MoE backend（vllm-v032-mxfp4-moe-backend）、VLLM_MXFP4_USE_MARLIN 的棄用與對應的 --moe-backend marlin（vllm-v022-mxfp4-marlin-env）、InferenceX 的 gpt-oss run 設了 VLLM_MXFP4_USE_MARLIN=1（inferencex-gptoss-h200-v022、inferencex-gptoss-h100-v021）', inputs: [vllm-config-quant-detect, vllm-mxfp4-v0101, vllm-gpt-oss-recipe, vllm-v032-mxfp4-moe-backend, vllm-v022-mxfp4-marlin-env, inferencex-gptoss-h200-v022, inferencex-gptoss-h100-v021], verified: 2026-10-21 }
+
+# Stand-in for a native checkpoint whose quantization the calculator has not modelled yet (issue #17; CLAUDE.md "Goal for
+# imported models"): ModelOpt mixed precision, NVFP4, Q8_0, FP8 with FP4 experts, compressed-tensors, …. Only the
+# importer assigns it (Model.estimates names the real format). Weight memory is still the checkpoint's own file size
+# (exact); these values only decide the expert / non-expert split, the compute dtype and the KV dtype, each on the
+# conservative side: the smallest bytes per parameter (FP4 without scales) leaves the most bytes in the non-expert part
+# read every step, BF16 compute is the slowest dtype, and the KV cache stays 16-bit.
+- id: native-other
+  name: 原生量化（未建模）
+  bytesPerParam: { value: 0.5, unit: bytes, status: estimate, basis: '未建模的原生格式：取 FP4（4 bits）不含 scale 的 0.5 bytes 作每參數位元組下限，用來把 checkpoint 大小拆成專家與非專家權重時，專家部分最小、每步全讀的非專家部分最大（保守：速度偏慢）；權重記憶體仍直接用 checkpoint 檔案大小', evidence: [ocp-mx-spec], verified: 2026-10-22 }
+  computeDtype: bf16
+  description: checkpoint 本身已量化，但格式計算機還沒建模；權重記憶體依 checkpoint 檔案大小，算力以 BF16 保守推估
+  kvBytesPerElem: { value: 2, unit: bytes, status: estimate, basis: '未建模的原生格式：KV cache 以 16-bit 計（vLLM --kv-cache-dtype auto 沿用 16-bit activation dtype），不假設任何 KV 量化（保守：KV 記憶體偏多）', evidence: [vllm-quantized-kv-cache, google-bfloat16], verified: 2026-10-22 }
+  embeddingBytesPerParam: { value: 2, unit: bytes, status: estimate, basis: '未建模的原生格式：embedding／lm_head 以 16-bit 計（vLLM 量化方法通常不量化 VocabParallelEmbedding）', evidence: [vllm-vocab-embedding, google-bfloat16], verified: 2026-10-22 }
+  vllmServe:
+    nativeOnly: { value: true, status: estimate, basis: '只代表已量化的原生 checkpoint，沒有線上轉換的路徑', evidence: [vllm-config-quant-detect], verified: 2026-10-22 }
+    nativeNote: { value: 'checkpoint 本身已量化（config.json 有 quantization_config 或 hf_quant_config.json），vLLM 會自動偵測量化方式，所以不加 --quantization／--dtype；這個格式計算機還沒建模，數值為推估', status: official, source: vllm-config-quant-detect, verified: 2026-10-22 }

@@ -17,6 +17,7 @@ import { FunnelDrawer } from './components/drawers/FunnelDrawer';
 import { HardwareDrawer } from './components/drawers/HardwareDrawer';
 import { HfImportDrawer, HfRefetch } from './components/drawers/HfImportDrawer';
 import { ManualModelDrawer } from './components/drawers/ManualModelDrawer';
+import { MyModelsDrawer, MyModelsSync } from './components/drawers/MyModelsDrawer';
 import { SpeedDrawer } from './components/drawers/SpeedDrawer';
 import { VerifyDrawer } from './components/drawers/VerifyDrawer';
 import { WorkloadDrawer } from './components/drawers/WorkloadDrawer';
@@ -119,6 +120,8 @@ function Dialogs() {
       <HardwareDrawer />
       <AccuracyDrawer />
       <HfRefetch />
+      <MyModelsDrawer />
+      <MyModelsSync />
     </>
   );
 }

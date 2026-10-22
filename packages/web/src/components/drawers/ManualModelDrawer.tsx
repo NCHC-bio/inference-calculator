@@ -5,6 +5,7 @@ import { useLang, useT, type MsgKey } from '../../i18n';
 import type { TFn } from '../../i18n/t';
 import { useCalc } from '../../state/store';
 import { CalcDrawer } from './CalcDrawer';
+import { CustomModelWarning } from './CustomModelWarning';
 
 type Num = 'totalParamsB' | 'layers' | 'heads' | 'kvHeads' | 'headDim' | 'hidden';
 /** ModelOverrideSchema's required fields (a plain GQA model); the rest of the schema is for HF imports. */
@@ -73,6 +74,7 @@ function Body(): JSX.Element {
   };
   return (
     <>
+      <CustomModelWarning />
       {issues.length > 0 && (
         <Alert
           data-testid="model-issues"

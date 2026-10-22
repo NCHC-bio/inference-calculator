@@ -89,7 +89,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       const importBtn = page.getByRole('button', { name: tZh('model.importRepo', { repo: 'acme/no-such-model' }) });
       await expect(importBtn).toBeVisible();
       await shot(page, 'model-not-found');
-      await dialogShot(page, 'drawer-hf', () => importBtn.click());
+      // 「匯入 owner/name」 imports at once (W15); the Drawer opens from the plain entry when no repo was typed.
+      await model.fill('zzzz');
+      await dialogShot(page, 'drawer-hf', () => page.getByRole('button', { name: tZh('model.importHf') }).click());
       await model.click();
       await model.fill('zzzz');
       await dialogShot(page, 'drawer-manual-model', () => page.getByRole('button', { name: tZh('model.manual') }).click());

@@ -34,6 +34,18 @@ function expectInvalid(f: () => unknown): void {
 }
 
 describe('imported model', () => {
+  it('estimated parts → the nonstandard-config warning and an estimate basis item (issue #17)', () => {
+    const r = estimateRequirements(bundle, query(imported((m) => {
+      m.estimates = [{ feature: 'linear-attention', detail: 'layer_types "linear_attention" on 3 of 24 layers, sized as full attention' }];
+    })));
+    expect(r.warnings.map((w) => w.code)).toEqual(['custom-model-supply-chain', 'nonstandard-config']);
+    expect(r.warnings[1]!.items).toEqual([{ feature: 'linear-attention', detail: expect.stringContaining('linear_attention') }]);
+    const item = r.basis.find((b) => b.path.endsWith('.estimates'));
+    expect(item).toMatchObject({ status: 'estimate', sourceIds: [catalog.source] });
+    // Without estimates: no such warning.
+    expect(estimateRequirements(bundle, query(imported())).warnings.map((w) => w.code)).toEqual(['custom-model-supply-chain']);
+  });
+
   it('a catalog model passed as imported gives the same numbers', () => {
     const a = estimateRequirements(bundle, query('gpt-oss-20b'));
     const b = estimateRequirements(bundle, query(imported()));

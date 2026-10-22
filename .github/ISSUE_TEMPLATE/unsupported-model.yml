@@ -1,0 +1,40 @@
+name: 請求支援模型架構／回報匯入錯誤
+description: 網站「從 Hugging Face 匯入」的模型數值為推估（請求精確支援），或匯入失敗（回報錯誤）。從網站的按鈕開啟時，欄位已預先填好。
+title: "Support model: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        謝謝。數值為推估的模型，我們會依這些資料把它的架構精確建模，之後匯入同類模型都會得到精確數值；匯入失敗則是計算機的錯誤，我們會修正。
+        **請勿貼上 Hugging Face token。** 需要授權的模型只要填 repo 與 commit 即可。
+  - type: input
+    id: repo
+    attributes:
+      label: Hugging Face repo
+      description: owner/name
+      placeholder: owner/name
+    validations:
+      required: true
+  - type: input
+    id: sha
+    attributes:
+      label: Commit sha
+      description: 匯入時讀取的 commit（網站自動填入）
+  - type: textarea
+    id: reason
+    attributes:
+      label: 推估的部分或錯誤訊息
+      description: 網站自動填入
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: config
+    attributes:
+      label: config.json 連結
+  - type: textarea
+    id: notes
+    attributes:
+      label: 補充說明
+      description: 例如你想用這個模型做什麼、預計的使用者人數或硬體

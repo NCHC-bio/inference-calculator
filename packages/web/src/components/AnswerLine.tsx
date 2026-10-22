@@ -10,7 +10,10 @@ import { useCalc } from '../state/store';
 import { STATUS_COLOR, StatusTag } from './BasisModal';
 import { isWeak, topEstimates, uniqueByPath } from './weak';
 import { bestCounts, needAnswerParts } from './answerText';
+import { EstimateNotice } from './EstimateNotice';
 import { Explain } from './Explain';
+import { ImportProgress } from './ImportProgress';
+import { pendingHf } from './drawers/HfImportDrawer';
 
 export { needAnswerText } from './answerText';
 export { topEstimates } from './weak';
@@ -128,9 +131,13 @@ function Answer({ r }: { r: RequirementResult }): JSX.Element {
           </Button>
         </Flex>
       </Flex>
-      {r.warnings.map((w, i) => (
-        <Alert key={`${w.code}-${i}`} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} className="fade-in" />
-      ))}
+      {r.warnings.map((w, i) =>
+        w.code === 'nonstandard-config' ? (
+          <EstimateNotice key={`${w.code}-${i}`} warning={w} />
+        ) : (
+          <Alert key={`${w.code}-${i}`} type="warning" showIcon title={w.text} style={{ marginTop: 8 }} className="fade-in" />
+        ),
+      )}
     </div>
   );
 }
@@ -138,7 +145,16 @@ function Answer({ r }: { r: RequirementResult }): JSX.Element {
 /** The one-line answer: always the suggestion, never the user's adjusted counts (design §4 item 3). */
 export function AnswerLine(): JSX.Element {
   const view = useMain();
-  if (view.kind === 'loading') return <Spin style={{ marginTop: 12 }} data-testid="answer-loading" />;
+  const [s] = useCalc();
+  if (view.kind === 'loading') {
+    // An HF model being imported: the steps, not a bare spinner.
+    const pending = pendingHf(s);
+    return (
+      <div data-testid="answer-loading">
+        {pending ? <ImportProgress repo={pending.repo} /> : <Spin style={{ marginTop: 12 }} />}
+      </div>
+    );
+  }
   if (view.kind === 'error') {
     return <Alert type="error" showIcon title={view.message} style={{ marginTop: 12 }} data-testid="answer-error" />;
   }

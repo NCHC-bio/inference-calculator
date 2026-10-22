@@ -5,3 +5,6 @@ dist/
 *.tsbuildinfo
 packages/web/test-results/
 playwright-report/
+
+# HF import snapshots kept on the developer machine only (see packages/data/test/fixtures/hf/README.md)
+packages/data/test/fixtures/hf/snapshots-local/

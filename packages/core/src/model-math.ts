@@ -14,12 +14,15 @@ export type MoeParamsIn = {
 
 /**
  * Total parameters held in MoE experts, in billions. Dense models return 0.
- * experts x 3 (gate/up/down) x hidden x expertFfnDim x layers / 1e9.
+ * experts x matrices x width x expertFfnDim x moeLayers / 1e9, with matrices = moe.matrices ?? 3 (gate/up/down),
+ * width = moe.width ?? hidden (a latent MoE works in a smaller dimension) and moeLayers = moe.layers ?? layers (dense
+ * MLP layers are not experts).
  * Basis: spec §5.1 (not covered by the lecture).
  */
 export function expertParamsTotalB(m: Omit<MoeParamsIn, 'totalParamsB'>): number {
   if (!m.moe) return 0;
-  return (m.moe.experts * 3 * m.hidden * m.moe.expertFfnDim * m.layers) / 1e9;
+  const { experts, expertFfnDim, matrices = 3, width = m.hidden, layers = m.layers } = m.moe;
+  return (experts * matrices * width * expertFfnDim * layers) / 1e9;
 }
 
 /**
@@ -42,7 +45,7 @@ export function moeParamsIssue(m: MoeParamsIn): string | null {
   const total = m.totalParamsB.value;
   const expertB = expertParamsTotalB(m);
   if (expertB > total) {
-    return `expert parameters ${expertB.toFixed(1)}B (experts × 3 × hidden × expertFfnDim × layers) exceed totalParamsB ${total}B`;
+    return `expert parameters ${expertB.toFixed(1)}B (experts × matrices × width × expertFfnDim × MoE layers) exceed totalParamsB ${total}B`;
   }
   const active = activeParamsB(m);
   if (!(active > 0)) return `active parameters ${active.toFixed(2)}B are not positive`;
@@ -52,15 +55,15 @@ export function moeParamsIssue(m: MoeParamsIn): string | null {
 /** The fields the MLA support check reads (a catalog Model or a user override both fit). */
 export type MlaLayoutIn = {
   attention: Model['attention'];
-  layerGroups?: unknown[] | undefined;
+  layerGroups?: Array<{ kind: string }> | undefined;
   slidingWindow?: number | null | undefined;
 };
 
 /**
- * Architecture combinations with MLA that the KV math does not support yet (Ruling R22):
- * kvBytesPerSequence gives MLA precedence over layerGroups and slidingWindow, so an MLA model with
- * either would be sized as if every layer kept a full-context latent cache, silently. Config
- * validation and override validation both reject these (one check, like moeParamsIssue).
+ * Architecture combinations with MLA that the KV math does not support yet (Ruling R22): a sliding window (an MLA
+ * layer keeps the full-context latent cache in kvBytesPerSequence). Layer groups are supported only as MLA layers
+ * ('full') beside fixed-state layers ('state', 'mamba'): an MLA / linear-attention hybrid (issue #17); a 'sliding'
+ * group is not. Config validation and override validation both reject these (one check, like moeParamsIssue).
  * Returns one issue per offending field; empty when supported.
  * Basis: spec §5.1 (KV precedence; not covered by the lecture).
  */
@@ -69,7 +72,7 @@ export function mlaLayoutIssues(m: MlaLayoutIn): Array<{ field: 'layerGroups' | 
   const out: Array<{ field: 'layerGroups' | 'slidingWindow'; message: string }> = [];
   const msg = (what: string) =>
     `architecture combination not supported yet: attention 'mla' with ${what} (the MLA KV formula ignores it; Ruling R22)`;
-  if (m.layerGroups !== undefined) out.push({ field: 'layerGroups', message: msg('layerGroups') });
+  if (m.layerGroups?.some((g) => g.kind === 'sliding')) out.push({ field: 'layerGroups', message: msg('a sliding layer group') });
   if (m.slidingWindow != null) out.push({ field: 'slidingWindow', message: msg('a non-null slidingWindow') });
   return out;
 }
@@ -108,7 +111,7 @@ export function layerShapeIssues(m: LayerShapeIn): Array<{ path: (string | numbe
     };
     gqa(m.kvHeads, ['kvHeads']);
     m.layerGroups?.forEach((g, i) => {
-      if (g.kind !== 'mamba' && g.kvHeads !== undefined) gqa(g.kvHeads, ['layerGroups', i, 'kvHeads']);
+      if ((g.kind === 'full' || g.kind === 'sliding') && g.kvHeads !== undefined) gqa(g.kvHeads, ['layerGroups', i, 'kvHeads']);
     });
   }
   return out;
@@ -284,14 +287,30 @@ export function kvHeadsStored(kvHeads: number, tp = 1): number {
  * KV-cache bytes per token for uniform attention (ignores layerGroups / windows), summed over a
  * replica of `tp` GPUs.
  * GQA: 2 x layers x kvHeadsStored(kvHeads, tp) x headDim x elem.
- * MLA: layers x (kvLoraRank + qkRopeHeadDim) x elem x tp — the latent cache has no head axis, so
+ * MLA: attention layers x (kvLoraRank + qkRopeHeadDim) x elem x tp — the latent cache has no head axis, so
  * every TP rank keeps a full copy (vLLM v0.32.0 `get_num_kv_heads` returns 1 under MLA, and the MLA KV spec has
  * `max_tp_shards=1`, so the copies = tp; docs/research/vllm-tp-kv-precision.md §2.1, §2.3, §2.5).
  * Basis: spec §5.1 (not covered by the lecture).
  */
+/** Layers that keep attention KV (or the MLA latent): every layer, or the layer groups that are not fixed-state. */
+export function attentionLayers(m: Pick<Model, 'layers' | 'layerGroups'>): number {
+  if (!m.layerGroups) return m.layers;
+  return m.layerGroups.filter((g) => g.kind === 'full' || g.kind === 'sliding').reduce((s, g) => s + g.count, 0);
+}
+
+/** Fixed per-sequence state of the 'mamba' and 'state' layer groups, summed over the replica (context-independent). */
+export function fixedStateBytes(m: Pick<Model, 'layerGroups'>): number {
+  let total = 0;
+  for (const g of m.layerGroups ?? []) {
+    if (g.kind === 'mamba' && g.ssm) total += g.count * g.ssm.heads * g.ssm.headDim * g.ssm.stateSize * (g.ssm.stateBytesPerElem ?? 2);
+    if (g.kind === 'state') total += g.count * (g.stateBytes ?? 0);
+  }
+  return total;
+}
+
 export function kvBytesPerToken(m: Model, kvBytesPerElem = 1, tp = 1): number {
   if (m.attention === 'mla' && m.mla) {
-    return m.layers * (m.mla.kvLoraRank + m.mla.qkRopeHeadDim) * kvBytesPerElem * tp;
+    return attentionLayers(m) * (m.mla.kvLoraRank + m.mla.qkRopeHeadDim) * kvBytesPerElem * tp;
   }
   return 2 * m.layers * kvHeadsStored(m.kvHeads, tp) * m.headDim * kvBytesPerElem;
 }
@@ -373,6 +392,9 @@ export function slidingTransientKvBytes(
  * - mamba group: count x ssm.heads x ssm.headDim x ssm.stateSize x (stateBytesPerElem ?? 2).
  *   Derived estimate: SSM recurrent state only (conv state not counted); independent of
  *   context length and of kvBytesPerElem.
+ * - state group: count x stateBytes (a fixed per-sequence state already summed over the replica).
+ * - extraCache: bytesPerToken x ceil(ctx / block) x block x tp (every rank keeps a copy) + stateBytes, added on top
+ *   of whichever branch above applies.
  * `tp`: the replica's tensor-parallel size; the result is the total over its GPUs, with KV heads
  * replicated when tp > kvHeads and the MLA latent cache copied on every rank (kvBytesPerToken).
  * Mamba state is sharded by head across ranks, so its total does not depend on tp.
@@ -380,17 +402,20 @@ export function slidingTransientKvBytes(
  */
 export function kvBytesPerSequence(m: Model, contextTokens: number, kvBytesPerElem = 1, tp = 1, opts?: KvSeqOpts): number {
   const fullTokens = roundUpToBlock(contextTokens, opts?.blockTokens);
+  const extra = m.extraCache ? m.extraCache.bytesPerToken * fullTokens * tp + m.extraCache.stateBytes : 0;
+  return attentionKvBytesPerSequence(m, contextTokens, fullTokens, kvBytesPerElem, tp, opts) + extra;
+}
+
+function attentionKvBytesPerSequence(
+  m: Model, contextTokens: number, fullTokens: number, kvBytesPerElem: number, tp: number, opts?: KvSeqOpts,
+): number {
   if (m.attention === 'mla' && m.mla) {
-    return kvBytesPerToken(m, kvBytesPerElem, tp) * fullTokens;
+    return kvBytesPerToken(m, kvBytesPerElem, tp) * fullTokens + fixedStateBytes(m);
   }
   if (m.layerGroups) {
-    let total = 0;
+    let total = fixedStateBytes(m);
     for (const g of m.layerGroups) {
-      if (g.kind === 'mamba') {
-        const s = g.ssm;
-        if (s) total += g.count * s.heads * s.headDim * s.stateSize * (s.stateBytesPerElem ?? 2);
-        continue;
-      }
+      if (g.kind === 'mamba' || g.kind === 'state' || g.kind === 'none') continue;
       const kv =
         (g.kEqualsV ? 1 : 2) * kvHeadsStored(g.kvHeads ?? m.kvHeads, tp) * (g.headDim ?? m.headDim) * kvBytesPerElem;
       const tokens =

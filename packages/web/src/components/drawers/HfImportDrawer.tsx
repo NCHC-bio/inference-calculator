@@ -1,11 +1,16 @@
+import { GithubOutlined } from '@ant-design/icons';
 import { fetchHfModel, type HfFetchResult } from '@nchc/data/hf';
-import { HF_REPO_RE, type Origin } from '@nchc/schema';
+import { HF_REPO_RE } from '@nchc/schema';
 import { Alert, App as AntApp, Button, Form, Input, Space, Spin, Typography } from 'antd';
 import { useEffect, useRef, useState, type JSX } from 'react';
 import { useT, type MsgKey, type TFn } from '../../i18n';
 import type { Action, CalcState } from '../../state/state';
 import { useCalc } from '../../state/store';
+import { reportModelUrl } from '../../reportModel';
+import { endImportProgress, reportImportStep, startImportProgress } from '../../state/importProgress';
+import { ImportProgress } from '../ImportProgress';
 import { CalcDrawer } from './CalcDrawer';
+import { CustomModelWarning } from './CustomModelWarning';
 
 type Failure = Extract<HfFetchResult, { ok: false }>;
 const ERR: Record<Failure['status'], MsgKey> = {
@@ -14,9 +19,13 @@ const ERR: Record<Failure['status'], MsgKey> = {
   invalid: 'hf.err.invalid',
   unparsable: 'hf.err.unparsable',
   network: 'hf.err.network',
+  gguf: 'hf.err.gguf',
+  'not-language-model': 'hf.err.notLlm',
 };
-const COUNTRY = /^[A-Z]{2}$/;
+/** The offline notice belongs to the pending import: dropped when it is (effect cleanup). */
 const REFETCH_KEY = 'hf-refetch';
+/** A failure notice outlives the import it reports (the model falls back, the effect re-runs): only the user closes it. */
+const FAIL_KEY = 'hf-import-failed';
 
 /** The browser's fetch, typed for fetchHfModel (only huggingface.co sees the token). */
 const browserFetch = (url: string, init?: { headers?: Record<string, string> }) => fetch(url, init);
@@ -33,25 +42,28 @@ export function pendingHf(s: CalcState): Extract<CalcState['customModel'], { kin
  */
 export async function importHf(
   repo: string,
-  origin: Origin,
   opts: { token?: string; revision?: string },
 ): Promise<{ ok: true; action: Action } | Failure> {
+  // No origin: a user-imported model is not origin-checked and gets the custom-model warning (Ruling W12).
+  // Each step is reported (state/importProgress) so the answer says what is happening.
+  startImportProgress(repo);
   const r = await fetchHfModel(repo, {
     fetch: browserFetch,
-    origin,
+    onProgress: reportImportStep,
     ...(opts.token ? { token: opts.token } : {}),
     ...(opts.revision ? { revision: opts.revision } : {}),
   });
+  endImportProgress();
   if (!r.ok) return r;
   return {
     ok: true,
-    action: { type: 'customModel', value: { kind: 'hf', repo: r.repo, sha: r.sha, imported: { model: r.model, source: r.source }, origin } },
+    action: { type: 'customModel', value: { kind: 'hf', repo: r.repo, sha: r.sha, imported: { model: r.model, source: r.source } } },
   };
 }
 
 /**
- * Ruling W1: an HF model from the URL (no `imported`) is fetched again at its stored sha with its stored origin; on
- * failure an error message and the default model. Without a stored origin the HF Drawer opens to ask for it.
+ * Ruling W1: an HF model from the URL (no `imported`) is fetched again at its stored sha; on failure an error message
+ * and the default model. A gated repo opens the HF Drawer so the user can paste a token (Ruling W12).
  * A network failure is transient: the model (and so the link in the address bar) is kept, and a notification offers
  * Retry or the default model (review I3).
  */
@@ -63,19 +75,17 @@ export function HfRefetch(): null {
   const pending = pendingHf(s);
   const repo = pending?.repo;
   const sha = pending?.sha;
-  const developer = pending?.origin?.developer;
-  const country = pending?.origin?.country;
   useEffect(() => {
     if (repo === undefined || sha === undefined) return;
-    if (developer === undefined || country === undefined) {
-      dispatch({ type: 'dialog', id: 'hf', hfQuery: repo });
-      return;
-    }
     let live = true;
-    void importHf(repo, { developer, country }, { revision: sha }).then((r) => {
+    void importHf(repo, { revision: sha }).then((r) => {
       if (!live) return;
       if (r.ok) {
         dispatch(r.action);
+        return;
+      }
+      if (r.status === 'denied') {
+        dispatch({ type: 'dialog', id: 'hf', hfQuery: repo });
         return;
       }
       if (r.status === 'network') {
@@ -110,7 +120,34 @@ export function HfRefetch(): null {
         });
         return;
       }
-      void message.error(tr('hf.refetchFail', { repo, message: `${tr(ERR[r.status])}（${r.message}）` }));
+      // Every failure stays until the user closes it (a toast vanished before it could be read). An import that could
+      // not be read is a calculator bug, so its notice keeps the pre-filled bug report.
+      const bug = r.status === 'unparsable' || r.status === 'gguf';
+      notification.error({
+        key: FAIL_KEY,
+        title: tr('hf.refetchFail', { repo, message: tr(ERR[r.status], { task: r.task ?? '' }) }),
+        // A bug lists what was missing, others their detail; "not a language model" is said in full by its title.
+        ...(r.status !== 'not-language-model'
+          ? { description: <span style={{ overflowWrap: 'anywhere' }}>{bug && r.missing?.length ? tr('hf.missing', { list: r.missing.join(tr('hf.listSep')) }) : r.message}</span> }
+          : {}),
+        duration: 0,
+        ...(bug
+          ? {
+              actions: (
+                <Button
+                  size="small"
+                  icon={<GithubOutlined />}
+                  href={reportModelUrl(r.repo ?? repo, r.sha, r.message, 'error')}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="hf-report"
+                >
+                  {tr('hf.report')}
+                </Button>
+              ),
+            }
+          : {}),
+      });
       dispatch({ type: 'customModel', value: null });
     });
     return () => {
@@ -118,29 +155,46 @@ export function HfRefetch(): null {
       notification.destroy(REFETCH_KEY);
     };
     // tr / message / notification only report the error; a language switch must not refetch. `attempt` is Retry.
-  }, [repo, sha, developer, country, dispatch, attempt]);
+  }, [repo, sha, dispatch, attempt]);
   return null;
 }
 
-function ErrorView({ err, tr }: { err: Failure; tr: TFn }) {
+/**
+ * A failed import, once (CLAUDE.md "Goal for imported models"): an import that could not be read at all (unparsable,
+ * or a GGUF repo with no base model to read) is a calculator bug, so it lists what was missing and offers a
+ * pre-filled bug report; anything else (gated, not found, offline) shows its own title and the detail.
+ */
+function ErrorView({ err, repo, tr }: { err: Failure; repo: string; tr: TFn }) {
+  const sep = tr('hf.listSep');
+  const bug = err.status === 'unparsable' || err.status === 'gguf';
+  const description = (
+    <>
+      {err.missing && err.missing.length > 0 && err.status !== 'not-language-model'
+        ? <div style={{ overflowWrap: 'anywhere' }}>{tr('hf.missing', { list: err.missing.join(sep) })}</div>
+        : <div style={{ overflowWrap: 'anywhere' }}>{err.message}</div>}
+      {bug && (
+        <Space orientation="vertical" size={2} style={{ marginTop: 8 }}>
+          <Button
+            size="small"
+            icon={<GithubOutlined />}
+            href={reportModelUrl(err.repo ?? repo, err.sha, err.message, 'error')}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="hf-report"
+          >
+            {tr('hf.report')}
+          </Button>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>{tr('hf.report.help')}</Typography.Text>
+        </Space>
+      )}
+    </>
+  );
   return (
-    <Alert
-      data-testid="hf-error"
-      type="error"
-      showIcon
-      style={{ marginBottom: 12 }}
-      title={tr(ERR[err.status])}
-      description={
-        <>
-          <div style={{ overflowWrap: 'anywhere' }}>{err.message}</div>
-          {err.missing && err.missing.length > 0 && <div>{tr('hf.missing', { list: err.missing.join('、') })}</div>}
-        </>
-      }
-    />
+    <Alert data-testid="hf-error" type="error" showIcon className="fade-in" style={{ marginBottom: 12 }} title={tr(ERR[err.status], { task: err.task ?? '' })} description={description} />
   );
 }
 
-type Values = { repo: string; developer: string; country: string };
+type Values = { repo: string };
 
 /**
  * One import at a time, owned by the Drawer: `begin` starts attempt n, `live(n)` is false once the Drawer closed (or a
@@ -155,8 +209,10 @@ function Body({ run }: { run: Run }): JSX.Element {
   const pending = pendingHf(s);
   // The token lives in this component only: never in the store, the URL or storage (spec §8.3.2).
   const [token, setToken] = useState('');
-  const [needToken, setNeedToken] = useState(false);
+  // A gated repo from the link (W12) arrives here pending: the token field is shown at once.
+  const [needToken, setNeedToken] = useState(pending !== null);
   const [err, setErr] = useState<Failure | null>(null);
+  const [lastRepo, setLastRepo] = useState('');
   const { busy } = run;
 
   const submit = async (v: Values) => {
@@ -164,7 +220,8 @@ function Body({ run }: { run: Run }): JSX.Element {
     const repo = v.repo.trim();
     const n = run.begin();
     setErr(null);
-    const r = await importHf(repo, { developer: v.developer.trim(), country: v.country.trim() }, {
+    setLastRepo(repo);
+    const r = await importHf(repo, {
       token: token.trim() || undefined,
       revision: pending && pending.repo === repo ? pending.sha : undefined,
     });
@@ -177,17 +234,23 @@ function Body({ run }: { run: Run }): JSX.Element {
     }
     dispatch(r.action);
     dispatch({ type: 'dialog', id: null });
-    void message.success(tr('hf.imported', { repo }));
+    // Estimated parts: said at once; the answer's notice lists them and offers the support request.
+    const added = r.action.type === 'customModel' ? r.action.value : null;
+    const estimated = added?.kind === 'hf' && (added.imported?.model.estimates?.length ?? 0) > 0;
+    if (estimated) void message.warning(tr('hf.imported.estimated', { repo }));
+    else void message.success(tr('hf.imported', { repo }));
   };
 
   return (
     <Spin spinning={busy}>
+      <CustomModelWarning />
       {pending && <Alert type="info" showIcon style={{ marginBottom: 12 }} title={tr('hf.reload', { repo: pending.repo })} />}
-      {err && <ErrorView err={err} tr={tr} />}
+      {err && <ErrorView err={err} repo={lastRepo} tr={tr} />}
+      {busy && lastRepo && <ImportProgress repo={lastRepo} />}
       <Form<Values>
         name="hfImport"
         layout="vertical"
-        initialValues={{ repo: s.hfQuery || pending?.repo || '', developer: pending?.origin?.developer ?? '', country: pending?.origin?.country ?? '' }}
+        initialValues={{ repo: s.hfQuery || pending?.repo || '' }}
         onFinish={(v) => void submit(v)}
       >
         <Form.Item
@@ -198,18 +261,6 @@ function Body({ run }: { run: Run }): JSX.Element {
           normalize={(x: string) => x.trimStart()}
         >
           <Input placeholder={tr('hf.repo.ph')} autoComplete="off" />
-        </Form.Item>
-        <Form.Item name="developer" label={tr('hf.developer')} rules={[{ required: true, whitespace: true, message: tr('form.required') }]}>
-          <Input autoComplete="off" />
-        </Form.Item>
-        <Form.Item
-          name="country"
-          label={tr('hf.country')}
-          extra={tr('hf.origin.help')}
-          normalize={(x: string) => x.toUpperCase()}
-          rules={[{ required: true, message: tr('form.required') }, { pattern: COUNTRY, message: tr('hf.country.invalid') }]}
-        >
-          <Input maxLength={2} autoComplete="off" style={{ width: 120 }} />
         </Form.Item>
         {needToken && (
           <Form.Item label={tr('hf.token')} htmlFor="hf_token" extra={tr('hf.token.help')} className="fade-in">

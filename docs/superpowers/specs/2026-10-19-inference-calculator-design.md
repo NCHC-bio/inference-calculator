@@ -699,7 +699,7 @@ config/
 
 `hfRepo` 不是 `owner/name` 時是 `invalid-input`。
 
-**警告**：不阻擋的提醒放在結果的 `warnings: { code, text }[]`，不是錯誤。目前只有 `custom-model-supply-chain`：每個使用者自訂模型的 `estimateRequirements`、`estimateCapacity`、`explain` 結果都附上，驗證指令的第一行也以 `# ` 註解寫出同一段文字；目錄模型沒有。text 為「國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。使用後果請用戶自行承擔。」
+**警告**：不阻擋的提醒放在結果的 `warnings: { code, text }[]`，不是錯誤。目前只有 `custom-model-supply-chain`：每個使用者自訂模型的 `estimateRequirements`、`estimateCapacity`、`explain` 結果都附上，驗證指令的第一行也以 `# ` 註解寫出同一段文字；目錄模型沒有。text 為「國網中心規定禁止使用紅色供應鏈模型（發表者為中國、香港或澳門組織）。違反規定可能影響您的 iService 帳號，使用後果請用戶自行承擔。」
 
 其他錯誤（一般 `Error`）代表設定或核心本身的問題，不是使用者能修正的輸入。
 

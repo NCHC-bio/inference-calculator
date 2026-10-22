@@ -248,7 +248,7 @@ export const MAX_GPUS = 1e5;
  */
 function kvHeadCounts(m: Pick<Model, 'kvHeads' | 'layerGroups'>): number[] {
   if (!m.layerGroups) return [m.kvHeads];
-  const out = m.layerGroups.filter((g) => g.kind !== 'mamba').map((g) => g.kvHeads ?? m.kvHeads);
+  const out = m.layerGroups.filter((g) => g.kind === 'full' || g.kind === 'sliding').map((g) => g.kvHeads ?? m.kvHeads);
   return out.length > 0 ? out : [m.kvHeads];
 }
 
